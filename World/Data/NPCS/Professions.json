@@ -1,0 +1,38 @@
+{
+    "Civillian": [
+        "Farmer",
+        "Fisherman",
+        "Baker",
+        "Blacksmith",
+        "Carpenter",
+        "Merchant",
+        "Tailor",
+        "Miner",
+        "Hunter",
+        "Innkeeper"
+    ],
+
+    "Military": [
+        "Guard",
+        "Soldier",
+        "Captian",
+        "Knight"
+    ],
+
+    "Religious": [
+        "Priest",
+        "Healer"
+    ],
+
+    "Academic": [
+        "Scholar",
+        "Alchemist",
+        "Mage"
+    ],
+
+    "Criminal": [
+        "Thief",
+        "Smuggler",
+        "Bandit"
+    ]
+}

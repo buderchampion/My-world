@@ -1,0 +1,12 @@
+{
+    "id": 0,
+    "name": "",
+    "type": "",
+    "category": "",
+    "city": null,
+    "capacity": 0,
+    "condition": 100,
+    "owner": null,
+    "workers": [],
+    "residents": []
+}

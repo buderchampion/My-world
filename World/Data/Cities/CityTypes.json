@@ -1,0 +1,21 @@
+{
+    "Capital": {
+        "population_min": 1000,
+        "population_max": 5000
+    },
+
+    "City": {
+        "population_min": 500,
+        "population_max": 2000
+    },
+
+    "Town": {
+        "population_min": 100,
+        "population_max": 500
+    },
+
+    "Village": {
+        "population_min": 20,
+        "population_max": 100
+    }
+}

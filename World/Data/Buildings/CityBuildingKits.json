@@ -1,0 +1,60 @@
+{
+    "Capital": {
+        "Castle":             [1, 1],
+        "Barracks":           [2, 4],
+        "Guard Post":         [3, 6],
+        "Temple":             [1, 2],
+        "Library":            [1, 2],
+        "Alchemist Lab":      [1, 2],
+        "Market":             [2, 4],
+        "Blacksmith Shop":    [2, 3],
+        "Tavern":             [3, 5],
+        "Carpenter Workshop": [1, 2],
+        "Tailor Shop":        [1, 2],
+        "Fishing Dock":       [0, 2],
+        "Mine":               [1, 2],
+        "Hunter Lodge":       [0, 2],
+        "Thieves Den":        [1, 2],
+        "Bandit Camp":        [0, 2]
+    },
+    "City": {
+        "Barracks":           [1, 2],
+        "Guard Post":         [2, 3],
+        "Temple":             [1, 1],
+        "Library":            [1, 1],
+        "Market":             [1, 2],
+        "Blacksmith Shop":    [1, 2],
+        "Tavern":             [1, 3],
+        "Carpenter Workshop": [0, 1],
+        "Tailor Shop":        [0, 1],
+        "Fishing Dock":       [0, 1],
+        "Mine":               [0, 1],
+        "Hunter Lodge":       [0, 1],
+        "Bandit Camp":        [0, 1]
+    },
+    "Town": {
+        "Guard Post":         [1, 2],
+        "Temple":             [1, 1],
+        "Market":             [1, 1],
+        "Blacksmith Shop":    [1, 1],
+        "Tavern":             [1, 2],
+        "Carpenter Workshop": [0, 1],
+        "Tailor Shop":        [0, 1],
+        "Fishing Dock":       [0, 1],
+        "Mine":               [0, 1],
+        "Hunter Lodge":       [0, 1],
+        "Bandit Camp":        [0, 1]
+    },
+    "Village": {
+        "Temple":             [0, 1],
+        "Farm":               [1, 3],
+        "Fishing Dock":       [0, 2],
+        "Hunter Lodge":       [0, 2],
+        "Blacksmith Shop":    [0, 1],
+        "Carpenter Workshop": [0, 1],
+        "Tailor Shop":        [0, 1],
+        "Mine":               [0, 1],
+        "Tavern":             [0, 1],
+        "Bandit Camp":        [0, 1]
+    }
+}
