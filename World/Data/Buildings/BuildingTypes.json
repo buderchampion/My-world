@@ -10,10 +10,10 @@
     "Tavern":            {"category": "Civillian",   "capacity": 6},
     "Carpenter Workshop":{"category": "Civillian",   "capacity": 4},
     "Tailor Shop":       {"category": "Civillian",   "capacity": 3},
-    "Farm":              {"category": "Civillian",   "capacity": 6},
-    "Fishing Dock":      {"category": "Civillian",   "capacity": 5},
+    "Farm":              {"category": "Civillian",   "capacity": 10},
+    "Fishing Dock":      {"category": "Civillian",   "capacity": 8},
     "Mine":              {"category": "Civillian",   "capacity": 8},
-    "Hunter Lodge":      {"category": "Civillian",   "capacity": 4},
+    "Hunter Lodge":      {"category": "Civillian",   "capacity": 6},
     "Thieves Den":       {"category": "Criminal",    "capacity": 6},
     "House":             {"category": "Residential", "capacity": 5},
     "Bandit Camp":       {"category": "Criminal",    "capacity": 4}

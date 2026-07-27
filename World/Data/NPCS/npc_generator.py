@@ -165,6 +165,7 @@ def generate_npc(city_type=None, buildings=None):
             home = house["id"]
 
     npc["home"] = home
+    npc["city_type"] = city_type
     npc["class"] = generate_class(npc["profession"])
     npc["skills"] = {}
 

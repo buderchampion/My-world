@@ -6,5 +6,7 @@
   "profession": "",
   "skills": {},
   "workplace": null,
-  "home": null
+  "home": null,
+  "city_type": null,
+  "gold": 0
 }
