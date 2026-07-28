@@ -14,5 +14,12 @@
   "parents": [],
   "children": [],
   "title": null,
-  "relationships": {}
+  "relationships": {},
+  "schedule": {},
+  "location": null,
+  "needs": {
+    "hunger": 100,
+    "energy": 100,
+    "social": 100
+  }
 }
