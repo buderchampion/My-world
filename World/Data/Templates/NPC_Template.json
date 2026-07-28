@@ -2,11 +2,17 @@
   "id":0,
   "name": "",
   "gender": "",
+  "age": 0,
   "class": "",
   "profession": "",
   "skills": {},
   "workplace": null,
   "home": null,
   "city_type": null,
-  "gold": 0
+  "gold": 0,
+  "spouse": null,
+  "parents": [],
+  "children": [],
+  "title": null,
+  "relationships": {}
 }

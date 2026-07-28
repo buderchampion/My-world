@@ -166,6 +166,7 @@ def generate_npc(city_type=None, buildings=None):
 
     npc["home"] = home
     npc["city_type"] = city_type
+    npc["age"] = random.randint(18, 70)
     npc["class"] = generate_class(npc["profession"])
     npc["skills"] = {}
 

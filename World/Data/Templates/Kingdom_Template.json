@@ -7,5 +7,7 @@
 
     "cities": [],
 
-    "population": 0
+    "population": 0,
+    
+    "ruler": null
 }

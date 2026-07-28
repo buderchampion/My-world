@@ -81,9 +81,12 @@ def generate_city(kingdom_id, city_type):
         {
             "id": building["id"],
             "name": building["name"],
+            "type": building["type"],
             "capacity": building["capacity"],
-            "workers": len(building["workers"])
+            "workers": len(building["workers"]),
+            "residents": len(building["residents"])
         }
+
         for building in buildings
     ]
 
