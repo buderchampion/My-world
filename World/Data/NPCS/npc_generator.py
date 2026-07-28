@@ -173,6 +173,13 @@ def generate_npc(city_type=None, buildings=None):
     for skill in classes.get(npc["class"], {}).get("skills", []):
 
         npc["skills"][skill] = skills[skill].copy()
+
+    from Data.DailyLife.daily_life import build_schedule
+
+    build_schedule(npc)
+
+    npc["location"] = npc["home"]
+
     save_npc(npc)
 
     return npc
