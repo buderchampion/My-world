@@ -93,6 +93,12 @@ def create_child(parent_a, parent_b, city_type, buildings_by_id):
     if home:
         home["residents"].append(child["id"])
 
+    From Data.DailyLife.daily_life import build_schedule
+
+    build_schedule
+
+    child["location"] = child["home"]
+
     save_npc(child)
 
     parent_a["children"].append(child["id"])
