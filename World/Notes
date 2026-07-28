@@ -37,7 +37,7 @@ Phase 12 →  Quests & Events
             (Generated stories, missions, festivals)
                 ↓
 Phase 13 →  Combat & Warfare
-            (Bandits, monsters, armies, sieges)
+            (Bandits, monsters, armies, sieges) - SQLite Needs to be added BEFORE clock. Almost there. Once done here Compile it all into a bundle. Flesh it out. Smooth the edges and ensure IT ALL WORKS HOW WE WANT IT TO. 
                 ↓
 Phase 14 →  History & Simulation
             (Time progression, births, deaths, wars, dynasties)
