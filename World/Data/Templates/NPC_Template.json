@@ -21,5 +21,7 @@
     "hunger": 100,
     "energy": 100,
     "social": 100
-  }
+  },
+  "health": 100,
+  "alive": true
 }
