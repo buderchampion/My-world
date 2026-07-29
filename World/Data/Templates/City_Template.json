@@ -4,8 +4,10 @@
     "type": "",
     "population": 0,
     "kingdom": null,
-    "ruler": null,
-    "npcs": [],
     "buildings": [],
-    "resources": {}
+    "resources": {},
+    "ruler": null,
+    "quests": [],
+    "events": [],
+    "npcs": []
 }

@@ -8,6 +8,8 @@
     "cities": [],
 
     "population": 0,
-    
-    "ruler": null
+
+    "ruler": null,
+
+    "events": []
 }
