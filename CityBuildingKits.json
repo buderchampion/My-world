@@ -1,6 +1,0 @@
-{
-    "Village": {"wage_multiplier": 1.0,  "xp_multiplier": 1.0},
-    "Town":    {"wage_multiplier": 1.25, "xp_multiplier": 1.25},
-    "City":    {"wage_multiplier": 1.5,  "xp_multiplier": 1.5},
-    "Capital": {"wage_multiplier": 2.0,  "xp_multiplier": 2.0}
-}
