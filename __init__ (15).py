@@ -1,0 +1,5 @@
+{
+    "Home":      {"hunger": -10, "energy": 20,  "social": -5},
+    "Workplace": {"hunger": -12, "energy": -10, "social": 5},
+    "Social":    {"hunger": -10, "energy": -8,  "social": 25}
+}

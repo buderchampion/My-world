@@ -1,0 +1,92 @@
+{
+    "Wizard": {
+        "skills": [
+            "Fire Magic",
+            "Ice Magic",
+            "Arcane Knowledge"
+        ]
+    },
+
+    "Fighter": {
+        "skills": [
+            "Swordsmanship",
+            "Shield",
+            "Leadership"
+        ]
+    },
+
+    "Barbarian": {
+        "skills": [
+            "Swordsmanship",
+            "Shield"
+        ]
+    },
+
+    "Druid": {
+        "skills": [
+            "Farming",
+            "Animal Care",
+            "Healing"
+        ]
+    },
+
+    "Ranger": {
+        "skills": [
+            "Archery",
+            "Fletching",
+            "Tracking"
+        ]
+    },
+
+    "Rouge": {
+        "skills": [
+            "Tracking",
+            "Bartering",
+            "Charisma"
+        ]
+    },
+
+    "Bard": {
+        "skills": [
+            "Charisma",
+            "Leadership"
+        ]
+    },
+
+    "Sorcerer": {
+        "skills": [
+            "Fire Magic",
+            "Ice Magic"
+        ]
+    },
+
+    "Paladin": {
+        "skills": [
+            "Swordsmanship",
+            "Shield",
+            "Religion"
+        ]
+    },
+
+    "Warlock": {
+        "skills": [
+            "Arcane Knowledge",
+            "Ice Magic"
+        ]
+    },
+
+    "Monk": {
+        "skills": [
+            "Swordsmanship",
+            "Healing"
+        ]
+    },
+
+    "Cleric": {
+        "skills": [
+            "Religion",
+            "Healing",
+            "Medium"
+        ]
+    }
+}
