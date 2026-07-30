@@ -1,21 +1,25 @@
 import json
 from pathlib import Path
 
-DATA_DIR = Path (__file__).resolve().parent.parent
+DATA_DIR = Path(__file__).resolve().parent.parent
 
 WAGES = DATA_DIR / "NPCS" / "Wages.json"
 CITY_PAY_SCALING = DATA_DIR / "Buildings" / "CityPayScaling.json"
 
+# Exponential leveling curve -- easy to retune later without touching
+# any of the logic below. xp needed to go from `level` to `level + 1`.
 BASE_LEVEL_XP = 100
 LEVEL_XP_GROWTH = 1.5
 
+# Flat xp granted per skill per workday, before the city's xp_multiplier.
 SKILL_XP_PER_DAY = 10
 
 
-def load_json(file): 
+def load_json(file):
 
     with open(file, "r") as f:
         return json.load(f)
+
 
 def xp_to_next_level(level):
 
@@ -36,6 +40,7 @@ def get_wage(profession, city_type):
 
 def add_skill_xp(skill, amount):
 
+    # skill is one of the npc["skills"][name] dicts -- mutated in place.
     skill["xp"] += amount
 
     while skill["xp"] >= xp_to_next_level(skill["level"]):
@@ -44,6 +49,14 @@ def add_skill_xp(skill, amount):
 
 
 def apply_workday(npc):
+    """
+    Applies a single day of work to an npc: adds their wage to gold, and
+    grants xp to every skill their class gave them (if any), scaled by
+    their city's pay tier.
+
+    No day/tick loop calls this yet -- that's a later simulation phase.
+    This is just the per-day calculation, ready for that loop to use.
+    """
 
     scaling = load_json(CITY_PAY_SCALING)
 

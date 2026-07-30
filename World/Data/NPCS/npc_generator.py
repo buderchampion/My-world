@@ -1,25 +1,19 @@
 import json
 import random
-import os
 from pathlib import Path
-from Data.counters import next_id as _next_id
+from Data.Database.repository import create_npc, save_npc, find_open_building, count_occupants
 
 DATA_DIR = Path(__file__).resolve().parent.parent
 
-TEMPLATE = DATA_DIR / "Templates" / "NPC_Template.json"
 CLASS_FILE = DATA_DIR / "NPCS" / "Classes.json"
 SKILL_FILE = DATA_DIR / "NPCS" / "Skills.json"
 PROFESSIONS = DATA_DIR / "NPCS" / "Professions.json"
-PROFESSIONS_CLASSES = DATA_DIR / "NPCS" / "ProfessionClasses.json"
-PROFESSIONS_WEIGHTS = DATA_DIR  / "Cities" / "ProfessionWeights.json"
-PROFESSIONS_BUILDINGS = DATA_DIR / "Buildings" / "ProfessionBuildings.json"
-
-NPC_FOLDER = DATA_DIR / "NPCS" / "NPCData"
+PROFESSION_CLASSES = DATA_DIR / "NPCS" / "ProfessionClasses.json"
+PROFESSION_WEIGHTS = DATA_DIR / "NPCS" / "ProfessionWeights.json"
+PROFESSION_BUILDINGS = DATA_DIR / "Buildings" / "ProfessionBuildings.json"
 
 MALE_NAMES = DATA_DIR / "Names" / "Human_Male.json"
 FEMALE_NAMES = DATA_DIR / "Names" / "Human_Female.json"
-
-NPC_FOLDER.mkdir(exist_ok=True)
 
 
 def load_json(file):
@@ -28,40 +22,41 @@ def load_json(file):
         return json.load(f)
 
 
-def get_next_id():
+def get_building_type(profession, profession_buildings):
 
-    return _next_id("npc", NPC_FOLDER, "npc_*.json")
-
-def find_open_building(buildings, building_type):
-
-    for building in buildings:
-
-        if building["type"] == building_type and len(building["workers"]) < building["capacity"]:
-            return building
+    # Case-insensitive match -- a profession spelled differently between
+    # Professions.json and ProfessionBuildings.json (e.g. "Innkeeper" vs
+    # "innkeeper") must NOT silently be treated as "no building required".
+    for key, value in profession_buildings.items():
+        if key.lower() == profession.lower():
+            return value
 
     return None
 
-def is_profession_available(profession, profession_buildings, buildings):
 
-    building_type = profession_buildings.get(profession)
+def is_profession_available(conn, city_id, profession, profession_buildings):
 
+    building_type = get_building_type(profession, profession_buildings)
+
+    # No building requirement (e.g. Bandit) -- always available
     if building_type is None:
         return True
 
-    if buildings is None:
+    if city_id is None:
         return True
 
-    return find_open_building(buildings, building_type) is not None
+    return find_open_building(conn, city_id, building_type, "workplace_id") is not None
 
-def generate_profession(city_type=None, buildings=None):
+
+def generate_profession(conn, city_id, city_type=None):
 
     professions = load_json(PROFESSIONS)
-    profession_buildings = load_json(PROFESSIONS_BUILDINGS)
+    profession_buildings = load_json(PROFESSION_BUILDINGS)
 
     weights = None
 
     if city_type:
-        weights_data = load_json(PROFESSIONS_WEIGHTS)
+        weights_data = load_json(PROFESSION_WEIGHTS)
         weights = weights_data.get(city_type)
 
     category_order = list(professions.keys())
@@ -69,6 +64,8 @@ def generate_profession(city_type=None, buildings=None):
     if weights:
         category_order = [c for c in weights if c in professions]
 
+    # Try categories weighted by city type, but skip a category entirely
+    # once every profession in it is full, and reroll a different one.
     remaining_categories = list(category_order)
 
     while remaining_categories:
@@ -81,20 +78,23 @@ def generate_profession(city_type=None, buildings=None):
 
         available = [
             p for p in professions[category]
-            if is_profession_available(p, profession_buildings, buildings)
+            if is_profession_available(conn, city_id, p, profession_buildings)
         ]
 
         if available:
             return random.choice(available)
-        
+
         remaining_categories.remove(category)
 
+    # Every profession in every category is full -- no work available
     return None
+
 
 def generate_class(profession):
 
-    profession_classes = load_json(PROFESSIONS_CLASSES)
+    profession_classes = load_json(PROFESSION_CLASSES)
 
+    # Match keys case-insensitively (e.g. "Innkeeper" profession vs "innkeeper" key)
     entry = None
     for key, value in profession_classes.items():
         if key.lower() == profession.lower():
@@ -104,75 +104,47 @@ def generate_class(profession):
     if not entry or not entry.get("classes"):
         return "None"
 
-    return random.choice(
-        entry["classes"]
-    )
-def find_open_building(buildings, building_type, occupancy_key="workers"):
+    return random.choice(entry["classes"])
 
-    for building in buildings:
 
-        if building["type"] == building_type and len(building[occupancy_key]) < building["capacity"]:
-            return building
-
-    return None
-
-def generate_npc(city_type=None, buildings=None):
-
-    npc = load_json(TEMPLATE)
+def generate_npc(conn, city_id, city_type=None):
 
     classes = load_json(CLASS_FILE)
     skills = load_json(SKILL_FILE)
-    profession_buildings = load_json(PROFESSIONS_BUILDINGS)
+    profession_buildings = load_json(PROFESSION_BUILDINGS)
 
-    npc["id"] = get_next_id()
-    npc["gender"] = random.choice(["Male", "Female"])
+    gender = random.choice(["Male", "Female"])
 
-    if npc["gender"] == "Male":
-        names = load_json(MALE_NAMES)
-    else:
-        names = load_json(FEMALE_NAMES)
+    names = load_json(MALE_NAMES if gender == "Male" else FEMALE_NAMES)
+    name = random.choice(names)
 
-    npc["name"] = random.choice(names)
+    age = random.randint(18, 70)
 
-    profession = generate_profession(city_type, buildings)
+    profession = generate_profession(conn, city_id, city_type)
 
-    workplace = None
     if profession is None:
-        npc["profession"] = "Unemployed"
-    else:
-        npc["profession"] = profession
+        profession = "Unemployed"
 
-        building_type = profession_buildings.get(profession)
+    npc_class = generate_class(profession)
 
-        if building_type and buildings is not None:
+    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession)
 
-            building = find_open_building(buildings, building_type)
+    building_type = get_building_type(profession, profession_buildings)
 
-            if building:
-                building["workers"].append(npc["id"])
-                workplace = building["id"]
+    if building_type:
 
-    npc["workplace"] = workplace
+        building = find_open_building(conn, city_id, building_type, "workplace_id")
 
-    home = None
+        if building:
+            npc["workplace"] = building["id"]
 
-    if buildings is not None:
+    house = find_open_building(conn, city_id, "House", "home_id")
 
-        house = find_open_building(buildings, "House", occupancy_key="residents")
+    if house:
+        npc["home"] = house["id"]
 
-        if house:
-            house["residents"].append(npc["id"])
-            home = house["id"]
-
-    npc["home"] = home
-    npc["city_type"] = city_type
-    npc["age"] = random.randint(18, 70)
-    npc["class"] = generate_class(npc["profession"])
-    npc["skills"] = {}
-
-    for skill in classes.get(npc["class"], {}).get("skills", []):
-
-        npc["skills"][skill] = skills[skill].copy()
+    for skill_name in classes.get(npc_class, {}).get("skills", []):
+        npc["skills"][skill_name] = skills[skill_name].copy()
 
     from Data.DailyLife.daily_life import build_schedule
 
@@ -180,14 +152,6 @@ def generate_npc(city_type=None, buildings=None):
 
     npc["location"] = npc["home"]
 
-    save_npc(npc)
+    save_npc(conn, npc)
 
     return npc
-
-
-def save_npc(npc):
-
-    filename = NPC_FOLDER / f"npc_{npc['id']:06}.json"
-
-    with open(filename, "w") as f:
-        json.dump(npc, f, indent=4)

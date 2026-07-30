@@ -1,12 +1,9 @@
-import json
 import random
 from pathlib import Path
-from Data.NPCS.npc_generator import TEMPLATE, MALE_NAMES, FEMALE_NAMES, load_json
+from Data.NPCS.npc_generator import MALE_NAMES, FEMALE_NAMES, load_json
+from Data.Database.repository import get_city_npcs, save_npc, create_npc, set_npc_parents
 
 DATA_DIR = Path(__file__).resolve().parent.parent
-
-NPC_FOLDER = DATA_DIR / "NPCS" / "NPCData"
-BUILDING_FOLDER = DATA_DIR / "Buildings" / "BuildingData"
 
 MIN_MARRY_AGE = 18
 MARRIAGE_CHANCE = 0.6
@@ -17,102 +14,52 @@ CHILD_CHANCE = 0.5
 MAX_CHILDREN = 3
 
 
-def load_npc(npc_id):
-
-    path = NPC_FOLDER / f"npc_{npc_id:06}.json"
-
-    with open(path, "r") as f:
-        return json.load(f)
-
-def save_npc(npc):
-
-    path = NPC_FOLDER / f"npc_{npc['id']:06}.json"
-
-    with open(path, "w") as f:
-        json.dump(npc, f, indent=4)
-
-
-def load_building(building_id):
-
-    path = BUILDING_FOLDER / f"building_{building_id:06}.json"
-
-    with open(path, "r") as f:
-        return json.load(f)
-
-def save_building(building):
-
-    path = BUILDING_FOLDER / f"building_{building['id']:06}.json"
-
-    with open(path, "w") as f:
-        json.dump(building, f, indent=4)
-
-
-def get_next_npc_id():
-
-    from Data.counters import next_id
-
-    return next_id("npc", NPC_FOLDER, "npc_*.json")
-
-
-def marry(npc_a, npc_b, buildings_by_id):
+def marry(npc_a, npc_b):
 
     npc_a["spouse"] = npc_b["id"]
     npc_b["spouse"] = npc_a["id"]
 
-    old_home = buildings_by_id.get(npc_b["home"])
-    new_home = buildings_by_id.get(npc_a["home"])
-
-    if old_home and npc_b["id"] in old_home["residents"]:
-        old_home["residents"].remove(npc_b["id"])
-
-    if new_home:
-        new_home["residents"].append(npc_b["id"])
-        npc_b["hpme"] = new_home["id"]
+    # Move npc_b in with npc_a so the couple actually lives together.
+    # (No building lists to update -- home_id on npc_b IS the residency.)
+    npc_b["home"] = npc_a["home"]
 
 
-def create_child(parent_a, parent_b, city_type, buildings_by_id):
+def create_child(conn, parent_a, parent_b, city_type):
 
-    child = load_json(TEMPLATE)
+    gender = random.choice(["Male", "Female"])
 
-    child["id"] = get_next_npc_id()
-    child["gender"] = random.choice(["Male", "Female"])
+    names = load_json(MALE_NAMES if gender == "Male" else FEMALE_NAMES)
+    name = random.choice(names)
 
-    names = load_json(MALE_NAMES if child["gender"] == "Male" else FEMALE_NAMES)
-    child["name"] = random.choice(names)
+    child = create_npc(conn, parent_a["city_id"], name, gender, 0, "None", "Child")
 
-    child["age"] = 0
-    child["city_type"] = city_type
-    child["profession"] = "Child"
-    child["class"] = "None"
-    child["workplace"] = None
+    set_npc_parents(conn, child["id"], parent_a["id"], parent_b["id"])
+
     child["home"] = parent_a["home"]
-    child["parents"] = [parent_a["id"], parent_b["id"]]
 
-    home = buildings_by_id.get(parent_a["home"])
+    from Data.DailyLife.daily_life import build_schedule
 
-    if home:
-        home["residents"].append(child["id"])
-
-    From Data.DailyLife.daily_life import build_schedule
-
-    build_schedule
+    build_schedule(child)
 
     child["location"] = child["home"]
 
-    save_npc(child)
-
-    parent_a["children"].append(child["id"])
-    parent_b["children"].append(child["id"])
+    save_npc(conn, child)
 
     return child
 
 
-def form_families(city):
-    npcs = [load_npc(entry["id"]) for entry in city["npcs"]]
+def form_families(conn, city):
+    """
+    Loads every NPC in this city, pairs up eligible adults into
+    marriages (moving them into one household), and gives some married
+    couples children. Saves every changed NPC back to the database, and
+    adds any newborn children to city["npcs"].
 
-    buildings_by_id = {
-        entry["id"]: load_building(entry["id"]) for entry in city["buildings"]
-    }
+    Not called automatically -- run whenever you want a city's
+    population to settle into families.
+    """
+
+    npcs = get_city_npcs(conn, city["id"])
 
     eligible = [
         npc for npc in npcs
@@ -131,7 +78,7 @@ def form_families(city):
         if random.random() > MARRIAGE_CHANCE:
             continue
 
-        marry(npc_a, npc_b, buildings_by_id)
+        marry(npc_a, npc_b)
 
         can_have_children = (
             FERTILE_AGE_MIN <= npc_a["age"] <= FERTILE_AGE_MAX
@@ -140,24 +87,23 @@ def form_families(city):
 
         num_children = 0
 
-        while can_have_children and num_children < MAX_CHILDREN and random.random() <CHILD_CHANCE:
+        while can_have_children and num_children < MAX_CHILDREN and random.random() < CHILD_CHANCE:
 
-            child = create_child(npc_a, npc_b, city["type"], buildings_by_id)
+            child = create_child(conn, npc_a, npc_b, city["type"])
 
             new_children.append(child)
 
             num_children += 1
 
     for npc in npcs:
-        save_npc(npc)
+        save_npc(conn, npc)
 
-    for building in buildings_by_id.values():
-        save_building(building) 
+    conn.commit()
 
     for child in new_children:
         city["npcs"].append({
             "id": child["id"],
-            "name": child ["name"],
+            "name": child["name"],
             "profession": child["profession"],
             "class": child["class"],
             "workplace": child["workplace"],

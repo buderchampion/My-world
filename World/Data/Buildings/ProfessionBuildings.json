@@ -1,25 +1,30 @@
 {
-    "Farmer": "Farm", 
-    "Fisherman": "Fishing Dock", 
+    "Farmer": "Farm",
+    "Fisherman": "Fishing Dock",
     "Baker": "Tavern",
-    "Blacksmith": "Blacksmith Shop", 
+    "Blacksmith": "Blacksmith Shop",
     "Carpenter": "Carpenter Workshop",
-    "Merchant": "Market", 
-    "Tailor": "Tailor Shop", 
+    "Merchant": "Market",
+    "Tailor": "Tailor Shop",
     "Miner": "Mine",
-    "Hunter": "Hunter Lodge", 
-    "Innkeeper": "Tavern",
-    "Guard": "Guard Post", 
-    "Soldier": "Barracks", 
-    "Captian": "Barracks", 
+    "Hunter": "Hunter Lodge",
+    "innkeeper": "Tavern",
+
+    "Guard": "Guard Post",
+    "Soldier": "Barracks",
+    "Captian": "Barracks",
     "Knight": "Castle",
-    "Priest": "Temple", 
+
+    "Priest": "Temple",
     "Healer": "Temple",
-    "Scholar": "Library", 
-    "Alchemist": "Alchemist Lab", 
+
+    "Scholar": "Library",
+    "Alchemist": "Alchemist Lab",
     "Mage": "Library",
-    "Thief": "Thieves Den", 
-    "Smuggler": "Thieves Den", 
+
+    "Thief": "Thieves Den",
+    "Smuggler": "Thieves Den",
     "Bandit": "Bandit Camp",
+
     "Unemployed": null
 }

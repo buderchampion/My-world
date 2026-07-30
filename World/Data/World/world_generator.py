@@ -1,56 +1,28 @@
-import json
 import random
-import os
-from pathlib import Path
 from Data.Kingdoms.kingdom_generator import generate_kingdom
-from Data.counters import next_id as _next_id
+from Data.Database.database import init_database, get_connection
+from Data.Database.repository import create_world, get_world_kingdoms
 
-
-DATA_DIR = Path(__file__).resolve().parent.parent
-
-WORLD_FOLDER = DATA_DIR / "World" / "WorldData"
-
-TEMPLATE = DATA_DIR / "Templates" / "World_Template.json"
-
-WORLD_FOLDER.mkdir(exist_ok=True)
-
-def load_json(file):
-
-    with open(file, "r") as f:
-        return json.load(f)
-
-def get_next_world_id():
-
-    return _next_id("world", WORLD_FOLDER, "world_*.json")
 
 def generate_world():
 
-    world = load_json(TEMPLATE)
+    init_database()
 
-    world["id"] = get_next_world_id()
+    conn = get_connection()
 
-    world["name"] = "Generated World"
+    world = create_world(conn, "Generated World")
 
-    number_of_kingdoms = random.randint(3,6)
+    number_of_kingdoms = random.randint(3, 6)
 
     for _ in range(number_of_kingdoms):
+        generate_kingdom(conn, world["id"])
 
-        kingdom = generate_kingdom()
+    world["kingdoms"] = [
+        {"id": k["id"], "name": k["name"]} for k in get_world_kingdoms(conn, world["id"])
+    ]
 
-        world["kingdoms"].append(
-            {
-                "id": kingdom["id"],
-                "name": kingdom["name"]
-            }
-        )
+    conn.commit()
 
-    save_world(world)
+    conn.close()
 
     return world
-
-def save_world(world):
-
-    filename = WORLD_FOLDER / f"world_{world['id']:06}.json"
-
-    with open(filename, "w") as f:
-        json.dump(world, f, indent=4)

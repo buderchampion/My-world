@@ -7,5 +7,4 @@
     "Tailor Shop":        {"resource": "Cloth",   "amount_per_worker": 2},
     "Carpenter Workshop": {"resource": "Wood",    "amount_per_worker": 3},
     "Alchemist Lab":      {"resource": "Potions", "amount_per_worker": 1}
-
 }

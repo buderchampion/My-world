@@ -70,7 +70,7 @@ def produce_resources(city):
         if not rule:
             continue
 
-        amount = building["workers"] * rule["amount_per_worker"]
+        amount = len(building["workers"]) * rule["amount_per_worker"]
 
         resource = rule["resource"]
 

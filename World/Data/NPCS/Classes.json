@@ -1,24 +1,24 @@
 {
     "Wizard": {
         "skills": [
-           "Fire Magic",
-           "Ice Magic",
-           "Arcane Knowledge"
+            "Fire Magic",
+            "Ice Magic",
+            "Arcane Knowledge"
         ]
     },
 
     "Fighter": {
         "skills": [
-           "Swordsmanship",
-           "Shield",
-           "Leadership"
+            "Swordsmanship",
+            "Shield",
+            "Leadership"
         ]
     },
 
     "Barbarian": {
         "skills": [
-           "Swordsmanship",
-           "Shield"
+            "Swordsmanship",
+            "Shield"
         ]
     },
 

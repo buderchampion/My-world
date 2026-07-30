@@ -1,35 +1,21 @@
-import json
 import random
-from pathlib import Path
+from Data.Database.repository import get_city_npcs, save_npc
 
-DATA_DIR = Path(__file__).resolve().parent.parent
-
-NPC_FOLDER = DATA_DIR / "NPCS" / "NPCData"
-
+# Professions considered notable enough to plausibly rule -- tried
+# first, before falling back to any employed adult in the city.
 RULER_CANDIDATE_PROFESSIONS = ["Knight", "Captian", "Merchant", "Scholar", "Priest"]
 
 NON_RULER_PROFESSIONS = ("Unemployed", "Child")
 
 
-def load_npc(npc_id):
+def assign_city_ruler(conn, city):
+    """
+    Picks one NPC to rule this city -- King/Queen for a Capital, Mayor
+    everywhere else. Sets city["ruler"] and saves the chosen NPC with
+    their new title. Not called automatically.
+    """
 
-    path = NPC_FOLDER / f"npc_{npc_id:06}.json"
-
-    with open(path, "r") as f:
-        return json.load(f)
-
-
-def save_npc(npc):
-
-    path = NPC_FOLDER / f"npc_{npc['id']:06}.json"
-
-    with open(path, "w") as f:
-        json.dump(npc, f, indent=4)
-
-
-def assign_city_ruler(city):
-
-    npcs = [load_npc(entry["id"]) for entry in city["npcs"]]
+    npcs = get_city_npcs(conn, city["id"])
 
     candidates = [
         npc for npc in npcs
@@ -53,7 +39,9 @@ def assign_city_ruler(city):
     else:
         ruler["title"] = "Mayor"
 
-    save_npc(ruler)
+    save_npc(conn, ruler)
+
+    conn.commit()
 
     city["ruler"] = ruler["id"]
 
@@ -61,7 +49,11 @@ def assign_city_ruler(city):
 
 
 def assign_kingdom_ruler(kingdom, capital_city):
-    
+    """
+    The Capital's ruler doubles as the kingdom's monarch. Call this
+    after assign_city_ruler has already been run on the capital.
+    """
+
     kingdom["ruler"] = capital_city.get("ruler")
 
     return kingdom["ruler"]

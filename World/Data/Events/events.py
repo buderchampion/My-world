@@ -1,43 +1,32 @@
-def get_next_event_id():
+def marriage_event(conn, npc_a, npc_b):
 
-    from Data.counters import next_id
-
-    return next_id("event")
-
-
-def create_event(event_type, description, participants=None, location=None):
-
-    return {
-        "id": get_next_event_id(),
-        "type": event_type,
-        "description": description,
-        "participants": participants or [],
-        "location": location,
-        "day": None
-    }
-
-
-def marriage_event(npc_a, npc_b):
+    from Data.Database.repository import create_event
 
     return create_event(
+        conn,
         "Wedding",
         f"{npc_a['name']} and {npc_b['name']} were married.",
         participants=[npc_a["id"], npc_b["id"]],
-        location=npc_a.get("home")
+        city_id=npc_a.get("city_id")
     )
 
 
-def coronation_event(ruler, city):
+def coronation_event(conn, ruler, city):
+
+    from Data.Database.repository import create_event
 
     return create_event(
+        conn,
         "Coronation",
         f"{ruler['name']} was crowned {ruler['title']} of {city['name']}.",
         participants=[ruler["id"]],
-        location=city["id"]
+        city_id=city["id"]
     )
 
 
-def raid_event(city, result):
+def raid_event(conn, city, result):
+
+    from Data.Database.repository import create_event
 
     if result["outcome"] == "attackers_win":
         description = f"Bandits raided {city['name']} and made off with plunder."
@@ -46,10 +35,12 @@ def raid_event(city, result):
     else:
         description = f"A planned raid on {city['name']} fizzled -- no one showed up to fight."
 
-    return create_event("Raid", description, location=city["id"])
+    return create_event(conn, "Raid", description, city_id=city["id"])
 
 
-def war_event(attacker_kingdom, defender_kingdom, result):
+def war_event(conn, attacker_kingdom, defender_kingdom, result):
+
+    from Data.Database.repository import create_event
 
     if result["outcome"] == "attacker_wins":
 
@@ -67,7 +58,9 @@ def war_event(attacker_kingdom, defender_kingdom, result):
         description = f"{attacker_kingdom['name']} and {defender_kingdom['name']} mobilized but never engaged."
 
     return create_event(
+        conn,
         "War",
         description,
-        participants=[attacker_kingdom["id"], defender_kingdom["id"]]
+        participants=[],
+        kingdom_id=attacker_kingdom["id"]
     )

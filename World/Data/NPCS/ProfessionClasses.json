@@ -73,7 +73,7 @@
         ]
     },
 
-    "Innkeeper": {
+    "innkeeper": {
         "classes": [
             "Fighter",
             "Paladin",
@@ -192,18 +192,8 @@
 
     "Unemployed": {
         "classes": [
-            "Barbarian",
-            "Fighter",
-            "Bard",
-            "Cleric",
-            "Druid",
-            "Monk",
-            "Paladin",
-            "Ranger",
-            "Rouge",
-            "Sorcerer",
-            "Warlock",
             "None"
         ]
     }
+
 }

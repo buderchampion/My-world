@@ -1,54 +1,46 @@
-import json
-from pathlib import Path
+from Data.Database.repository import get_npc, get_city_buildings, get_city_rival_pairs, create_quest
 
-DATA_DIR = Path(__file__).resolve().parent.parent
-
-NPC_FOLDER = DATA_DIR / "NPCS" / "NPCData"
-
+# Reward tuning -- how gold value flows from each system into a quest.
 BOUNTY_GOLD_PER_POWER = 5
 SUPPLY_RUN_QUANTITY = 20
 SUPPLY_RUN_REWARD_FRACTION = 0.5
 DIPLOMACY_BASE_REWARD = 20
 
+# A city can have a lot of Rival pairs once population gets large --
+# cap how many actually become quests, keeping only the worst ones.
 MAX_DIPLOMACY_QUESTS = 3
 
 
-def load_npc(npc_id):
-
-    path = NPC_FOLDER / f"npc_{npc_id:06}.json"
-
-    with open(path, "r") as f:
-        return json.load(f)
-
-
-def get_next_quest_id():
-
-    from Data.counters import next_id
-
-    return next_id("quest")
-
-
-def generate_bounty_quest(city, bandit_camp):
+def generate_bounty_quest(conn, city, bandit_camp):
+    """
+    A Bandit Camp with living occupants becomes a Bounty quest -- reward
+    scales with the camp's actual combat power (Data.Combat.combat).
+    """
 
     from Data.Combat.combat import get_combat_power
 
-    workers = [load_npc(npc_id) for npc_id in bandit_camp["workers"]]
+    workers = [get_npc(conn, npc_id) for npc_id in bandit_camp["workers"]]
     workers = [npc for npc in workers if npc["alive"]]
 
     power = sum(get_combat_power(npc) for npc in workers)
 
-    return {
-        "id": get_next_quest_id(),
-        "type": "Bounty",
-        "title": f"Clear out {bandit_camp['name']}",
-        "giver": city.get("ruler"),
-        "target_building": bandit_camp["id"],
-        "reward_gold": round(power * BOUNTY_GOLD_PER_POWER, 2),
-        "status": "Available"
-    }
+    return create_quest(
+        conn,
+        city_id=city["id"],
+        type="Bounty",
+        title=f"Clear out {bandit_camp['name']}",
+        giver_id=city.get("ruler"),
+        target_building_id=bandit_camp["id"],
+        reward_gold=round(power * BOUNTY_GOLD_PER_POWER, 2)
+    )
 
 
-def generate_supply_quest(shortage_city, surplus_city, resource):
+def generate_supply_quest(conn, shortage_city, surplus_city, resource):
+    """
+    A city short on a resource, paired with a nearby city that has a
+    surplus of it, becomes a Supply Run quest -- reward is based on
+    that resource's current price (Data.Economy.economy).
+    """
 
     from Data.Economy.economy import get_price
 
@@ -56,52 +48,54 @@ def generate_supply_quest(shortage_city, surplus_city, resource):
 
     reward = round(price * SUPPLY_RUN_QUANTITY * SUPPLY_RUN_REWARD_FRACTION, 2)
 
-    return {
-        "id": get_next_quest_id(),
-        "type": "Supply Run",
-        "title": f"Deliver {resource} to {shortage_city['name']}",
-        "giver": shortage_city.get("ruler"),
-        "from_city": surplus_city["id"],
-        "to_city": shortage_city["id"],
-        "resource": resource,
-        "quantity": SUPPLY_RUN_QUANTITY,
-        "reward_gold": reward,
-        "status": "Available"
-    }
+    return create_quest(
+        conn,
+        city_id=shortage_city["id"],
+        type="Supply Run",
+        title=f"Deliver {resource} to {shortage_city['name']}",
+        giver_id=shortage_city.get("ruler"),
+        from_city_id=surplus_city["id"],
+        to_city_id=shortage_city["id"],
+        resource=resource,
+        quantity=SUPPLY_RUN_QUANTITY,
+        reward_gold=reward
+    )
 
 
-def generate_diplomacy_quest(city, npc_a, npc_b):
+def generate_diplomacy_quest(conn, city, npc_a, npc_b, severity):
+    """
+    Two NPCs with a Rival relationship become a Diplomacy quest --
+    reward scales with how bad the rivalry actually is (Data.Relationships).
+    """
 
-    relationship = npc_a["relationships"][str(npc_b["id"])]
-
-    severity = abs(relationship["reputation"])
-
-    return {
-        "id": get_next_quest_id(),
-        "type": "Diplomacy",
-        "title": f"Mend the rivalry between {npc_a['name']} and {npc_b['name']}",
-        "giver": city.get("ruler"),
-        "target_npcs": [npc_a["id"], npc_b["id"]],
-        "reward_gold": round(DIPLOMACY_BASE_REWARD + severity, 2),
-        "status": "Available"
-    }
+    return create_quest(
+        conn,
+        city_id=city["id"],
+        type="Diplomacy",
+        title=f"Mend the rivalry between {npc_a['name']} and {npc_b['name']}",
+        giver_id=city.get("ruler"),
+        target_npc_a_id=npc_a["id"],
+        target_npc_b_id=npc_b["id"],
+        reward_gold=round(DIPLOMACY_BASE_REWARD + severity, 2)
+    )
 
 
-def generate_quests_for_city(city, buildings_by_id, nearby_cities=None):
+def generate_quests_for_city(conn, city, nearby_cities=None):
+    """
+    Scans this city's current state -- Bandit Camp threats, resource
+    shortages (against nearby_cities' surpluses), and NPC rivalries --
+    and generates whatever quests make sense right now. Returns the new
+    quests. Not called automatically.
+    """
 
     from Data.Economy.economy import classify_supply
 
     quests = []
 
-    for building_entry in city["buildings"]:
+    for building in get_city_buildings(conn, city["id"]):
 
-        if building_entry["type"] != "Bandit Camp":
-            continue
-
-        full_building = buildings_by_id.get(building_entry["id"])
-
-        if full_building and full_building["workers"]:
-            quests.append(generate_bounty_quest(city, full_building))
+        if building["type"] == "Bandit Camp" and building["workers"]:
+            quests.append(generate_bounty_quest(conn, city, building))
 
     if nearby_cities:
 
@@ -116,35 +110,15 @@ def generate_quests_for_city(city, buildings_by_id, nearby_cities=None):
             )
 
             if surplus_city:
-                quests.append(generate_supply_quest(city, surplus_city, resource))
+                quests.append(generate_supply_quest(conn, city, surplus_city, resource))
 
-    npcs = [load_npc(entry["id"]) for entry in city["npcs"]]
+    rival_pairs = get_city_rival_pairs(conn, city["id"])
 
-    seen_pairs = set()
-    rival_pairs = []
+    for npc_a_id, npc_b_id, severity in rival_pairs[:MAX_DIPLOMACY_QUESTS]:
 
-    for npc in npcs:
+        npc_a = get_npc(conn, npc_a_id)
+        npc_b = get_npc(conn, npc_b_id)
 
-        for other_id, relationship in npc.get("relationships", {}).items():
-
-            if relationship["type"] != "Rival":
-                continue
-
-            pair = tuple(sorted([npc["id"], int(other_id)]))
-
-            if pair in seen_pairs:
-                continue
-
-            seen_pairs.add(pair)
-
-            rival_pairs.append((npc, load_npc(int(other_id)), abs(relationship["reputation"])))
-
-    rival_pairs.sort(key=lambda entry: entry[2], reverse=True)
-
-    for npc_a, npc_b, severity in rival_pairs[:MAX_DIPLOMACY_QUESTS]:
-
-        quests.append(generate_diplomacy_quest(city, npc_a, npc_b))
-
-    city["quests"].extend(quests)
+        quests.append(generate_diplomacy_quest(conn, city, npc_a, npc_b, severity))
 
     return quests

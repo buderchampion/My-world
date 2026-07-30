@@ -1,11 +1,9 @@
 import json
 import random
 from pathlib import Path
+from Data.Database.repository import get_npc, save_npc, get_city_npcs, set_city_kingdom
 
 DATA_DIR = Path(__file__).resolve().parent.parent
-
-NPC_FOLDER = DATA_DIR / "NPCS" / "NPCData"
-BUILDING_FOLDER = DATA_DIR / "Buildings" / "BuildingData"
 
 COMBAT_RATES = DATA_DIR / "Combat" / "CombatRates.json"
 
@@ -35,38 +33,6 @@ def load_json(file):
         return json.load(f)
 
 
-def load_npc(npc_id):
-
-    path = NPC_FOLDER / f"npc_{npc_id:06}.json"
-
-    with open(path, "r") as f:
-        return json.load(f)
-
-
-def save_npc(npc):
-
-    path = NPC_FOLDER / f"npc_{npc['id']:06}.json"
-
-    with open(path, "w") as f:
-        json.dump(npc, f, indent=4)
-
-
-def load_building(building_id):
-
-    path = BUILDING_FOLDER / f"building_{building_id:06}.json"
-
-    with open(path, "r") as f:
-        return json.load(f)
-
-
-def save_building(building):
-
-    path = BUILDING_FOLDER / f"building_{building['id']:06}.json"
-
-    with open(path, "w") as f:
-        json.dump(building, f, indent=4)
-
-
 def get_combat_power(npc):
 
     rates = load_json(COMBAT_RATES)
@@ -78,24 +44,7 @@ def get_combat_power(npc):
     return base + skill_bonus
 
 
-def remove_npc_from_buildings(npc):
-
-    for building_id in (npc.get("workplace"), npc.get("home")):
-
-        if building_id is None:
-            continue
-
-        building = load_building(building_id)
-
-        for occupancy_key in ("workers", "residents"):
-
-            if npc["id"] in building.get(occupancy_key, []):
-                building[occupancy_key].remove(npc["id"])
-
-        save_building(building)
-
-
-def apply_casualties(participants, won):
+def apply_casualties(conn, participants, won):
 
     death_chance = WINNER_DEATH_CHANCE if won else LOSER_DEATH_CHANCE
     injury_chance = WINNER_INJURY_CHANCE if won else LOSER_INJURY_CHANCE
@@ -110,7 +59,12 @@ def apply_casualties(participants, won):
 
             npc["health"] = 0
             npc["alive"] = False
-            remove_npc_from_buildings(npc)
+
+            # Slots free up automatically -- workplace/home occupancy is
+            # always derived from these fields, so clearing them IS the
+            # "remove from building" step. No building rows to touch.
+            npc["workplace"] = None
+            npc["home"] = None
 
         elif roll < death_chance + injury_chance:
 
@@ -131,19 +85,31 @@ def apply_casualties(participants, won):
 
                 add_skill_xp(skill, xp)
 
-        save_npc(npc)
+        save_npc(conn, npc)
+
+    conn.commit()
 
 
-def resolve_raid(city, bandit_camp):
+def resolve_raid(conn, city, bandit_camp):
+    """
+    A Bandit Camp's occupants raid this city. Compares raider strength
+    against the city's Guard/Soldier/Captian/Knight defenders, applies
+    casualties to both sides, and -- if the raiders win -- steals a
+    portion of the city's resources, converted to gold at that
+    resource's current price and split among surviving raiders.
 
-    attackers = [load_npc(npc_id) for npc_id in bandit_camp["workers"]]
+    Returns a result dict. Not called automatically. You'll want to
+    call Data.Database.repository.save_city(conn, city) afterward to
+    persist the plundered resource totals.
+    """
+
+    attackers = [get_npc(conn, npc_id) for npc_id in bandit_camp["workers"]]
     attackers = [npc for npc in attackers if npc["alive"]]
 
     defenders = [
-        load_npc(entry["id"]) for entry in city["npcs"]
-        if entry["profession"] in DEFENDER_PROFESSIONS
+        npc for npc in get_city_npcs(conn, city["id"])
+        if npc["profession"] in DEFENDER_PROFESSIONS and npc["alive"]
     ]
-    defenders = [npc for npc in defenders if npc["alive"]]
 
     attack_power = sum(get_combat_power(npc) for npc in attackers)
     defense_power = sum(get_combat_power(npc) for npc in defenders)
@@ -155,8 +121,8 @@ def resolve_raid(city, bandit_camp):
 
     attackers_win = random.random() < (attack_power / total_power)
 
-    apply_casualties(attackers, won=attackers_win)
-    apply_casualties(defenders, won=not attackers_win)
+    apply_casualties(conn, attackers, won=attackers_win)
+    apply_casualties(conn, defenders, won=not attackers_win)
 
     plunder = {}
 
@@ -185,7 +151,9 @@ def resolve_raid(city, bandit_camp):
 
                 for npc in survivors:
                     npc["gold"] = round(npc.get("gold", 0) + share, 2)
-                    save_npc(npc)
+                    save_npc(conn, npc)
+
+            conn.commit()
 
     return {
         "outcome": "attackers_win" if attackers_win else "defenders_win",
@@ -195,22 +163,29 @@ def resolve_raid(city, bandit_camp):
     }
 
 
-def resolve_kingdom_war(attacker_kingdom, defender_kingdom, attacker_cities, defender_cities):
- 
+def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities):
+    """
+    Gathers every Guard/Soldier/Captian/Knight across all of each
+    kingdom's cities, resolves one battle between the two militaries,
+    applies casualties, and -- if the attacker wins -- captures one of
+    the defender's non-capital cities (preferring whichever city holds
+    the most valuable resource stockpile, so the war has an actual
+    target worth fighting for). The captured city's own resources
+    travel with it to the new kingdom.
+
+    Returns a result dict. Not called automatically.
+    """
+
     def gather_military(cities):
 
         military = []
 
         for city in cities:
 
-            for entry in city["npcs"]:
+            for npc in get_city_npcs(conn, city["id"]):
 
-                if entry["profession"] in DEFENDER_PROFESSIONS:
-
-                    npc = load_npc(entry["id"])
-
-                    if npc["alive"]:
-                        military.append(npc)
+                if npc["profession"] in DEFENDER_PROFESSIONS and npc["alive"]:
+                    military.append(npc)
 
         return military
 
@@ -227,8 +202,8 @@ def resolve_kingdom_war(attacker_kingdom, defender_kingdom, attacker_cities, def
 
     attacker_wins = random.random() < (attack_power / total_power)
 
-    apply_casualties(attacker_military, won=attacker_wins)
-    apply_casualties(defender_military, won=not attacker_wins)
+    apply_casualties(conn, attacker_military, won=attacker_wins)
+    apply_casualties(conn, defender_military, won=not attacker_wins)
 
     captured_city = None
 
@@ -249,6 +224,8 @@ def resolve_kingdom_war(attacker_kingdom, defender_kingdom, attacker_cities, def
             capturable.sort(key=city_value, reverse=True)
 
             captured_city = capturable[0]
+
+            set_city_kingdom(conn, captured_city["id"], attacker_kingdom["id"])
 
             defender_kingdom["cities"] = [
                 c for c in defender_kingdom["cities"] if c["id"] != captured_city["id"]
