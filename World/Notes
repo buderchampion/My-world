@@ -1,15 +1,497 @@
-World
+==========================================
+          WORLD SIMULATION ROADMAP
+==========================================
+
+PROJECT VISION
+--------------
+Create a persistent fantasy world where kingdoms, cities, and NPCs exist
+independently of the player. Every person has a life, goals, relationships,
+memories, and can influence history. The world continues evolving whether
+the player is present or not.
+
+==========================================
+PHASE 1 - FOUNDATION (Current Phase)
+==========================================
+
+STATUS:
+[X] World Generator
+[X] Kingdom Generator
+[X] City Generator
+[X] NPC Generator
+[X] Persistent JSON Saving
+[X] Classes
+[X] Skills
+[X] Templates
+
+GOALS:
+- Clean project structure
+- Standardize JSON formats
+- Fix imports
+- Document folder structure
+- Push project to GitHub
+
+COMPLETE WHEN:
+- Every generator works independently.
+- No broken imports.
+- Everything loads from templates.
+- World generation can run start-to-finish without errors.
+
+==========================================
+PHASE 2 - SIMULATION CORE
+==========================================
+
+Create the "heart" of the engine.
+
+SYSTEMS
+
+[ ] Simulation Manager
+[ ] Event Manager
+[ ] Save Manager
+[ ] Load Manager
+[ ] Logger
+[ ] Random Seed Manager
+
+Clock
+
+[ ] Minute
+[ ] Hour
+[ ] Day
+[ ] Month
+[ ] Season
+[ ] Year
+
+Simulation Loop
+
+Clock
+↓
+
+Simulation Manager
+↓
+
+Managers Update
+↓
+
+Save Changes
+
+GOALS
+
+NPCs can now exist inside time.
+
+==========================================
+PHASE 3 - WORLD STRUCTURE
+==========================================
+
+Expand cities beyond names.
+
+Cities
+
+[ ] Population
+[ ] Wealth
+[ ] Food Storage
+[ ] Buildings
+[ ] Roads
+[ ] Districts
+
+Buildings
+
+[ ] Houses
+[ ] Farms
+[ ] Inns
+[ ] Markets
+[ ] Blacksmiths
+[ ] Churches
+[ ] Barracks
+[ ] Castles
 
 Kingdoms
-    ↓
-Cities
-    ↓
-Buildings
-    ↓
-NPCs
-    ↓
-Jobs
-    ↓
+
+[ ] Treasury
+[ ] Laws
+[ ] Government
+[ ] Military
+[ ] Diplomacy
+
+==========================================
+PHASE 4 - NPC LIFE
+==========================================
+
+Every NPC becomes a person.
+
+Attributes
+
+[ ] Age
+[ ] Health
+[ ] Hunger
+[ ] Energy
+[ ] Happiness
+[ ] Stress
+
+Needs
+
+[ ] Eat
+[ ] Sleep
+[ ] Work
+[ ] Socialize
+[ ] Heal
+
 Schedules
-    ↓
-Events
+
+Wake Up
+↓
+
+Breakfast
+↓
+
+Go To Work
+↓
+
+Lunch
+↓
+
+Continue Work
+↓
+
+Go Home
+↓
+
+Relax
+↓
+
+Sleep
+
+Movement
+
+[ ] Walking
+[ ] Travel
+[ ] Visiting Buildings
+[ ] Going Home
+
+==========================================
+PHASE 5 - ECONOMY
+==========================================
+
+Resources
+
+[ ] Food
+[ ] Wood
+[ ] Stone
+[ ] Iron
+[ ] Gold
+
+Production Chain
+
+Farm
+↓
+
+Grain
+↓
+
+Mill
+↓
+
+Flour
+↓
+
+Bakery
+↓
+
+Bread
+
+NPC Jobs
+
+[ ] Farmer
+[ ] Miner
+[ ] Blacksmith
+[ ] Merchant
+[ ] Guard
+[ ] Priest
+
+Trade
+
+[ ] Local Markets
+[ ] Caravans
+[ ] Kingdom Trade
+[ ] Imports
+[ ] Exports
+
+==========================================
+PHASE 6 - RELATIONSHIPS
+==========================================
+
+Every NPC remembers people.
+
+Relationships
+
+[ ] Parents
+[ ] Children
+[ ] Friends
+[ ] Rivals
+[ ] Enemies
+[ ] Spouse
+
+Memory
+
+Remember
+
+- Conversations
+- Gifts
+- Crimes
+- Favors
+- Betrayals
+- Battles
+
+Reputation
+
+Local
+
+Kingdom
+
+World
+
+==========================================
+PHASE 7 - EVENTS
+==========================================
+
+Dynamic Events
+
+[ ] Birth
+[ ] Death
+[ ] Marriage
+[ ] Fire
+[ ] Flood
+[ ] Drought
+[ ] Festival
+[ ] Crime
+[ ] War
+
+History
+
+Every important event becomes part of world history.
+
+==========================================
+PHASE 8 - POLITICS
+==========================================
+
+Kingdom AI
+
+[ ] Taxes
+[ ] Diplomacy
+[ ] Alliances
+[ ] War
+[ ] Peace Treaties
+
+Cities
+
+[ ] Revolts
+[ ] Crime
+[ ] Prosperity
+[ ] Expansion
+
+==========================================
+PHASE 9 - COMBAT
+==========================================
+
+Individuals
+
+[ ] Weapons
+[ ] Armor
+[ ] Injuries
+
+Groups
+
+[ ] Guards
+[ ] Armies
+[ ] Bandits
+
+Wars
+
+[ ] Sieges
+[ ] Battles
+[ ] Occupation
+
+==========================================
+PHASE 10 - MAP
+==========================================
+
+The map becomes a LIVE VIEWER.
+
+Display
+
+[ ] Terrain
+[ ] Roads
+[ ] Rivers
+[ ] Kingdom Borders
+[ ] Cities
+[ ] Buildings
+[ ] NPCs
+[ ] Caravans
+[ ] Armies
+
+Controls
+
+[ ] Zoom
+[ ] Pan
+[ ] Search
+[ ] Time Controls
+
+==========================================
+PHASE 11 - DECISION ENGINE
+==========================================
+
+NPC Thinking
+
+Observe
+
+↓
+
+Evaluate Needs
+
+↓
+
+Choose Goal
+
+↓
+
+Create Plan
+
+↓
+
+Execute Plan
+
+Example
+
+Hungry
+
+↓
+
+Need Food
+
+↓
+
+Need Money
+
+↓
+
+Go To Work
+
+↓
+
+Earn Money
+
+↓
+
+Buy Bread
+
+↓
+
+Eat
+
+==========================================
+PHASE 12 - AI
+==========================================
+
+Only important NPCs use AI.
+
+Possible AI Roles
+
+[ ] Kings
+[ ] Nobles
+[ ] Heroes
+[ ] Villains
+[ ] Advisors
+[ ] Player Companions
+
+AI Responsibilities
+
+- Conversations
+- Planning
+- Strategy
+- Negotiation
+- Storytelling
+
+==========================================
+PHASE 13 - WORLD HISTORY
+==========================================
+
+Generate historical records.
+
+Examples
+
+1042
+The Kingdom of Aranor was founded.
+
+1051
+King Aldric died.
+
+1054
+The Great Famine began.
+
+1061
+The Red War ended.
+
+NPCs remember these events.
+
+==========================================
+PHASE 14 - MOD SUPPORT
+==========================================
+
+External JSON
+
+External Scripts
+
+Custom Races
+
+Custom Classes
+
+Custom Skills
+
+Custom Kingdoms
+
+==========================================
+PHASE 15 - POLISH
+==========================================
+
+Optimization
+
+Threading
+
+Saving Improvements
+
+Better UI
+
+Performance
+
+Testing
+
+==========================================
+LONG-TERM DREAM
+==========================================
+
+The player enters a world that has already existed for hundreds of years.
+
+NPCs:
+- remember
+- learn
+- age
+- marry
+- work
+- travel
+- fight
+- rule
+- die
+
+Kingdoms:
+- rise
+- collapse
+- trade
+- wage war
+
+Cities:
+- grow
+- shrink
+- starve
+- prosper
+
+The player is not the center of the world.
+
+The world lives with or without them.
