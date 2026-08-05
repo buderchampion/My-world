@@ -25,6 +25,10 @@ SURPLUS_THRESHOLD = 1.5
 SHORTAGE_THRESHOLD = 0.5
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=None)
 def load_json(file):
 
     with open(file, "r") as f:

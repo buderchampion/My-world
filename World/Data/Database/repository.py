@@ -199,11 +199,11 @@ def find_open_building(conn, city_id, building_type, occupancy_column="workplace
 # Cities
 # ---------------------------------------------------------------------------
 
-def create_city(conn, kingdom_id, name, city_type, population):
+def create_city(conn, kingdom_id, name, city_type, population, map_x=0, map_y=0):
 
     cursor = conn.execute(
-        "INSERT INTO cities (kingdom_id, name, type, population) VALUES (?, ?, ?, ?)",
-        (kingdom_id, name, city_type, population)
+        "INSERT INTO cities (kingdom_id, name, type, population, map_x, map_y) VALUES (?, ?, ?, ?, ?, ?)",
+        (kingdom_id, name, city_type, population, map_x, map_y)
     )
 
     return get_city(conn, cursor.lastrowid)
@@ -244,8 +244,8 @@ def get_city(conn, city_id):
 def save_city(conn, city):
 
     conn.execute(
-        "UPDATE cities SET name = ?, type = ?, population = ?, ruler_id = ? WHERE id = ?",
-        (city["name"], city["type"], city["population"], city["ruler"], city["id"])
+        "UPDATE cities SET name = ?, type = ?, population = ?, ruler_id = ?, map_x = ?, map_y = ? WHERE id = ?",
+        (city["name"], city["type"], city["population"], city["ruler"], city["map_x"], city["map_y"], city["id"])
     )
 
     for resource, amount in city.get("resources", {}).items():
@@ -256,6 +256,45 @@ def save_city(conn, city):
             """,
             (city["id"], resource, amount)
         )
+
+    conn.commit()
+
+
+def create_road(conn, city_a_id, city_b_id, kind, distance, travel_days):
+
+    # Store the pair in a consistent order so (A, B) and (B, A) can
+    # never both get inserted as if they were different roads.
+    city_a_id, city_b_id = sorted((city_a_id, city_b_id))
+
+    cursor = conn.execute(
+        "INSERT INTO roads (city_a_id, city_b_id, kind, distance, travel_days) VALUES (?, ?, ?, ?, ?)",
+        (city_a_id, city_b_id, kind, distance, travel_days)
+    )
+
+    return dict(conn.execute("SELECT * FROM roads WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+
+def get_city_roads(conn, city_id):
+
+    rows = conn.execute(
+        "SELECT * FROM roads WHERE city_a_id = ? OR city_b_id = ?", (city_id, city_id)
+    ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def get_world_roads(conn, world_id):
+
+    rows = conn.execute(
+        """
+        SELECT r.* FROM roads r
+        JOIN cities c ON c.id = r.city_a_id
+        JOIN kingdoms k ON k.id = c.kingdom_id
+        WHERE k.world_id = ?
+        """, (world_id,)
+    ).fetchall()
+
+    return [dict(row) for row in rows]
 
 
 def get_kingdom_cities(conn, kingdom_id):
@@ -269,9 +308,11 @@ def get_kingdom_cities(conn, kingdom_id):
 # Kingdoms / Worlds
 # ---------------------------------------------------------------------------
 
-def create_kingdom(conn, world_id, name):
+def create_kingdom(conn, world_id, name, color="#808080"):
 
-    cursor = conn.execute("INSERT INTO kingdoms (world_id, name) VALUES (?, ?)", (world_id, name))
+    cursor = conn.execute(
+        "INSERT INTO kingdoms (world_id, name, color) VALUES (?, ?, ?)", (world_id, name, color)
+    )
 
     return get_kingdom(conn, cursor.lastrowid)
 
@@ -300,9 +341,11 @@ def get_kingdom(conn, kingdom_id):
 def save_kingdom(conn, kingdom):
 
     conn.execute(
-        "UPDATE kingdoms SET name = ?, capital_city_id = ?, ruler_id = ? WHERE id = ?",
-        (kingdom["name"], kingdom["capital"], kingdom["ruler"], kingdom["id"])
+        "UPDATE kingdoms SET name = ?, capital_city_id = ?, ruler_id = ?, color = ? WHERE id = ?",
+        (kingdom["name"], kingdom["capital"], kingdom["ruler"], kingdom["color"], kingdom["id"])
     )
+
+    conn.commit()
 
 
 def set_city_kingdom(conn, city_id, kingdom_id):
@@ -315,6 +358,32 @@ def create_world(conn, name):
     cursor = conn.execute("INSERT INTO worlds (name) VALUES (?)", (name,))
 
     return {"id": cursor.lastrowid, "name": name}
+
+
+def load_clock(conn, world_id):
+
+    from Data.Simulation.clock import Clock
+
+    row = conn.execute(
+        "SELECT clock_minute, clock_hour, clock_day, clock_month, clock_year FROM worlds WHERE id = ?",
+        (world_id,)
+    ).fetchone()
+
+    return Clock(
+        minute=row["clock_minute"], hour=row["clock_hour"],
+        day=row["clock_day"], month=row["clock_month"], year=row["clock_year"]
+    )
+
+
+def save_clock(conn, world_id, clock):
+
+    conn.execute(
+        """
+        UPDATE worlds SET clock_minute = ?, clock_hour = ?, clock_day = ?, clock_month = ?, clock_year = ?
+        WHERE id = ?
+        """,
+        (clock.minute, clock.hour, clock.day, clock.month, clock.year, world_id)
+    )
 
 
 def get_world_kingdoms(conn, world_id):
@@ -388,7 +457,43 @@ def get_city_quests(conn, city_id):
     return [dict(row) for row in rows]
 
 
+def _resolve_current_day(conn, city_id, kingdom_id):
+    """
+    Converts the world's current clock position into a single elapsed-
+    day count, so events can be ordered/compared with a plain integer.
+    Looks the world up via whichever of city_id/kingdom_id is given.
+    """
+
+    if kingdom_id is None and city_id is not None:
+        row = conn.execute("SELECT kingdom_id FROM cities WHERE id = ?", (city_id,)).fetchone()
+        kingdom_id = row["kingdom_id"] if row else None
+
+    if kingdom_id is None:
+        return None
+
+    row = conn.execute(
+        """
+        SELECT w.clock_year, w.clock_month, w.clock_day FROM worlds w
+        JOIN kingdoms k ON k.world_id = w.id WHERE k.id = ?
+        """, (kingdom_id,)
+    ).fetchone()
+
+    if row is None:
+        return None
+
+    from Data.Simulation.clock import MONTHS_PER_YEAR, DAYS_PER_MONTH
+
+    return (
+        (row["clock_year"] - 1) * MONTHS_PER_YEAR * DAYS_PER_MONTH
+        + (row["clock_month"] - 1) * DAYS_PER_MONTH
+        + (row["clock_day"] - 1)
+    )
+
+
 def create_event(conn, event_type, description, participants=None, city_id=None, kingdom_id=None, day=None):
+
+    if day is None:
+        day = _resolve_current_day(conn, city_id, kingdom_id)
 
     cursor = conn.execute(
         "INSERT INTO events (kingdom_id, city_id, type, description, day) VALUES (?, ?, ?, ?, ?)",

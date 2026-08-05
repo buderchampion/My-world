@@ -15,6 +15,10 @@ LEVEL_XP_GROWTH = 1.5
 SKILL_XP_PER_DAY = 10
 
 
+from functools import lru_cache
+
+
+@lru_cache(maxsize=None)
 def load_json(file):
 
     with open(file, "r") as f:

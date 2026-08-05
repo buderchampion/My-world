@@ -69,6 +69,7 @@ def form_families(conn, city):
     random.shuffle(eligible)
 
     new_children = []
+    new_marriages = []
 
     while len(eligible) >= 2:
 
@@ -79,6 +80,7 @@ def form_families(conn, city):
             continue
 
         marry(npc_a, npc_b)
+        new_marriages.append((npc_a, npc_b))
 
         can_have_children = (
             FERTILE_AGE_MIN <= npc_a["age"] <= FERTILE_AGE_MAX
@@ -97,6 +99,13 @@ def form_families(conn, city):
 
     for npc in npcs:
         save_npc(conn, npc)
+
+    conn.commit()
+
+    from Data.Events.events import marriage_event
+
+    for npc_a, npc_b in new_marriages:
+        marriage_event(conn, npc_a, npc_b)
 
     conn.commit()
 

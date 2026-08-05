@@ -2,7 +2,12 @@ PRAGMA foreign_keys = ON;
 
 CREATE TABLE IF NOT EXISTS worlds (
     id      INTEGER PRIMARY KEY,
-    name    TEXT NOT NULL
+    name    TEXT NOT NULL,
+    clock_minute INTEGER NOT NULL DEFAULT 0,
+    clock_hour   INTEGER NOT NULL DEFAULT 0,
+    clock_day    INTEGER NOT NULL DEFAULT 1,
+    clock_month  INTEGER NOT NULL DEFAULT 1,
+    clock_year   INTEGER NOT NULL DEFAULT 1
 );
 
 CREATE TABLE IF NOT EXISTS kingdoms (
@@ -10,7 +15,9 @@ CREATE TABLE IF NOT EXISTS kingdoms (
     world_id        INTEGER NOT NULL REFERENCES worlds(id),
     name            TEXT NOT NULL,
     capital_city_id INTEGER REFERENCES cities(id),
-    ruler_id        INTEGER REFERENCES npcs(id)
+    ruler_id        INTEGER REFERENCES npcs(id),
+    color           TEXT   -- hex color string, e.g. "#3F7FBF" -- used to
+                            -- tell kingdoms apart on the map
 );
 
 CREATE TABLE IF NOT EXISTS cities (
@@ -23,7 +30,9 @@ CREATE TABLE IF NOT EXISTS cities (
                                      -- Actual current population is always a
                                      -- query: SELECT COUNT(*) FROM npcs WHERE
                                      -- city_id = ? AND alive = 1
-    ruler_id    INTEGER REFERENCES npcs(id)
+    ruler_id    INTEGER REFERENCES npcs(id),
+    map_x       INTEGER NOT NULL DEFAULT 0,
+    map_y       INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS city_resources (
@@ -31,6 +40,16 @@ CREATE TABLE IF NOT EXISTS city_resources (
     resource_name   TEXT NOT NULL,
     amount          REAL NOT NULL DEFAULT 0,
     PRIMARY KEY (city_id, resource_name)
+);
+
+CREATE TABLE IF NOT EXISTS roads (
+    id           INTEGER PRIMARY KEY,
+    city_a_id    INTEGER NOT NULL REFERENCES cities(id),
+    city_b_id    INTEGER NOT NULL REFERENCES cities(id),
+    kind         TEXT NOT NULL,   -- "Capital Road" (within a kingdom) or "Trade Route" (between kingdom capitals)
+    distance     REAL NOT NULL,   -- straight-line distance between the two cities' map_x/map_y
+    travel_days  INTEGER NOT NULL,
+    UNIQUE (city_a_id, city_b_id)
 );
 
 CREATE TABLE IF NOT EXISTS buildings (
@@ -115,7 +134,9 @@ CREATE TABLE IF NOT EXISTS events (
     city_id     INTEGER REFERENCES cities(id),      -- set for city-scale events (weddings, raids, coronations)
     type        TEXT NOT NULL,
     description TEXT NOT NULL,
-    day         INTEGER   -- placeholder until the real clock exists
+    day         INTEGER   -- elapsed days since world start (Data.Simulation.clock);
+                            -- auto-filled by create_event() from the world's current
+                            -- clock position unless explicitly overridden
 );
 
 CREATE TABLE IF NOT EXISTS event_participants (

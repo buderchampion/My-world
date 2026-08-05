@@ -1,7 +1,8 @@
 import random
-from Data.Kingdoms.kingdom_generator import generate_kingdom
+from Data.Kingdoms.kingdom_generator import generate_kingdom, KINGDOM_COLORS
 from Data.Database.database import init_database, get_connection
 from Data.Database.repository import create_world, get_world_kingdoms
+from Data.Infrastructure.roads import generate_roads
 
 
 def generate_world():
@@ -14,12 +15,16 @@ def generate_world():
 
     number_of_kingdoms = random.randint(3, 6)
 
-    for _ in range(number_of_kingdoms):
-        generate_kingdom(conn, world["id"])
+    colors = random.sample(KINGDOM_COLORS, number_of_kingdoms)
+
+    for color in colors:
+        generate_kingdom(conn, world["id"], color)
 
     world["kingdoms"] = [
         {"id": k["id"], "name": k["name"]} for k in get_world_kingdoms(conn, world["id"])
     ]
+
+    generate_roads(conn, world["id"])
 
     conn.commit()
 

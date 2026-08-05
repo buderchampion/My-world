@@ -26,7 +26,7 @@ def generate_city_name():
     return random.choice(prefixes) + random.choice(suffixes)
 
 
-def generate_city(conn, kingdom_id, city_type):
+def generate_city(conn, kingdom_id, city_type, map_x=0, map_y=0):
 
     population_data = load_json(POPULATION)
 
@@ -35,7 +35,7 @@ def generate_city(conn, kingdom_id, city_type):
         population_data[city_type]["max"]
     )
 
-    city = create_city(conn, kingdom_id, generate_city_name(), city_type, population)
+    city = create_city(conn, kingdom_id, generate_city_name(), city_type, population, map_x, map_y)
 
     # Buildings are rolled first so employment can be checked against
     # their real capacity as NPCs are generated.

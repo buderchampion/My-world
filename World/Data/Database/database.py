@@ -31,5 +31,33 @@ def init_database():
     with open(SCHEMA_FILE, "r") as f:
         connection.executescript(f.read())
 
+    _add_missing_columns(connection, "worlds", {
+        "clock_minute": "INTEGER NOT NULL DEFAULT 0",
+        "clock_hour": "INTEGER NOT NULL DEFAULT 0",
+        "clock_day": "INTEGER NOT NULL DEFAULT 1",
+        "clock_month": "INTEGER NOT NULL DEFAULT 1",
+        "clock_year": "INTEGER NOT NULL DEFAULT 1",
+    })
+
+    _add_missing_columns(connection, "cities", {
+        "map_x": "INTEGER NOT NULL DEFAULT 0",
+        "map_y": "INTEGER NOT NULL DEFAULT 0",
+    })
+
     connection.commit()
     connection.close()
+
+
+def _add_missing_columns(connection, table, columns):
+    """
+    CREATE TABLE IF NOT EXISTS skips tables that already exist, so a
+    database created before a given column existed in schema.sql would
+    otherwise be missing it permanently. This adds any that aren't
+    there yet, on any table, without touching existing data.
+    """
+
+    existing_columns = {row["name"] for row in connection.execute(f"PRAGMA table_info({table})")}
+
+    for column, definition in columns.items():
+        if column not in existing_columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")

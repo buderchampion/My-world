@@ -45,6 +45,10 @@ def assign_city_ruler(conn, city):
 
     city["ruler"] = ruler["id"]
 
+    from Data.Events.events import coronation_event
+    coronation_event(conn, ruler, city)
+    conn.commit()
+
     return ruler
 
 

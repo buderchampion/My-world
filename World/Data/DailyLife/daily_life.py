@@ -91,7 +91,8 @@ def get_needs_effect(location_type):
     """
     Pure lookup -- returns the hunger/energy/social change a single
     time block spent at this location type would cause. Does not
-    apply it to anyone; that's for the real clock (Phase 14/15) to do.
+    apply it to anyone; that's for SimulationManager.on_hour() to do
+    once needs decay gets wired in (see Data.Simulation.simulation_manager).
     """
 
     effects = load_json(NEEDS_EFFECTS)

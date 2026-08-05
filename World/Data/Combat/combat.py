@@ -155,12 +155,18 @@ def resolve_raid(conn, city, bandit_camp):
 
             conn.commit()
 
-    return {
+    result = {
         "outcome": "attackers_win" if attackers_win else "defenders_win",
         "attack_power": attack_power,
         "defense_power": defense_power,
         "plunder": plunder
     }
+
+    from Data.Events.events import raid_event
+    raid_event(conn, city, result)
+    conn.commit()
+
+    return result
 
 
 def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities):
@@ -239,9 +245,15 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
             captured_city["kingdom"] = attacker_kingdom["id"]
 
-    return {
+    result = {
         "outcome": "attacker_wins" if attacker_wins else "defender_wins",
         "attack_power": attack_power,
         "defense_power": defense_power,
         "captured_city": captured_city["name"] if captured_city else None
     }
+
+    from Data.Events.events import war_event
+    war_event(conn, attacker_kingdom, defender_kingdom, result)
+    conn.commit()
+
+    return result
