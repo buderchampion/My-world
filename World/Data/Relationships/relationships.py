@@ -22,6 +22,13 @@ def roll_relationship():
 
 def link(conn, npc_a, npc_b):
 
+    # Already linked -- leave it alone. Without this check, calling
+    # form_relationships more than once (e.g. every month, once wired
+    # into the clock) would re-roll and could flip an existing
+    # friendship into a rivalry for no reason.
+    if str(npc_b["id"]) in npc_a.get("relationships", {}):
+        return
+
     rel_type, reputation = roll_relationship()
 
     set_relationship(conn, npc_a["id"], npc_b["id"], rel_type, reputation)

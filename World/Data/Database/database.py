@@ -42,6 +42,16 @@ def init_database():
     _add_missing_columns(connection, "cities", {
         "map_x": "INTEGER NOT NULL DEFAULT 0",
         "map_y": "INTEGER NOT NULL DEFAULT 0",
+        "wealth": "REAL NOT NULL DEFAULT 0",
+    })
+
+    _add_missing_columns(connection, "kingdoms", {
+        "treasury": "REAL NOT NULL DEFAULT 1000",
+        "tax_rate": "REAL NOT NULL DEFAULT 0.1",
+    })
+    
+    _add_missing_columns(connection, "buildings", {
+        "district_id": "INTEGER REFERENCES districts(id)",
     })
 
     connection.commit()

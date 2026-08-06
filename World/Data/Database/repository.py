@@ -337,6 +337,27 @@ def get_kingdom(conn, kingdom_id):
 
     return kingdom
 
+def get_kingdom_relation(conn, kingdom_a_id, kingdom_b_id):
+    
+    a_id, b_id = sorted((kingdom_a_id, kingdom_b_id))
+    
+    row = conn.execute(
+        "SELECT * FROM kingdom_relations WHERE kingdom_a_id = ? AND kingdom_b_id = ?", (a_id, b_id)
+    ).fetchone()
+    
+    if row is None:
+        return {"kingdom_a_id": a_id, "kingdom_b_id": b_id, "status": "Neutral", "peace_until_year": None}
+    
+    return dict(row)
+
+def set_kingdom_relation(conn, kingdom_a_id, kingdom_b_id, status, peace_until_year=None):
+    
+    a_id, b_id = sorted((kingdom_a_id, kingdom_b_id))
+    
+    conn.execute(
+        
+        (a_id, b_id, status, peace_until_year)
+    )
 
 def save_kingdom(conn, kingdom):
 
@@ -351,6 +372,55 @@ def save_kingdom(conn, kingdom):
 def set_city_kingdom(conn, city_id, kingdom_id):
 
     conn.execute("UPDATE cities SET kingdom_id = ? WHERE id = ?", (kingdom_id, city_id))
+
+
+def add_treasury(conn, kingdom_id, amount):
+    """Adds (or, with a negative amount, removes) gold from a kingdom's
+    treasury directly -- an atomic SQL increment, not a read-modify-
+    write, so this is safe even if kingdom['treasury'] in memory is
+    stale. Can go negative (e.g. representing crushing tribute); use
+    spend_treasury instead if you need an affordability check first."""
+
+    conn.execute("UPDATE kingdoms SET treasury = treasury + ? WHERE id = ?", (amount, kingdom_id))
+
+
+def spend_treasury(conn, kingdom_id, amount):
+    """Deducts amount from a kingdom's treasury only if it can afford
+    it. Returns True and deducts if so, False (no change) otherwise."""
+
+    row = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
+
+    if row is None or row["treasury"] < amount:
+        return False
+
+    conn.execute("UPDATE kingdoms SET treasury = treasury - ? WHERE id = ?", (amount, kingdom_id))
+
+    return True
+
+def add_city_wealth(conn, city_id, amount):
+    
+    conn.execute("UPDATE cities SET wealth = wealth + ? WHERE id = ?", (amount, city_id))
+    
+def spend_city_wealth(conn, city_id, amount):
+    
+    row = conn.execute("SELECT wealth FROM cities WHERE id = ?", (city_id,)).fetchone()
+    
+    if row is None or row["wealth"] < amount:
+        return False
+    
+    conn.execute("UPDATE cities SET wealth = wealth - ? WHERE id = ?", (amount, city_id))
+    
+    return True    
+
+def set_tax_rate(conn, kingdom_id, rate):
+    """Sets a kingdom's tax rate -- the fraction of each day's wages
+    collected into its treasury. Clamped to [0.0, 1.0]."""
+
+    rate = max(0.0, min(1.0, rate))
+
+    conn.execute("UPDATE kingdoms SET tax_rate = ? WHERE id = ?", (rate, kingdom_id))
+
+    return rate
 
 
 def create_world(conn, name):
@@ -435,6 +505,23 @@ def get_city_rival_pairs(conn, city_id):
 # Quests / Events
 # ---------------------------------------------------------------------------
 
+def has_open_quest(conn, **filters):
+    """
+    True if any quest with status='Available' matches every given
+    field=value filter, e.g. has_open_quest(conn, target_building_id=5)
+    or has_open_quest(conn, target_npc_a_id=3, target_npc_b_id=9).
+    """
+
+    conditions = " AND ".join(f"{key} = ?" for key in filters)
+    values = list(filters.values())
+
+    row = conn.execute(
+        f"SELECT 1 FROM quests WHERE status = 'Available' AND {conditions} LIMIT 1", values
+    ).fetchone()
+
+    return row is not None
+
+
 def create_quest(conn, **fields):
 
     columns = ", ".join(fields.keys())
@@ -511,6 +598,9 @@ def create_event(conn, event_type, description, participants=None, city_id=None,
 
     event = dict(row)
     event["participants"] = list(participants or [])
+
+    from Data.Simulation.logger import log_line
+    log_line("EVENT", f"[{event_type}] {description}")
 
     return event
 

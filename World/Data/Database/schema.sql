@@ -16,8 +16,21 @@ CREATE TABLE IF NOT EXISTS kingdoms (
     name            TEXT NOT NULL,
     capital_city_id INTEGER REFERENCES cities(id),
     ruler_id        INTEGER REFERENCES npcs(id),
-    color           TEXT   -- hex color string, e.g. "#3F7FBF" -- used to
+    color           TEXT,  -- hex color string, e.g. "#3F7FBF" -- used to
                             -- tell kingdoms apart on the map
+    treasury        REAL NOT NULL DEFAULT 1000,  -- shared kingdom-level gold,
+                            -- separate from individual NPCs' own gold
+    tax_rate        REAL NOT NULL DEFAULT 0.1    -- fraction of each day's
+                            -- wages collected into the treasury
+);
+
+CREATE TABLE IF NOT EXISTS kingdom_relations (
+    kingdom_a_id     INTEGER NOT NULL REFERENCES kingdoms(id),
+    kingdom_b_id     INTEGER NOT NULL REFERENCES kingdoms(id),
+    status           TEXT NOT NULL DEFAULT 'Neutral',
+    peace_until_year INTEGER,
+
+    PRIMARY KEY (kingdom_a_id, kingdom_b_id)
 );
 
 CREATE TABLE IF NOT EXISTS cities (
@@ -32,7 +45,8 @@ CREATE TABLE IF NOT EXISTS cities (
                                      -- city_id = ? AND alive = 1
     ruler_id    INTEGER REFERENCES npcs(id),
     map_x       INTEGER NOT NULL DEFAULT 0,
-    map_y       INTEGER NOT NULL DEFAULT 0
+    map_y       INTEGER NOT NULL DEFAULT 0,
+    wealth      REAL NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS city_resources (
@@ -60,9 +74,17 @@ CREATE TABLE IF NOT EXISTS buildings (
     category    TEXT NOT NULL,
     capacity    INTEGER NOT NULL,
     condition   INTEGER NOT NULL DEFAULT 100,
-    owner_id    INTEGER REFERENCES npcs(id)
+    owner_id    INTEGER REFERENCES npcs(id),
+    district_id INTEGER REFERENCES districts(id)
     -- No workers/residents columns -- "who works/lives here" is always
     -- SELECT id FROM npcs WHERE workplace_id = ? / home_id = ?
+);
+
+CREATE TABLE IF NOT EXISTS districts (
+    id          INTEGER PRIMARY KEY,
+    city_id     INTEGER NOT NULL REFERENCES cities(id),
+    name        TEXT NOT NULL,
+    category    TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS npcs (

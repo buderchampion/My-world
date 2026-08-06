@@ -26,6 +26,11 @@ LOSER_XP = 8
 # Fraction of a city's resource stockpile a successful raid steals.
 RAID_PLUNDER_FRACTION = 0.25
 
+# Fraction of the defender's CURRENT treasury balance that transfers
+# to the attacker when a city is successfully captured.
+WAR_TREASURY_SPOILS_FRACTION = 0.25
+
+PEACE_TREATY_YEARS = 3
 
 def load_json(file):
 
@@ -51,6 +56,8 @@ def apply_casualties(conn, participants, won):
 
     xp = WINNER_XP if won else LOSER_XP
 
+    deaths = []
+
     for npc in participants:
 
         roll = random.random()
@@ -65,6 +72,8 @@ def apply_casualties(conn, participants, won):
             # "remove from building" step. No building rows to touch.
             npc["workplace"] = None
             npc["home"] = None
+
+            deaths.append(npc)
 
         elif roll < death_chance + injury_chance:
 
@@ -88,6 +97,8 @@ def apply_casualties(conn, participants, won):
         save_npc(conn, npc)
 
     conn.commit()
+
+    return deaths
 
 
 def resolve_raid(conn, city, bandit_camp):
@@ -121,8 +132,12 @@ def resolve_raid(conn, city, bandit_camp):
 
     attackers_win = random.random() < (attack_power / total_power)
 
-    apply_casualties(conn, attackers, won=attackers_win)
-    apply_casualties(conn, defenders, won=not attackers_win)
+    attacker_deaths = apply_casualties(conn, attackers, won=attackers_win)
+    defender_deaths = apply_casualties(conn, defenders, won=not attackers_win)
+
+    from Data.Events.events import death_event
+    for npc in attacker_deaths + defender_deaths:
+        death_event(conn, npc, "Raid", city_id=city["id"])
 
     plunder = {}
 
@@ -208,26 +223,27 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
     attacker_wins = random.random() < (attack_power / total_power)
 
-    apply_casualties(conn, attacker_military, won=attacker_wins)
-    apply_casualties(conn, defender_military, won=not attacker_wins)
+    attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins)
+    defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins)
+
+    from Data.Events.events import death_event
+    for npc in attacker_deaths:
+        death_event(conn, npc, "War", kingdom_id=attacker_kingdom["id"])
+    for npc in defender_deaths:
+        death_event(conn, npc, "War", kingdom_id=defender_kingdom["id"])
 
     captured_city = None
+    spoils = 0
 
     if attacker_wins:
 
-        from Data.Economy.economy import get_price
+        from Data.Economy.economy import total_resource_value
 
         capturable = [c for c in defender_cities if c["type"] != "Capital"]
 
         if capturable:
 
-            def city_value(city):
-                return sum(
-                    amount * get_price(resource, city)
-                    for resource, amount in city.get("resources", {}).items()
-                )
-
-            capturable.sort(key=city_value, reverse=True)
+            capturable.sort(key=total_resource_value, reverse=True)
 
             captured_city = capturable[0]
 
@@ -245,11 +261,35 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
             captured_city["kingdom"] = attacker_kingdom["id"]
 
+            from Data.Database.repository import spend_treasury, add_treasury
+
+            defender_row = conn.execute(
+                "SELECT treasury FROM kingdoms WHERE id = ?", (defender_kingdom["id"],)
+            ).fetchone()
+            spoils = round(defender_row["treasury"] * WAR_TREASURY_SPOILS_FRACTION, 2)
+
+            if spoils > 0:
+                spend_treasury(conn, defender_kingdom["id"], spoils)
+                add_treasury(conn, attacker_kingdom["id"], spoils)
+                
+            from Data.Database.repository import set_kingdom_relation
+            
+            current_year_row = conn.execute(
+                "SELECT clock_year FROM worlds WHERE if = ?", (attacker_kingdom["world_id"],)
+            ).fetchone()
+            current_year = current_year_row["clock_year"] if current_year_row else 1
+            
+            set_kingdom_relation(
+                conn, attacker_kingdom["id"], defender_kingdom["id"],
+                "Peace Treaty", peace_until_year=current_year + PEACE_TREATY_YEARS
+            )
+
     result = {
         "outcome": "attacker_wins" if attacker_wins else "defender_wins",
         "attack_power": attack_power,
         "defense_power": defense_power,
-        "captured_city": captured_city["name"] if captured_city else None
+        "captured_city": captured_city["name"] if captured_city else None,
+        "treasury_spoils": spoils
     }
 
     from Data.Events.events import war_event

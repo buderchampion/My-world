@@ -14,6 +14,8 @@ from Data.World.world_generator import generate_world
 from Data.Simulation.simulation_manager import run_realtime
 from Data.Infrastructure.roads import generate_roads
 from Data.Kingdoms.kingdom_generator import backfill_city_positions
+from Data.Cities.districts import ensure_districts_for_city
+from Data.Database.repository import get_world_kingdoms, get_kingdom_cities
 
 # 1.0 = 1 real second passes per simulated minute (a full simulated day
 # takes ~24 real minutes). Raise this to run time faster.
@@ -38,6 +40,13 @@ def get_or_create_world():
         created = generate_roads(connection, world["id"])
         if created:
             print(f"  (backfilled {len(created)} roads onto this world -- it predates the road network)")
+        
+        districts_created = 0
+        for kingdom in get_world_kingdoms(connection, world["id"]):
+            for city in get_kingdom_cities(connection, kingdom["id"]):
+                districts_created += len(ensure_districts_for_city(connection, city["id"]))
+        if districts_created:
+            print(f"  (backfilled {districts_created} districts onto this world's cities)")
 
         connection.commit()
         connection.close()
@@ -64,12 +73,16 @@ def main():
     print(f"Starting simulation for '{world['name']}' at {SIM_MINUTES_PER_REAL_SECOND} sim-minute(s) per real second.")
     print("Press Ctrl+C to stop -- the clock's current position is saved after every tick, so it's safe to stop any time.")
 
+    from Data.Simulation.logger import log_line
+    log_line("SESSION", f"Started -- world '{world['name']}' (id {world['id']}), {SIM_MINUTES_PER_REAL_SECOND} sim-min/real-sec")
+
     connection = get_connection()
 
     try:
         run_realtime(connection, world["id"], sim_minutes_per_real_second=SIM_MINUTES_PER_REAL_SECOND, on_tick=on_tick)
     except KeyboardInterrupt:
         print("\nSimulation stopped. Run this again to resume from where it left off.")
+        log_line("SESSION", "Stopped (Ctrl+C)")
     finally:
         connection.close()
 

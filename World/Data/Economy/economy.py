@@ -138,6 +138,13 @@ def get_price(resource, city):
 
     return round(base_price * multiplier, 2)
 
+def total_resource_value(city):
+    
+    return sum(
+        amount * get_price(resource, city)
+        for resource, amount in city.get("resources", {}).items()
+    )
+
 def classify_supply(resource, city):
 
     resource_types = load_json(RESOURCE_TYPES)

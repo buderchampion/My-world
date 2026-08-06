@@ -64,5 +64,9 @@ def generate_buildings(conn, city_id, city_type, population):
         conn.commit()
 
         buildings.append(building)
+        
+    from Data.Cities.districts import ensure_districts_for_city
+    ensure_districts_for_city(conn, city_id)
+    conn.commit()
 
     return buildings

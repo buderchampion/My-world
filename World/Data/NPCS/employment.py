@@ -52,14 +52,13 @@ def add_skill_xp(skill, amount):
         skill["level"] += 1
 
 
-def apply_workday(npc):
+def apply_workday(npc, tax_rate: float = 0.0) -> float:
     """
-    Applies a single day of work to an npc: adds their wage to gold, and
-    grants xp to every skill their class gave them (if any), scaled by
-    their city's pay tier.
-
-    No day/tick loop calls this yet -- that's a later simulation phase.
-    This is just the per-day calculation, ready for that loop to use.
+    Applies a single day of work to an npc: adds their after-tax wage
+    to gold, and grants xp to every skill their class gave them (if
+    any), scaled by their city's pay tier. Returns the tax amount
+    collected (0 if tax_rate is 0, the default), so a caller can route
+    it to the kingdom's treasury.
     """
 
     scaling = load_json(CITY_PAY_SCALING)
@@ -70,9 +69,12 @@ def apply_workday(npc):
 
     wage = get_wage(npc["profession"], city_type)
 
-    npc["gold"] = round(npc.get("gold", 0) + wage, 2)
+    tax = round(wage * tax_rate, 2)
+    take_home = round(wage - tax, 2)
+
+    npc["gold"] = round(npc.get("gold", 0) + take_home, 2)
 
     for skill in npc.get("skills", {}).values():
         add_skill_xp(skill, round(SKILL_XP_PER_DAY * xp_multiplier))
 
-    return npc
+    return tax

@@ -85,17 +85,21 @@ def generate_quests_for_city(conn, city, nearby_cities=None):
     Scans this city's current state -- Bandit Camp threats, resource
     shortages (against nearby_cities' surpluses), and NPC rivalries --
     and generates whatever quests make sense right now. Returns the new
-    quests. Not called automatically.
+    quests. Skips anything that already has a matching open quest, so
+    this is safe to call repeatedly (e.g. from an automatic tick)
+    without spawning duplicates for the same unresolved situation.
     """
 
     from Data.Economy.economy import classify_supply
+    from Data.Database.repository import has_open_quest
 
     quests = []
 
     for building in get_city_buildings(conn, city["id"]):
 
         if building["type"] == "Bandit Camp" and building["workers"]:
-            quests.append(generate_bounty_quest(conn, city, building))
+            if not has_open_quest(conn, target_building_id=building["id"]):
+                quests.append(generate_bounty_quest(conn, city, building))
 
     if nearby_cities:
 
@@ -109,12 +113,17 @@ def generate_quests_for_city(conn, city, nearby_cities=None):
                 None
             )
 
-            if surplus_city:
+            if surplus_city and not has_open_quest(
+                conn, from_city_id=surplus_city["id"], to_city_id=city["id"], resource=resource
+            ):
                 quests.append(generate_supply_quest(conn, city, surplus_city, resource))
 
     rival_pairs = get_city_rival_pairs(conn, city["id"])
 
     for npc_a_id, npc_b_id, severity in rival_pairs[:MAX_DIPLOMACY_QUESTS]:
+
+        if has_open_quest(conn, target_npc_a_id=npc_a_id, target_npc_b_id=npc_b_id):
+            continue
 
         npc_a = get_npc(conn, npc_a_id)
         npc_b = get_npc(conn, npc_b_id)

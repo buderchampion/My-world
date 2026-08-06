@@ -11,6 +11,20 @@ def marriage_event(conn, npc_a, npc_b):
     )
 
 
+def death_event(conn, npc, cause, city_id=None, kingdom_id=None):
+
+    from Data.Database.repository import create_event
+
+    return create_event(
+        conn,
+        "Death",
+        f"{npc['name']} died ({cause}).",
+        participants=[npc["id"]],
+        city_id=city_id if city_id is not None else npc.get("city_id"),
+        kingdom_id=kingdom_id
+    )
+
+
 def coronation_event(conn, ruler, city):
 
     from Data.Database.repository import create_event
@@ -47,7 +61,11 @@ def war_event(conn, attacker_kingdom, defender_kingdom, result):
         description = f"{attacker_kingdom['name']} defeated {defender_kingdom['name']} in battle"
 
         if result.get("captured_city"):
-            description += f" and captured {result['captured_city']}."
+            description += f" and captured {result['captured_city']}"
+            if result.get("treasury_spoils"):
+                description += f", seizing {result['treasury_spoils']:g} gold in spoils."
+            else:
+                description += "."
         else:
             description += "."
 
