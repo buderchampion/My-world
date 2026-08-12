@@ -69,16 +69,16 @@ class SimulationManager:
 
     def on_day(self) -> None:
         from Data.NPCS.employment import apply_workday
-        from Data.Economy.economy import simulate_city_economy_day, simulate_kingdom_trade_day, total_resource_value
+        from Data.NPCS.healing import apply_healing, city_has_active_temple
+        from Data.Economy.economy import (
+            simulate_city_economy_day, simulate_kingdom_trade_day, simulate_cross_kingdom_trade_day,
+            total_resource_value
+        )
         from Data.Combat.combat import resolve_raid
+        from Data.Government.military import apply_military_upkeep, MILITARY_PROFESSIONS
         from Data.Database.repository import add_treasury, add_city_wealth
         import random
         
-        # Chance, per city per day, that a city's own Bandit Camp (if
-        # it has one, with living occupants) actually raids that day --
-        # not a certainty every tick, so raids feel occasional rather
-        # than relentless. ~78% chance of at least one raid per camp
-        # over a 30-day month at this rate.
         RAID_CHANCE_PER_DAY = 0.05
         CITY_WEALTH_MARKET_FEE_RATE = 0.02
 
@@ -86,6 +86,7 @@ class SimulationManager:
 
             cities = get_kingdom_cities(self.conn, kingdom["id"])
             tax_collected = 0.0
+            military_npcs = []
 
             for city in cities:
 
@@ -95,9 +96,26 @@ class SimulationManager:
                 if market_revenue > 0:
                     add_city_wealth(self.conn, city["id"], market_revenue)
 
+                has_temple = city_has_active_temple(city)
+
                 for npc in get_city_npcs(self.conn, city["id"]):
-                    if npc["alive"] and npc["profession"] != "Unemployed":
+
+                    if not npc["alive"]:
+                        continue
+
+                    changed = False
+
+                    if npc["profession"] != "Unemployed":
                         tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
+                        changed = True
+
+                    if apply_healing(npc, has_temple):
+                        changed = True
+
+                    if npc["profession"] in MILITARY_PROFESSIONS:
+                        military_npcs.append(npc)
+
+                    if changed:
                         save_npc(self.conn, npc)
 
                 for building in city.get("buildings", []):
@@ -108,10 +126,16 @@ class SimulationManager:
             if tax_collected > 0:
                 add_treasury(self.conn, kingdom["id"], round(tax_collected, 2))
 
+            apply_military_upkeep(self.conn, kingdom, military_npcs)
+
             simulate_kingdom_trade_day(cities)
 
             for city in cities:
                 save_city(self.conn, city)
+
+        simulate_cross_kingdom_trade_day(self.conn, self.world_id)
+        from Data.Infrastructure.caravans import advance_caravans
+        advance_caravans(self.conn, self.world_id)
 
         self.conn.commit()
 

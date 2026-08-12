@@ -1,12 +1,14 @@
 {
     "Farmer": "Farm",
     "Fisherman": "Fishing Dock",
-    "Baker": "Tavern",
+    "Baker": "Bakery",
+    "Miller": "Mill",
     "Blacksmith": "Blacksmith Shop",
     "Carpenter": "Carpenter Workshop",
     "Merchant": "Market",
     "Tailor": "Tailor Shop",
     "Miner": "Mine",
+    "Quarrier": "Quarry",
     "Hunter": "Hunter Lodge",
     "innkeeper": "Tavern",
 

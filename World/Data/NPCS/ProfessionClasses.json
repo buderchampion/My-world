@@ -24,6 +24,14 @@
         ]
     },
 
+    "Miller": {
+        "classes": [
+            "Druid",
+            "Monk",
+            "None"
+        ]
+    },
+
     "Blacksmith": {
         "classes": [
             "Fighter",
@@ -57,6 +65,15 @@
     },
 
     "Miner": {
+        "classes": [
+            "Barbarian",
+            "Fighter",
+            "Monk",
+            "None"
+        ]
+    },
+
+    "Quarrier": {
         "classes": [
             "Barbarian",
             "Fighter",

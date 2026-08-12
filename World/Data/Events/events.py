@@ -51,6 +51,16 @@ def raid_event(conn, city, result):
 
     return create_event(conn, "Raid", description, city_id=city["id"])
 
+def caravan_raided_event(conn, caravan, origin_name, destination_name):
+
+    from Data.Database.repository import create_event
+
+    description = (
+        f"A caravan carrying {caravan['amount']:g} {caravan['resource']} from "
+        f"{origin_name} to {destination_name} was lost to raiders."
+    )
+
+    return create_event(conn, "Caravan Raided", description, kingdom_id=caravan["buyer_kingdom_id"])
 
 def war_event(conn, attacker_kingdom, defender_kingdom, result):
 

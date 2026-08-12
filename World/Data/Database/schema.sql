@@ -33,6 +33,18 @@ CREATE TABLE IF NOT EXISTS kingdom_relations (
     PRIMARY KEY (kingdom_a_id, kingdom_b_id)
 );
 
+CREATE TABLE IF NOT EXISTS caravans (
+    id                  INTEGER PRIMARY KEY,
+    origin_city_id      INTEGER NOT NULL REFERENCES cities(id),
+    destination_city_id INTEGER NOT NULL REFERENCES cities(id),
+    resource            TEXT NOT NULL,
+    amount              REAL NOT NULL,
+    buyer_kingdom_id    INTEGER NOT NULL REFERENCES kingdoms(id),
+    seller_kingdom_id   INTEGER NOT NULL REFERENCES kingdoms(id),
+    days_remaining      INTEGER NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'En Route'  -- En Route, Delivered, Raided
+);
+
 CREATE TABLE IF NOT EXISTS cities (
     id          INTEGER PRIMARY KEY,
     kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),

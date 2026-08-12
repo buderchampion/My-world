@@ -3,11 +3,13 @@
         "Farmer",
         "Fisherman",
         "Baker",
+        "Miller",
         "Blacksmith",
         "Carpenter",
         "Merchant",
         "Tailor",
         "Miner",
+        "Quarrier",
         "Hunter",
         "innkeeper"
     ],

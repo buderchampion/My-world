@@ -2,11 +2,13 @@
     "Farmer": 5,
     "Fisherman": 5,
     "Baker": 6,
+    "Miller": 6,
     "Blacksmith": 8,
     "Carpenter": 7,
     "Merchant": 10,
     "Tailor": 6,
     "Miner": 7,
+    "Quarrier": 7,
     "Hunter": 6,
     "innkeeper": 6,
 

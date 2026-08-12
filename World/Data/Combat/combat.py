@@ -271,18 +271,18 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
             if spoils > 0:
                 spend_treasury(conn, defender_kingdom["id"], spoils)
                 add_treasury(conn, attacker_kingdom["id"], spoils)
-                
-            from Data.Database.repository import set_kingdom_relation
-            
-            current_year_row = conn.execute(
-                "SELECT clock_year FROM worlds WHERE if = ?", (attacker_kingdom["world_id"],)
-            ).fetchone()
-            current_year = current_year_row["clock_year"] if current_year_row else 1
-            
-            set_kingdom_relation(
-                conn, attacker_kingdom["id"], defender_kingdom["id"],
-                "Peace Treaty", peace_until_year=current_year + PEACE_TREATY_YEARS
-            )
+
+    from Data.Database.repository import set_kingdom_relation
+
+    current_year_row = conn.execute(
+        "SELECT clock_year FROM worlds WHERE id = ?", (attacker_kingdom["world_id"],)
+    ).fetchone()
+    current_year = current_year_row["clock_year"] if current_year_row else 1
+
+    set_kingdom_relation(
+        conn, attacker_kingdom["id"], defender_kingdom["id"],
+        "Peace Treaty", peace_until_year=current_year + PEACE_TREATY_YEARS
+    )
 
     result = {
         "outcome": "attacker_wins" if attacker_wins else "defender_wins",

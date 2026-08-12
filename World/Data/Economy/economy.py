@@ -60,6 +60,14 @@ def produce_resources(city):
     """
     One day of production: every worker in a producing building adds
     that building type's output to the city's resource stockpile.
+
+    Some buildings (a production CHAIN's later stages -- e.g. a Mill
+    turning Grain into Flour) also require an input resource. If the
+    city doesn't have enough of that input on hand, output scales down
+    proportionally to however much input is actually available, rather
+    than producing from nothing or crashing. Buildings with no
+    input_resource in their rule are completely unaffected by this --
+    same behavior as before this existed.
     """
 
     building_production = load_json(BUILDING_PRODUCTION)
@@ -74,15 +82,43 @@ def produce_resources(city):
         if not rule:
             continue
 
-        amount = len(building["workers"]) * rule["amount_per_worker"]
+        workers = len(building["workers"])
 
+        if workers <= 0:
+            continue
+
+        desired_amount = workers * rule["amount_per_worker"]
         resource = rule["resource"]
 
+        input_resource = rule.get("input_resource")
+
+        if input_resource:
+
+            input_needed = workers * rule.get("input_per_worker", 0)
+
+            if input_needed <= 0:
+                continue
+
+            available_input = city["resources"].get(input_resource, 0)
+            fulfillment = min(1.0, available_input / input_needed)
+
+            if fulfillment <= 0:
+                continue
+
+            actual_amount = round(desired_amount * fulfillment, 2)
+            input_consumed = round(input_needed * fulfillment, 2)
+
+            city["resources"][input_resource] = round(available_input - input_consumed, 2)
+
+        else:
+            actual_amount = desired_amount
+
         city["resources"][resource] = round(
-            city["resources"].get(resource, 0) + amount, 2
+            city["resources"].get(resource, 0) + actual_amount, 2
         )
 
     return city
+
 
 def consume_resources(city):
     """
@@ -106,6 +142,7 @@ def consume_resources(city):
 
     return city
 
+
 def simulate_city_economy_day(city):
     """
     Applies one day of production followed by one day of consumption.
@@ -117,6 +154,7 @@ def simulate_city_economy_day(city):
     consume_resources(city)
 
     return city
+
 
 def get_price(resource, city):
 
@@ -138,12 +176,14 @@ def get_price(resource, city):
 
     return round(base_price * multiplier, 2)
 
+
 def total_resource_value(city):
-    
+
     return sum(
         amount * get_price(resource, city)
         for resource, amount in city.get("resources", {}).items()
     )
+
 
 def classify_supply(resource, city):
 
@@ -160,6 +200,7 @@ def classify_supply(resource, city):
         return "Shortage"
 
     return "Balanced"
+
 
 # Fraction of a city's outstanding shortage that can be resolved by
 # trade in a single day. Using a fraction instead of a flat number
@@ -223,12 +264,14 @@ def simulate_kingdom_trade_day(cities, trade_fraction=DEFAULT_TRADE_FRACTION):
                 city["resources"].get(resource, 0) + share, 2
             )
 
-            trade_log.append({
-                "resource": resource,
-                "direction": "import",
-                "city": city["name"],
-                "amount": share
-            })
+            trade_log.append(
+                {
+                    "resource": resource,
+                    "direction": "import",
+                    "city": city["name"],
+                    "amount": share,
+                }
+            )
 
         for city, available in surplus_cities:
 
@@ -238,11 +281,162 @@ def simulate_kingdom_trade_day(cities, trade_fraction=DEFAULT_TRADE_FRACTION):
                 city["resources"].get(resource, 0) - share, 2
             )
 
-            trade_log.append({
-                "resource": resource,
-                "direction": "export",
-                "city": city["name"],
-                "amount": share
-            })
+            trade_log.append(
+                {
+                    "resource": resource,
+                    "direction": "export",
+                    "city": city["name"],
+                    "amount": share,
+                }
+            )
+
+
+# How much of a kingdom's outstanding shortage cross-kingdom trade can
+# resolve in a single day -- deliberately smaller than the within-
+# kingdom trade_fraction (0.5), since this only kicks in for whatever
+# shortage internal redistribution couldn't already fix, and involves
+# real gold rather than free barter.
+DEFAULT_CROSS_KINGDOM_TRADE_FRACTION = 0.3
+
+
+def simulate_cross_kingdom_trade_day(
+    conn, world_id, trade_fraction=DEFAULT_CROSS_KINGDOM_TRADE_FRACTION
+):
+    """
+    One day of inter-KINGDOM trade: after each kingdom's own internal
+    trade has already run, any kingdom still sitting on an aggregate
+    shortage of a resource can buy it from another kingdom with an
+    aggregate surplus, paying real gold from its treasury rather than
+    the free barter that within-kingdom trade uses. Goods move through
+    each kingdom's capital city, the natural hub given the Trade Route
+    road network already connects capitals directly.
+
+    A seller's available surplus is tracked and depleted as sales
+    happen within this same call, so multiple buyers competing for the
+    same seller's stock in one day can't collectively over-buy it.
+    Every purchase re-checks the buyer's CURRENT treasury balance
+    directly from the database (not a possibly-stale in-memory value),
+    so a kingdom that spends across several resources in the same day
+    can never go into debt.
+
+    Returns a log of every trade that happened, mostly for testing.
+    """
+
+    from Data.Database.repository import (
+        get_world_kingdoms,
+        get_kingdom_cities,
+        get_city,
+        save_city,
+        spend_treasury,
+        add_treasury,
+    )
+
+    resource_types = load_json(RESOURCE_TYPES)
+    consumption_rates = load_json(CONSUMPTION_RATES)
+
+    kingdoms = get_world_kingdoms(conn, world_id)
+    cities_by_kingdom = {k["id"]: get_kingdom_cities(conn, k["id"]) for k in kingdoms}
+
+    trade_log = []
+
+    for resource in resource_types:
+
+        surplus_entries = (
+            []
+        )  # [kingdom, remaining_surplus] -- remaining_surplus shrinks as sales happen
+        shortage_entries = []  # [kingdom, remaining_need]
+
+        for kingdom in kingdoms:
+
+            cities = cities_by_kingdom[kingdom["id"]]
+
+            total_stock = sum(c.get("resources", {}).get(resource, 0) for c in cities)
+            total_target = sum(
+                get_target_stock(resource, c, resource_types, consumption_rates)
+                for c in cities
+            )
+
+            if total_target <= 0:
+                continue
+
+            if total_stock >= total_target * SURPLUS_THRESHOLD:
+                surplus_entries.append([kingdom, total_stock - total_target])
+            elif total_stock <= total_target * SHORTAGE_THRESHOLD:
+                shortage_entries.append([kingdom, total_target - total_stock])
+
+        if not surplus_entries or not shortage_entries:
+            continue
+
+        for buyer_entry in shortage_entries:
+
+            buyer_kingdom, need = buyer_entry
+
+            buyer_capital_id = buyer_kingdom.get("capital")
+            if buyer_capital_id is None:
+                continue
+
+            surplus_entries.sort(key=lambda entry: -entry[1])
+
+            for seller_entry in surplus_entries:
+
+                if need <= 0:
+                    break
+
+                seller_kingdom, available = seller_entry
+
+                if available <= 0 or seller_kingdom["id"] == buyer_kingdom["id"]:
+                    continue
+
+                seller_capital_id = seller_kingdom.get("capital")
+                if seller_capital_id is None:
+                    continue
+                seller_capital = get_city(conn, seller_capital_id)
+
+                amount = round(min(need, available) * trade_fraction, 2)
+                if amount <= 0:
+                    continue
+
+                price_per_unit = get_price(resource, seller_capital)
+                if price_per_unit <= 0:
+                    continue
+
+                current_treasury = conn.execute(
+                    "SELECT treasury FROM kingdoms WHERE id = ?", (buyer_kingdom["id"],)
+                ).fetchone()["treasury"]
+
+                affordable_amount = round(current_treasury / price_per_unit, 2)
+                amount = min(amount, affordable_amount)
+
+                if amount <= 0:
+                    continue
+
+                cost = round(amount * price_per_unit, 2)
+
+                if cost <= 0 or not spend_treasury(conn, buyer_kingdom["id"], cost):
+                    continue
+
+                add_treasury(conn, seller_kingdom["id"], cost)
+
+                seller_capital["resources"][resource] = round(seller_capital["resources"].get(resource, 0) - amount, 2)
+                save_city(conn, seller_capital)
+
+                from Data.Infrastructure.caravans import dispatch_caravan
+                dispatch_caravan(
+                    conn, seller_capital["id"], buyer_capital_id, resource, amount,
+                    buyer_kingdom["id"], seller_kingdom["id"]
+                )
+
+                seller_entry[1] -= amount
+                need -= amount
+
+                trade_log.append(
+                    {
+                        "resource": resource,
+                        "amount": amount,
+                        "cost": cost,
+                        "buyer": buyer_kingdom["name"],
+                        "seller": seller_kingdom["name"],
+                    }
+                )
 
     return trade_log

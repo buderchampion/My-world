@@ -355,7 +355,12 @@ def set_kingdom_relation(conn, kingdom_a_id, kingdom_b_id, status, peace_until_y
     a_id, b_id = sorted((kingdom_a_id, kingdom_b_id))
     
     conn.execute(
-        
+        """
+        INSERT INTO kingdom_relations (kingdom_a_id, kingdom_b_id, status, peace_until_year)
+        VALUES (?, ?, ?, ?)
+        ON CONFLICT(kingdom_a_id, kingdom_b_id) DO UPDATE SET
+            status = excluded.status, peace_until_year = excluded.peace_until_year
+        """,
         (a_id, b_id, status, peace_until_year)
     )
 
@@ -373,7 +378,47 @@ def set_city_kingdom(conn, city_id, kingdom_id):
 
     conn.execute("UPDATE cities SET kingdom_id = ? WHERE id = ?", (kingdom_id, city_id))
 
+def create_caravan(conn, origin_city_id, destination_city_id, resource, amount,
+                    buyer_kingdom_id, seller_kingdom_id, days_remaining):
 
+    cursor = conn.execute(
+        """
+        INSERT INTO caravans
+            (origin_city_id, destination_city_id, resource, amount,
+             buyer_kingdom_id, seller_kingdom_id, days_remaining)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
+        """,
+        (origin_city_id, destination_city_id, resource, amount,
+         buyer_kingdom_id, seller_kingdom_id, days_remaining)
+    )
+
+    return dict(conn.execute("SELECT * FROM caravans WHERE id = ?", (cursor.lastrowid,)).fetchone())
+
+
+def get_active_caravans(conn, world_id):
+    """Every caravan currently 'En Route' whose buyer belongs to this
+    world (a caravan's buyer and seller are always in the same world,
+    so checking one side is enough)."""
+
+    rows = conn.execute(
+        """
+        SELECT c.* FROM caravans c
+        JOIN kingdoms k ON k.id = c.buyer_kingdom_id
+        WHERE k.world_id = ? AND c.status = 'En Route'
+        """,
+        (world_id,)
+    ).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+def set_caravan_status(conn, caravan_id, status):
+    conn.execute("UPDATE caravans SET status = ? WHERE id = ?", (status, caravan_id))
+
+
+def decrement_caravan_days(conn, caravan_id, days_remaining):
+    conn.execute("UPDATE caravans SET days_remaining = ? WHERE id = ?", (days_remaining, caravan_id))
+    
 def add_treasury(conn, kingdom_id, amount):
     """Adds (or, with a negative amount, removes) gold from a kingdom's
     treasury directly -- an atomic SQL increment, not a read-modify-
