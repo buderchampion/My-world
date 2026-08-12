@@ -15,6 +15,7 @@
     "Bakery":             {"category": "Civillian",   "capacity": 4},
     "Fishing Dock":       {"category": "Civillian",   "capacity": 8},
     "Mine":               {"category": "Civillian",   "capacity": 8},
+    "Smelter":            {"category": "Civillian",   "capacity": 6},
     "Quarry":             {"category": "Civillian",   "capacity": 8},
     "Hunter Lodge":       {"category": "Civillian",   "capacity": 6},
     "Thieves Den":        {"category": "Criminal",    "capacity": 6},

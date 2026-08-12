@@ -55,26 +55,32 @@ def random_point_near(center_x, center_y, max_radius):
     return int(x), int(y)
 
 
+BIAS_RANGE = (0.5, 2.0)
+
+
 def generate_kingdom(conn, world_id, color="#808080"):
 
     kingdom = create_kingdom(conn, world_id, generate_kingdom_name(), color)
+
+    from Data.Buildings.building_generator import CHAIN_CATEGORIES
+    biases = {category: random.uniform(*BIAS_RANGE) for category in CHAIN_CATEGORIES}
 
     center_x = random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN)
     center_y = random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN)
 
     capital_x, capital_y = random_point_near(center_x, center_y, CAPITAL_JITTER)
 
-    capital = generate_city(conn, kingdom["id"], "Capital", capital_x, capital_y)
+    capital = generate_city(conn, kingdom["id"], "Capital", capital_x, capital_y, biases)
 
     kingdom["capital"] = capital["id"]
 
     for _ in range(random.randint(2, 5)):
         x, y = random_point_near(center_x, center_y, CITY_SPREAD_RADIUS)
-        generate_city(conn, kingdom["id"], "Town", x, y)
+        generate_city(conn, kingdom["id"], "Town", x, y, biases)
 
     for _ in range(random.randint(5, 10)):
         x, y = random_point_near(center_x, center_y, CITY_SPREAD_RADIUS)
-        generate_city(conn, kingdom["id"], "Village", x, y)
+        generate_city(conn, kingdom["id"], "Village", x, y, biases)
 
     save_kingdom(conn, kingdom)
 

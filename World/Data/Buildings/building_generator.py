@@ -15,8 +15,14 @@ def load_json(file):
     with open(file, "r") as f:
         return json.load(f)
 
+CHAIN_CATEGORIES = {
+     "agricultural": {"Farm", "Mill", "Bakery"},
+     "industrial": {"Mine", "Smelter", "Blacksmith Shop"},
+ }
 
-def generate_buildings(conn, city_id, city_type, population):
+def generate_buildings(conn, city_id, city_type, population, biases=None):
+
+    biases = biases or {}
 
     building_types_data = load_json(BUILDING_TYPES)
     kits = load_json(CITY_BUILDING_KITS)
@@ -30,6 +36,11 @@ def generate_buildings(conn, city_id, city_type, population):
         min_count, max_count = bounds
 
         count = random.randint(min_count, max_count)
+
+        for category, building_types in CHAIN_CATEGORIES.items():
+            if building_type in building_types:
+                count = max(0, round(count * biases.get(category, 1.0)))
+                break
 
         for _ in range(count):
 
@@ -107,48 +118,48 @@ def ensure_production_chain_buildings(conn, city_id, city_type):
             conn.execute("UPDATE buildings SET name = ? WHERE id = ?", (building["name"], building["id"]))
             
             created.append(building)
-            
-        conn.commit()
-        
-        if not created:
-            return[]
-        
-        from Data.Cities.districts import ensure_districts_for_city 
-        ensure_districts_for_city(conn, city_id)
-        conn.commit()
-        
-        npcs = get_city_npcs(conn, city_id)
-        
-        new_bakeries = [b for b in created if b["type"] == "Bakery"]
-        new_mills = [b for b in created if b["type"] == "Mill"]
-        
-        if new_bakeries:
-            
-            bakery_capacity = building_types_data["Bakery"]["capacity"]
-            bakery_slots = []
-            for bakery in new_bakeries:
-                bakery_slots.extend([bakery["id"]] * bakery_capacity)
-                
-            existing_bakers = [n for n in npcs if n["alive"] and n["profession"] == "Baker"]
-            
-            for npc, slot in zip(existing_bakers, bakery_slots):
-                npc["workplace"] = slot
-                save_npc(conn, npc)
-                
-        if new_mills:
-            
-            mill_capacity = building_types_data["Mill"]["capacity"]
-            mill_slots = []
-            for mill in new_mills:
-                mill_slots.extend([mill["id"]] * mill_capacity)
-                
-            unemployed = [n for n in npcs if n["alive"] and n["profession"] == "Unemployed"]
-            
-            for npc, slot in zip(unemployed, mill_slots):
-                npc["profession"] = "Miller"
-                npc["workplace"] = slot
-                save_npc(conn, npc)
-                
-        conn.commit()
-        
-        return created
+
+    conn.commit()
+
+    if not created:
+        return []
+
+    from Data.Cities.districts import ensure_districts_for_city
+    ensure_districts_for_city(conn, city_id)
+    conn.commit()
+
+    npcs = get_city_npcs(conn, city_id)
+
+    new_bakeries = [b for b in created if b["type"] == "Bakery"]
+    new_mills = [b for b in created if b["type"] == "Mill"]
+
+    if new_bakeries:
+
+        bakery_capacity = building_types_data["Bakery"]["capacity"]
+        bakery_slots = []
+        for bakery in new_bakeries:
+            bakery_slots.extend([bakery["id"]] * bakery_capacity)
+
+        existing_bakers = [n for n in npcs if n["alive"] and n["profession"] == "Baker"]
+
+        for npc, slot in zip(existing_bakers, bakery_slots):
+            npc["workplace"] = slot
+            save_npc(conn, npc)
+
+    if new_mills:
+
+        mill_capacity = building_types_data["Mill"]["capacity"]
+        mill_slots = []
+        for mill in new_mills:
+            mill_slots.extend([mill["id"]] * mill_capacity)
+
+        unemployed = [n for n in npcs if n["alive"] and n["profession"] == "Unemployed"]
+
+        for npc, slot in zip(unemployed, mill_slots):
+            npc["profession"] = "Miller"
+            npc["workplace"] = slot
+            save_npc(conn, npc)
+
+    conn.commit()
+
+    return created
