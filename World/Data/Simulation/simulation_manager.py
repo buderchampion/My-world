@@ -62,14 +62,48 @@ class SimulationManager:
 
         return rollover
 
+    HOUR_TO_TIME_BLOCK = {6: "Morning", 12: "Afternoon", 18: "Evening", 22: "Night"}
+
     def on_hour(self) -> None:
-        # Reserved for future wiring (e.g. needs decay, NPC location
-        # resolution via Data.DailyLife.daily_life).
-        pass
+
+        time_block = self.HOUR_TO_TIME_BLOCK.get(self.clock.hour)
+
+        if time_block is None:
+            return
+
+        from Data.DailyLife.daily_life import resolve_time_block, get_needs_effect
+        from Data.Database.repository import get_city
+
+        for kingdom in get_world_kingdoms(self.conn, self.world_id):
+            for city_summary in get_kingdom_cities(self.conn, kingdom["id"]):
+
+                city = get_city(self.conn, city_summary["id"])
+                buildings = city.get("buildings", [])
+                building_types_by_id = {b["id"]: b["type"] for b in buildings}
+
+                for npc in get_city_npcs(self.conn, city["id"]):
+
+                    if not npc["alive"]:
+                        continue
+
+                    location_type, location_id = resolve_time_block(npc, time_block, buildings)
+                    building_type = building_types_by_id.get(location_id, "House")
+                    effect = get_needs_effect(building_type)
+
+                    npc["location"] = location_id
+
+                    for need, delta in effect.items():
+                        npc["needs"][need] = max(0, min(100, npc["needs"][need] + delta))
+
+                    save_npc(self.conn, npc)
+
+        self.conn.commit()
 
     def on_day(self) -> None:
         from Data.NPCS.employment import apply_workday
         from Data.NPCS.healing import apply_healing, city_has_active_temple
+        from Data.NPCS.starvation import apply_starvation_check
+        from Data.Events.events import death_event
         from Data.Economy.economy import (
             simulate_city_economy_day, simulate_kingdom_trade_day, simulate_cross_kingdom_trade_day,
             total_resource_value
@@ -77,6 +111,7 @@ class SimulationManager:
         from Data.Combat.combat import resolve_raid
         from Data.Government.military import apply_military_upkeep, MILITARY_PROFESSIONS
         from Data.Database.repository import add_treasury, add_city_wealth
+        
         import random
         
         RAID_CHANCE_PER_DAY = 0.05
@@ -101,6 +136,11 @@ class SimulationManager:
                 for npc in get_city_npcs(self.conn, city["id"]):
 
                     if not npc["alive"]:
+                        continue
+                    
+                    if apply_starvation_check(npc):
+                        death_event(self.conn, npc, "starvation", city_id=city["id"])
+                        save_npc(self.conn, npc)
                         continue
 
                     changed = False

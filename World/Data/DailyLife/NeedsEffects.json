@@ -1,5 +1,7 @@
 {
-    "Home":      {"hunger": -10, "energy": 20,  "social": -5},
-    "Workplace": {"hunger": -12, "energy": -10, "social": 5},
-    "Social":    {"hunger": -10, "energy": -8,  "social": 25}
+    "House":              {"hunger": 15, "energy": 20,  "social": -5},
+    "Tavern":             {"hunger": 15, "energy": -8,  "social": 25},
+    "Market":             {"hunger": 10, "energy": -8,  "social": 20},
+    "Bakery":             {"hunger": 25, "energy": -3,  "social": 5},
+    "_default_workplace": {"hunger": -12, "energy": -10, "social": 5}
 }
