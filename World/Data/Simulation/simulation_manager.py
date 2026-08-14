@@ -104,6 +104,7 @@ class SimulationManager:
         from Data.NPCS.healing import apply_healing, city_has_active_temple
         from Data.NPCS.starvation import apply_starvation_check
         from Data.Events.events import death_event
+        from Data.Relationships.relationships import apply_grief
         from Data.Economy.economy import (
             simulate_city_economy_day, simulate_kingdom_trade_day, simulate_cross_kingdom_trade_day,
             total_resource_value
@@ -156,6 +157,7 @@ class SimulationManager:
 
                     if apply_starvation_check(npc):
                         death_event(self.conn, npc, "starvation", city_id=city["id"])
+                        apply_grief(self.conn, npc)
                         save_npc(self.conn, npc)
                         continue
 
@@ -252,6 +254,7 @@ class SimulationManager:
     def on_year(self) -> None:
         from Data.NPCS.aging import apply_aging
         from Data.Events.events import death_event
+        from Data.Relationships.relationships import apply_grief
         from Data.Combat.combat import (
             resolve_kingdom_war, check_civil_war_eligibility, resolve_civil_war,
             CIVIL_WAR_CHANCE_IF_ELIGIBLE
@@ -273,6 +276,7 @@ class SimulationManager:
                 for npc in get_city_npcs(self.conn, city["id"]):
                     if apply_aging(npc):
                         death_event(self.conn, npc, "old age", city_id=city["id"])
+                        apply_grief(self.conn, npc)
                     save_npc(self.conn, npc)
 
         self.conn.commit()
