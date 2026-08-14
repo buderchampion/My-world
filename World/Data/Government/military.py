@@ -1,28 +1,32 @@
-# Gold cost per living military-profession NPC (Guard/Soldier/Captian/
-# Knight) per day, deducted from their kingdom's treasury -- upkeep
-# (food, equipment, wages beyond their own personal wage) for
-# maintaining a standing force. This is deliberately the thing that
-# actually spends kingdom treasury, since taxes/market fees only ever
-# added to it before this existed.
-UPKEEP_PER_SOLDIER_PER_DAY = 2.0
+# Cost per living military-profession NPC (Guard/Soldier/Captian/
+# Knight) per day. Gold comes from the kingdom's treasury; Food and
+# Weapons come from the kingdom's capital's stockpile (its central
+# supply depot, the same role capitals already play for cross-kingdom
+# trade). Weapons wear out and get lost far slower than food gets
+# eaten or gold gets spent, hence the much smaller daily rate.
+UPKEEP_GOLD_PER_SOLDIER_PER_DAY = 2.0
+UPKEEP_FOOD_PER_SOLDIER_PER_DAY = 1.0
+UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY = 0.1
 
-# If a kingdom can't afford its full upkeep bill, this fraction of its
-# military deserts (becomes Unemployed) -- an unpaid army shrinks
-# itself rather than the kingdom silently going into debt.
+# If a kingdom can't afford its full upkeep bill (any of the three),
+# this fraction of its military deserts (becomes Unemployed) -- an
+# army that isn't fed, armed, and paid doesn't stay together.
 DESERTION_FRACTION = 0.05
 
 MILITARY_PROFESSIONS = ("Guard", "Soldier", "Captian", "Knight")
 
 
-def apply_military_upkeep(conn, kingdom, military_npcs):
+def apply_military_upkeep(conn, kingdom, military_npcs, capital_city):
     """
-    Charges one day of upkeep for a kingdom's standing military
-    (every living NPC in a military profession, across the whole
-    kingdom) against its treasury. If the kingdom can't afford it,
-    some fraction of the military deserts instead -- mutates and
-    saves any deserting NPCs directly (unlike most of this codebase's
-    functions, since desertion is a side effect specific to this
-    system, not something the caller would otherwise persist).
+    Charges one day of upkeep for a kingdom's standing military:
+    gold from the treasury, Food and Weapons from the kingdom's
+    capital (mutates capital_city["resources"] in place -- the
+    caller is responsible for saving it afterward, same as every
+    other function in this codebase that touches a city dict).
+
+    All three costs must be affordable together or nothing gets
+    spent at all -- no partial payment -- and some fraction of the
+    military deserts instead.
 
     Returns a dict describing what happened, for logging/testing.
     """
@@ -30,24 +34,42 @@ def apply_military_upkeep(conn, kingdom, military_npcs):
     from Data.Database.repository import spend_treasury, save_npc
 
     if not military_npcs:
-        return {"cost": 0.0, "paid": True, "deserters": 0}
+        return {"gold_cost": 0.0, "food_cost": 0.0, "weapons_cost": 0.0, "paid": True, "deserters": 0}
 
-    cost = round(len(military_npcs) * UPKEEP_PER_SOLDIER_PER_DAY, 2)
+    count = len(military_npcs)
 
-    if cost <= 0:
-        return {"cost": 0.0, "paid": True, "deserters": 0}
+    gold_cost = round(count * UPKEEP_GOLD_PER_SOLDIER_PER_DAY, 2)
+    food_cost = round(count * UPKEEP_FOOD_PER_SOLDIER_PER_DAY, 2)
+    weapons_cost = round(count * UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY, 2)
 
-    paid = spend_treasury(conn, kingdom["id"], cost)
+    available_food = capital_city.get("resources", {}).get("Food", 0)
+    available_weapons = capital_city.get("resources", {}).get("Weapons", 0)
+
+    can_afford_food = available_food >= food_cost
+    can_afford_weapons = available_weapons >= weapons_cost
+
+    if can_afford_food and can_afford_weapons:
+        paid = spend_treasury(conn, kingdom["id"], gold_cost)
+    else:
+        paid = False
 
     deserters = 0
 
-    if not paid:
+    if paid:
 
-        desertion_count = max(1, round(len(military_npcs) * DESERTION_FRACTION))
+        capital_city["resources"]["Food"] = round(available_food - food_cost, 2)
+        capital_city["resources"]["Weapons"] = round(available_weapons - weapons_cost, 2)
+
+    else:
+
+        desertion_count = max(1, round(count * DESERTION_FRACTION))
 
         for npc in military_npcs[:desertion_count]:
             npc["profession"] = "Unemployed"
             save_npc(conn, npc)
             deserters += 1
 
-    return {"cost": cost, "paid": paid, "deserters": deserters}
+    return {
+        "gold_cost": gold_cost, "food_cost": food_cost, "weapons_cost": weapons_cost,
+        "paid": paid, "deserters": deserters
+    }

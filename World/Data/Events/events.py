@@ -62,6 +62,23 @@ def caravan_raided_event(conn, caravan, origin_name, destination_name):
 
     return create_event(conn, "Caravan Raided", description, kingdom_id=caravan["buyer_kingdom_id"])
 
+def civil_war_event(conn, kingdom, result):
+
+    from Data.Database.repository import create_event
+
+    if result["outcome"] == "rebels_win":
+        description = (
+            f"Civil war erupted in {kingdom['name']} -- years of hardship boiled over, and the "
+            f"uprising overthrew the ruling government."
+        )
+    else:
+        description = (
+            f"Civil war erupted in {kingdom['name']} -- the uprising was crushed, but the "
+            f"unrest that caused it remains."
+        )
+
+    return create_event(conn, "Civil War", description, kingdom_id=kingdom["id"])
+
 def war_event(conn, attacker_kingdom, defender_kingdom, result):
 
     from Data.Database.repository import create_event

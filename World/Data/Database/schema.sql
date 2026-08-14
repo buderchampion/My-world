@@ -20,8 +20,9 @@ CREATE TABLE IF NOT EXISTS kingdoms (
                             -- tell kingdoms apart on the map
     treasury        REAL NOT NULL DEFAULT 1000,  -- shared kingdom-level gold,
                             -- separate from individual NPCs' own gold
-    tax_rate        REAL NOT NULL DEFAULT 0.1    -- fraction of each day's
+    tax_rate        REAL NOT NULL DEFAULT 0.1,    -- fraction of each day's
                             -- wages collected into the treasury
+    last_civil_war_year  INTEGER
 );
 
 CREATE TABLE IF NOT EXISTS kingdom_relations (
@@ -120,6 +121,8 @@ CREATE TABLE IF NOT EXISTS npcs (
     needs_hunger    INTEGER NOT NULL DEFAULT 100,
     needs_energy    INTEGER NOT NULL DEFAULT 100,
     needs_social    INTEGER NOT NULL DEFAULT 100,
+    needs_happiness INTEGER NOT NULL DEFAULT 70,
+    needs_stress    INTEGER NOT NULL DEFAULT 20,
     health          INTEGER NOT NULL DEFAULT 100,
     alive           INTEGER NOT NULL DEFAULT 1   -- SQLite has no real boolean
     -- No city_type column -- always derivable via JOIN to cities.type

@@ -32,6 +32,37 @@ WAR_TREASURY_SPOILS_FRACTION = 0.25
 
 PEACE_TREATY_YEARS = 3
 
+MORALE_IMPACT = {
+    "raid_repelled": {"stress": 5, "happiness": -3},
+    "raid_succeeded": {"stress": 15, "happiness": -10},
+    "war_won":  {"stress": 10, "happiness": -3},
+    "war_lost": {"stress": 20, "happiness": -15},
+    "civil_war_rebels_won": {"stress": -30, "happiness": 10},
+    "civil_war_loyalists_won": {"stress": -20, "happiness": -10}
+}
+
+CIVIL_WAR_STRESS_THRESHOLD = 75
+CIVIL_WAR_HAPPINESS_THRESHOLD = 25
+CIVIL_WAR_WEAPONS_FRACTION_OF_POPULATION = 0.08
+CIVIL_WAR_REBEL_PARTICIPATION_RATE = 0.15
+CIVIL_WAR_ARMED_REBEL_BONUS =  2
+CIVIL_WAR_CHANCE_IF_ELIGIBLE = 0.15
+CIVIL_WAR_COOLDOWN_YEARS = 15
+CIVIL_WAR_TREASURY_DAMAGE_FRACTION = 0.20
+
+def apply_morale_impact(conn, npcs, impact_key):
+    impact = MORALE_IMPACT[impact_key]
+
+    for npc in npcs:
+
+        if not npc["alive"]:
+            continue
+
+        npc["needs"]["stress"] = max(0, min(100, npc["needs"]["stress"] + impact["stress"]))
+        npc["needs"]["happiness"] = max(0, min(100, npc["needs"]["happiness"] + impact["happiness"]))
+
+        save_npc(conn, npc)
+
 def load_json(file):
 
     with open(file, "r") as f:
@@ -177,6 +208,9 @@ def resolve_raid(conn, city, bandit_camp):
         "plunder": plunder
     }
 
+    city_population = get_city_npcs(conn, city["id"])
+    apply_morale_impact(conn, city_population, "raid_succeeded" if attackers_win else "raid_repelled")    
+
     from Data.Events.events import raid_event
     raid_event(conn, city, result)
     conn.commit()
@@ -292,8 +326,153 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
         "treasury_spoils": spoils
     }
 
+    def gather_population(cities):
+        population = []
+        for city in cities:
+            population.extend(get_city_npcs(conn, city["id"]))
+        return population
+
+    apply_morale_impact(conn, gather_population(attacker_cities), "war_won" if attacker_wins else "war_lost")
+    apply_morale_impact(conn, gather_population(defender_cities), "war_lost" if attacker_wins else "war_won")
+
     from Data.Events.events import war_event
     war_event(conn, attacker_kingdom, defender_kingdom, result)
+    conn.commit()
+
+    return result
+
+def check_civil_war_eligibility(conn, kingdom, cities, current_year):
+    """
+    A kingdom is eligible for civil war this year only if ALL of:
+    - it's not still on cooldown from a previous civil war
+    - its population's average stress is at or above
+      CIVIL_WAR_STRESS_THRESHOLD
+    - its population's average happiness is at or below
+      CIVIL_WAR_HAPPINESS_THRESHOLD
+    - its capital holds enough Weapons to arm a real fraction of the
+      population (see CIVIL_WAR_WEAPONS_FRACTION_OF_POPULATION)
+
+    Meeting all four doesn't mean a civil war happens -- see
+    CIVIL_WAR_CHANCE_IF_ELIGIBLE, rolled by the caller.
+
+    Returns a dict with "eligible": bool plus the underlying numbers,
+    for logging/testing.
+    """
+
+    last_civil_war_year = kingdom.get("last_civil_war_year")
+
+    if last_civil_war_year is not None and current_year - last_civil_war_year < CIVIL_WAR_COOLDOWN_YEARS:
+        return {"eligible": False, "reason": "cooldown"}
+
+    living = [npc for city in cities for npc in get_city_npcs(conn, city["id"]) if npc["alive"]]
+
+    if not living:
+        return {"eligible": False, "reason": "no population"}
+
+    avg_stress = sum(npc["needs"]["stress"] for npc in living) / len(living)
+    avg_happiness = sum(npc["needs"]["happiness"] for npc in living) / len(living)
+
+    capital_city = next((c for c in cities if c["id"] == kingdom.get("capital")), None)
+    available_weapons = capital_city["resources"].get("Weapons", 0) if capital_city else 0
+
+    weapons_needed = len(living) * CIVIL_WAR_WEAPONS_FRACTION_OF_POPULATION
+
+    eligible = (
+        avg_stress >= CIVIL_WAR_STRESS_THRESHOLD
+        and avg_happiness <= CIVIL_WAR_HAPPINESS_THRESHOLD
+        and available_weapons >= weapons_needed
+    )
+
+    return {
+        "eligible": eligible,
+        "avg_stress": round(avg_stress, 1),
+        "avg_happiness": round(avg_happiness, 1),
+        "available_weapons": available_weapons,
+        "weapons_needed": round(weapons_needed, 1),
+    }
+
+
+def resolve_civil_war(conn, kingdom, cities, current_year):
+    """
+    Loyalist military (Guard/Soldier/Captian/Knight) vs. armed rebels
+    drawn from the rest of the population, armed by whatever Weapons
+    are sitting in the kingdom's capital (consumed in the process --
+    handing out weapons is a one-way trip). Applies casualties to
+    both sides, damages the treasury, releases the population's
+    stress (the pressure breaks either way), and -- if the rebels
+    win -- clears the capital's ruler, which the existing monthly
+    succession check will fill on its own next month.
+
+    Not called automatically -- the caller should already have
+    confirmed eligibility via check_civil_war_eligibility and rolled
+    CIVIL_WAR_CHANCE_IF_ELIGIBLE first.
+
+    Returns a result dict.
+    """
+
+    living = [npc for city in cities for npc in get_city_npcs(conn, city["id"]) if npc["alive"]]
+
+    loyalists = [npc for npc in living if npc["profession"] in DEFENDER_PROFESSIONS]
+    civilians = [npc for npc in living if npc["profession"] not in DEFENDER_PROFESSIONS]
+
+    capital_city = next((c for c in cities if c["id"] == kingdom.get("capital")), None)
+    available_weapons = capital_city["resources"].get("Weapons", 0) if capital_city else 0
+
+    desired_rebels = round(len(living) * CIVIL_WAR_REBEL_PARTICIPATION_RATE)
+    armed_rebel_count = min(int(available_weapons), desired_rebels, len(civilians))
+
+    random.shuffle(civilians)
+    rebels = civilians[:armed_rebel_count]
+
+    if capital_city is not None and armed_rebel_count > 0:
+        capital_city["resources"]["Weapons"] = round(available_weapons - armed_rebel_count, 2)
+
+    loyalist_power = sum(get_combat_power(npc) for npc in loyalists)
+    rebel_power = sum(get_combat_power(npc) + CIVIL_WAR_ARMED_REBEL_BONUS for npc in rebels)
+
+    total_power = loyalist_power + rebel_power
+
+    if total_power == 0:
+        return {"outcome": "no_battle", "reason": "no combatants on either side"}
+
+    rebels_win = random.random() < (rebel_power / total_power)
+
+    loyalist_deaths = apply_casualties(conn, loyalists, won=not rebels_win)
+    rebel_deaths = apply_casualties(conn, rebels, won=rebels_win)
+
+    from Data.Events.events import death_event
+    for npc in loyalist_deaths + rebel_deaths:
+        death_event(conn, npc, "Civil War", kingdom_id=kingdom["id"])
+
+    apply_morale_impact(conn, living, "civil_war_rebels_won" if rebels_win else "civil_war_loyalists_won")
+
+    ruler_overthrown = False
+
+    if rebels_win and capital_city is not None:
+        conn.execute("UPDATE cities SET ruler_id = NULL WHERE id = ?", (capital_city["id"],))
+        ruler_overthrown = True
+
+    from Data.Database.repository import spend_treasury, set_last_civil_war_year
+
+    treasury_row = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kingdom["id"],)).fetchone()
+    treasury_damage = round(treasury_row["treasury"] * CIVIL_WAR_TREASURY_DAMAGE_FRACTION, 2)
+
+    if treasury_damage > 0:
+        spend_treasury(conn, kingdom["id"], treasury_damage)
+
+    set_last_civil_war_year(conn, kingdom["id"], current_year)
+
+    result = {
+        "outcome": "rebels_win" if rebels_win else "loyalists_win",
+        "loyalist_power": loyalist_power,
+        "rebel_power": rebel_power,
+        "rebel_count": len(rebels),
+        "ruler_overthrown": ruler_overthrown,
+        "treasury_damage": treasury_damage,
+    }
+
+    from Data.Events.events import civil_war_event
+    civil_war_event(conn, kingdom, result)
     conn.commit()
 
     return result

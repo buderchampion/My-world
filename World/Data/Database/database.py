@@ -48,10 +48,16 @@ def init_database():
     _add_missing_columns(connection, "kingdoms", {
         "treasury": "REAL NOT NULL DEFAULT 1000",
         "tax_rate": "REAL NOT NULL DEFAULT 0.1",
+        "last_civil_war_year": "INTEGER",
     })
     
     _add_missing_columns(connection, "buildings", {
         "district_id": "INTEGER REFERENCES districts(id)",
+    })
+
+    _add_missing_columns(connection, "npcs", {
+        "needs_happiness": "INTEGER NOT NULL DEFAULT 70",
+        "needs_stress": "INTEGER NOT NULL DEFAULT 20",
     })
 
     connection.commit()

@@ -38,7 +38,9 @@ def get_npc(conn, npc_id):
     npc["needs"] = {
         "hunger": npc.pop("needs_hunger"),
         "energy": npc.pop("needs_energy"),
-        "social": npc.pop("needs_social")
+        "social": npc.pop("needs_social"),
+        "happiness": npc.pop("needs_happiness"),
+        "stress": npc.pop("needs_stress")
     }
 
     schedule_json = npc.pop("schedule_json")
@@ -72,6 +74,7 @@ def save_npc(conn, npc):
             workplace_id = ?, home_id = ?, gold = ?, spouse_id = ?, title = ?,
             location_id = ?, schedule_json = ?,
             needs_hunger = ?, needs_energy = ?, needs_social = ?,
+            needs_happiness = ?, needs_stress = ?,
             health = ?, alive = ?
         WHERE id = ?
         """,
@@ -80,6 +83,7 @@ def save_npc(conn, npc):
             npc["workplace"], npc["home"], npc["gold"], npc["spouse"], npc["title"],
             npc["location"], json.dumps(npc.get("schedule", {})),
             npc["needs"]["hunger"], npc["needs"]["energy"], npc["needs"]["social"],
+            npc["needs"]["happiness"], npc["needs"]["stress"],
             npc["health"], int(npc["alive"]),
             npc["id"]
         )
@@ -467,6 +471,11 @@ def set_tax_rate(conn, kingdom_id, rate):
 
     return rate
 
+def set_last_civil_war_year(conn, kingdom_id, year):
+    """Records the year a kingdom's civil war happened, for enforcing
+    a cooldown before it can have another one."""
+
+    conn.execute("UPDATE kingdoms SET last_civil_war_year = ? WHERE id = ?", (year, kingdom_id))
 
 def create_world(conn, name):
 

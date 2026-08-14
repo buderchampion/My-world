@@ -68,6 +68,12 @@ def produce_resources(city):
     than producing from nothing or crashing. Buildings with no
     input_resource in their rule are completely unaffected by this --
     same behavior as before this existed.
+
+    A building can also have a secondary_resource (e.g. Blacksmith
+    Shop makes both Tools and Weapons from the same Steel budget) --
+    the primary and secondary outputs share the same input and the
+    same fulfillment fraction, they just produce two different things
+    from it. Buildings with no secondary_resource are unaffected.
     """
 
     building_production = load_json(BUILDING_PRODUCTION)
@@ -90,6 +96,9 @@ def produce_resources(city):
         desired_amount = workers * rule["amount_per_worker"]
         resource = rule["resource"]
 
+        secondary_resource = rule.get("secondary_resource")
+        secondary_desired = workers * rule.get("secondary_amount_per_worker", 0) if secondary_resource else 0
+
         input_resource = rule.get("input_resource")
 
         if input_resource:
@@ -106,16 +115,23 @@ def produce_resources(city):
                 continue
 
             actual_amount = round(desired_amount * fulfillment, 2)
+            actual_secondary = round(secondary_desired * fulfillment, 2)
             input_consumed = round(input_needed * fulfillment, 2)
 
             city["resources"][input_resource] = round(available_input - input_consumed, 2)
 
         else:
             actual_amount = desired_amount
+            actual_secondary = secondary_desired
 
         city["resources"][resource] = round(
             city["resources"].get(resource, 0) + actual_amount, 2
         )
+
+        if secondary_resource and actual_secondary > 0:
+            city["resources"][secondary_resource] = round(
+                city["resources"].get(secondary_resource, 0) + actual_secondary, 2
+            )
 
     return city
 
