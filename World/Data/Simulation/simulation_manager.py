@@ -111,11 +111,25 @@ class SimulationManager:
         from Data.Combat.combat import resolve_raid
         from Data.Government.military import apply_military_upkeep, MILITARY_PROFESSIONS
         from Data.Database.repository import add_treasury, add_city_wealth
-        
         import random
         
+        # Chance, per city per day, that a city's own Bandit Camp (if
+        # it has one, with living occupants) actually raids that day --
+        # not a certainty every tick, so raids feel occasional rather
+        # than relentless. ~78% chance of at least one raid per camp
+        # over a 30-day month at this rate.
         RAID_CHANCE_PER_DAY = 0.05
         CITY_WEALTH_MARKET_FEE_RATE = 0.02
+
+        # A city with genuinely happy residents draws extra visitors --
+        # trade, tourism, word of mouth -- generating real treasury
+        # income on top of ordinary taxes. Below the threshold, a city
+        # isn't pleasant enough to draw anyone extra, so this
+        # contributes nothing; above it, revenue scales with both how
+        # happy the population is and how many people there are to be
+        # happy in the first place.
+        VISITOR_HAPPINESS_THRESHOLD = 60
+        VISITOR_REVENUE_PER_HAPPINESS_POINT = 0.01
 
         for kingdom in get_world_kingdoms(self.conn, self.world_id):
 
@@ -132,16 +146,21 @@ class SimulationManager:
                     add_city_wealth(self.conn, city["id"], market_revenue)
 
                 has_temple = city_has_active_temple(city)
+                happiness_sum = 0
+                living_count = 0
 
                 for npc in get_city_npcs(self.conn, city["id"]):
 
                     if not npc["alive"]:
                         continue
-                    
+
                     if apply_starvation_check(npc):
                         death_event(self.conn, npc, "starvation", city_id=city["id"])
                         save_npc(self.conn, npc)
                         continue
+
+                    happiness_sum += npc["needs"]["happiness"]
+                    living_count += 1
 
                     changed = False
 
@@ -158,6 +177,17 @@ class SimulationManager:
                     if changed:
                         save_npc(self.conn, npc)
 
+                if living_count > 0:
+
+                    avg_happiness = happiness_sum / living_count
+
+                    if avg_happiness > VISITOR_HAPPINESS_THRESHOLD:
+                        visitor_revenue = round(
+                            (avg_happiness - VISITOR_HAPPINESS_THRESHOLD) * living_count
+                            * VISITOR_REVENUE_PER_HAPPINESS_POINT, 2
+                        )
+                        tax_collected += visitor_revenue
+
                 for building in city.get("buildings", []):
                     if building["type"] == "Bandit Camp" and building["workers"]:
                         if random.random() < RAID_CHANCE_PER_DAY:
@@ -166,7 +196,9 @@ class SimulationManager:
             if tax_collected > 0:
                 add_treasury(self.conn, kingdom["id"], round(tax_collected, 2))
 
-            apply_military_upkeep(self.conn, kingdom, military_npcs)
+            capital_city = next((c for c in cities if c["id"] == kingdom.get("capital")), None)
+            if capital_city is not None:
+                apply_military_upkeep(self.conn, kingdom, military_npcs, capital_city)
 
             simulate_kingdom_trade_day(cities)
 
@@ -174,6 +206,7 @@ class SimulationManager:
                 save_city(self.conn, city)
 
         simulate_cross_kingdom_trade_day(self.conn, self.world_id)
+
         from Data.Infrastructure.caravans import advance_caravans
         advance_caravans(self.conn, self.world_id)
 
@@ -219,7 +252,10 @@ class SimulationManager:
     def on_year(self) -> None:
         from Data.NPCS.aging import apply_aging
         from Data.Events.events import death_event
-        from Data.Combat.combat import resolve_kingdom_war
+        from Data.Combat.combat import (
+            resolve_kingdom_war, check_civil_war_eligibility, resolve_civil_war,
+            CIVIL_WAR_CHANCE_IF_ELIGIBLE
+        )
         from Data.Database.repository import get_kingdom, get_city, get_world_roads
         import random
 
@@ -293,6 +329,30 @@ class SimulationManager:
             defender_cities = get_kingdom_cities(self.conn, defender_kingdom["id"])
 
             resolve_kingdom_war(self.conn, kingdom, defender_kingdom, attacker_cities, defender_cities)
+
+        self.conn.commit()
+
+        # Civil wars: checked after kingdom wars, so a kingdom that
+        # just fought (and spent treasury, took casualties) has that
+        # already reflected before eligibility gets checked, and one
+        # that just had a civil war respects its own fresh cooldown.
+        for kingdom_summary in kingdoms:
+
+            kingdom = get_kingdom(self.conn, kingdom_summary["id"])
+            cities = get_kingdom_cities(self.conn, kingdom["id"])
+
+            eligibility = check_civil_war_eligibility(self.conn, kingdom, cities, self.clock.year)
+
+            if not eligibility["eligible"]:
+                continue
+
+            if random.random() >= CIVIL_WAR_CHANCE_IF_ELIGIBLE:
+                continue
+
+            resolve_civil_war(self.conn, kingdom, cities, self.clock.year)
+
+            for city in cities:
+                save_city(self.conn, city)
 
         self.conn.commit()
 
