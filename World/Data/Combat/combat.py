@@ -167,8 +167,10 @@ def resolve_raid(conn, city, bandit_camp):
     defender_deaths = apply_casualties(conn, defenders, won=not attackers_win)
 
     from Data.Events.events import death_event
+    from Data.Relationships.relationships import apply_grief
     for npc in attacker_deaths + defender_deaths:
         death_event(conn, npc, "Raid", city_id=city["id"])
+        apply_grief(conn, npc)
 
     plunder = {}
 
@@ -212,7 +214,7 @@ def resolve_raid(conn, city, bandit_camp):
     apply_morale_impact(conn, city_population, "raid_succeeded" if attackers_win else "raid_repelled")    
 
     from Data.Events.events import raid_event
-    raid_event(conn, city, result)
+    raid_event(conn, city, result, participants=[npc["id"] for npc in attackers + defenders])
     conn.commit()
 
     return result
@@ -261,10 +263,13 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins)
 
     from Data.Events.events import death_event
+    from Data.Relationships.relationships import apply_grief
     for npc in attacker_deaths:
         death_event(conn, npc, "War", kingdom_id=attacker_kingdom["id"])
+        apply_grief(conn, npc)
     for npc in defender_deaths:
         death_event(conn, npc, "War", kingdom_id=defender_kingdom["id"])
+        apply_grief(conn, npc)
 
     captured_city = None
     spoils = 0
@@ -336,7 +341,9 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     apply_morale_impact(conn, gather_population(defender_cities), "war_lost" if attacker_wins else "war_won")
 
     from Data.Events.events import war_event
-    war_event(conn, attacker_kingdom, defender_kingdom, result)
+    war_event(conn, attacker_kingdom, defender_kingdom, result,
+              participants=[npc["id"] for npc in attacker_military + defender_military]
+              )
     conn.commit()
 
     return result
@@ -441,8 +448,10 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
     rebel_deaths = apply_casualties(conn, rebels, won=rebels_win)
 
     from Data.Events.events import death_event
+    from Data.Relationships.relationships import apply_grief
     for npc in loyalist_deaths + rebel_deaths:
         death_event(conn, npc, "Civil War", kingdom_id=kingdom["id"])
+        apply_grief(conn, npc)
 
     apply_morale_impact(conn, living, "civil_war_rebels_won" if rebels_win else "civil_war_loyalists_won")
 
@@ -472,7 +481,7 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
     }
 
     from Data.Events.events import civil_war_event
-    civil_war_event(conn, kingdom, result)
+    civil_war_event(conn, kingdom, result, participants=[npc["id"] for npc in loyalists + rebels])
     conn.commit()
 
     return result

@@ -38,7 +38,7 @@ def coronation_event(conn, ruler, city):
     )
 
 
-def raid_event(conn, city, result):
+def raid_event(conn, city, result, participants=None):
 
     from Data.Database.repository import create_event
 
@@ -49,7 +49,7 @@ def raid_event(conn, city, result):
     else:
         description = f"A planned raid on {city['name']} fizzled -- no one showed up to fight."
 
-    return create_event(conn, "Raid", description, city_id=city["id"])
+    return create_event(conn, "Raid", description, participants=participants, city_id=city["id"])
 
 def caravan_raided_event(conn, caravan, origin_name, destination_name):
 
@@ -62,7 +62,7 @@ def caravan_raided_event(conn, caravan, origin_name, destination_name):
 
     return create_event(conn, "Caravan Raided", description, kingdom_id=caravan["buyer_kingdom_id"])
 
-def civil_war_event(conn, kingdom, result):
+def civil_war_event(conn, kingdom, result, participants=None):
 
     from Data.Database.repository import create_event
 
@@ -77,9 +77,9 @@ def civil_war_event(conn, kingdom, result):
             f"unrest that caused it remains."
         )
 
-    return create_event(conn, "Civil War", description, kingdom_id=kingdom["id"])
+    return create_event(conn, "Civil War", description, participants=participants, kingdom_id=kingdom["id"])
 
-def war_event(conn, attacker_kingdom, defender_kingdom, result):
+def war_event(conn, attacker_kingdom, defender_kingdom, result, participants=None):
 
     from Data.Database.repository import create_event
 
@@ -106,6 +106,6 @@ def war_event(conn, attacker_kingdom, defender_kingdom, result):
         conn,
         "War",
         description,
-        participants=[],
+        participants=participants,
         kingdom_id=attacker_kingdom["id"]
     )

@@ -3,11 +3,13 @@ from pathlib import Path
 from Data.NPCS.npc_generator import MALE_NAMES, FEMALE_NAMES, load_json
 from Data.Database.repository import get_city_npcs, save_npc, create_npc, set_npc_parents
 
+
 DATA_DIR = Path(__file__).resolve().parent.parent
 
 MIN_MARRY_AGE = 18
 MARRIAGE_CHANCE = 0.6
 
+SPOUSE_REPUTATION_RANGE = (70, 95)
 FERTILE_AGE_MIN = 18
 FERTILE_AGE_MAX = 45
 CHILD_CHANCE = 0.5
@@ -103,9 +105,11 @@ def form_families(conn, city):
     conn.commit()
 
     from Data.Events.events import marriage_event
+    from Data.Database.repository import set_relationship
 
     for npc_a, npc_b in new_marriages:
         marriage_event(conn, npc_a, npc_b)
+        set_relationship(conn, npc_a["id"], npc_b["id"], "Spouse", random.randint(*SPOUSE_REPUTATION_RANGE))
 
     conn.commit()
 
