@@ -73,6 +73,9 @@ class SimulationManager:
 
         from Data.DailyLife.daily_life import resolve_time_block, get_needs_effect
         from Data.Database.repository import get_city
+        from Data.Infrastructure.travel import get_traveling_npc_ids
+
+        traveling_npc_ids = get_traveling_npc_ids(self.conn, self.world_id)
 
         for kingdom in get_world_kingdoms(self.conn, self.world_id):
             for city_summary in get_kingdom_cities(self.conn, kingdom["id"]):
@@ -84,6 +87,13 @@ class SimulationManager:
                 for npc in get_city_npcs(self.conn, city["id"]):
 
                     if not npc["alive"]:
+                        continue
+
+                    if npc["id"] in traveling_npc_ids:
+                        effect = get_needs_effect("Traveling")
+                        for need, delta in effect.items():
+                            npc["needs"][need] = max(0, min(100, npc["needs"][need] + delta))
+                        save_npc(self.conn, npc)
                         continue
 
                     location_type, location_id = resolve_time_block(npc, time_block, buildings)
@@ -212,6 +222,15 @@ class SimulationManager:
         from Data.Infrastructure.caravans import advance_caravans
         advance_caravans(self.conn, self.world_id)
 
+        from Data.Infrastructure.travel import advance_npc_travels, collect_tourist_revenue
+        collect_tourist_revenue(self.conn, self.world_id)
+        travel_result = advance_npc_travels(self.conn, self.world_id)
+
+        from Data.Infrastructure.migration import relocate_npc
+        for trip in travel_result["arrived"]:
+            if trip["purpose"] == "Migration":
+                relocate_npc(self.conn, trip["npc_id"], trip["destination_city_id"])
+
         self.conn.commit()
 
     def on_month(self) -> None:
@@ -244,7 +263,12 @@ class SimulationManager:
                     if city["id"] == kingdom.get("capital"):
                         assign_kingdom_ruler(kingdom, city)
                         save_kingdom(self.conn, kingdom)
+        from Data.Infrastructure.travel import consider_tourism
+        consider_tourism(self.conn, self.world_id)
 
+        from Data.Infrastructure.migration import consider_migration
+        consider_migration(self.conn, self.world_id)
+        
         self.conn.commit()
 
     def on_season(self) -> None:
