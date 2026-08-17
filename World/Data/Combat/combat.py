@@ -211,7 +211,18 @@ def resolve_raid(conn, city, bandit_camp):
     }
 
     city_population = get_city_npcs(conn, city["id"])
-    apply_morale_impact(conn, city_population, "raid_succeeded" if attackers_win else "raid_repelled")    
+    apply_morale_impact(conn, city_population, "raid_succeeded" if attackers_win else "raid_repelled")
+
+    from Data.Relationships.relationships import evolve_relationships_from_battle, form_relationships_from_battle
+    evolve_relationships_from_battle(
+        conn, attackers, defenders,
+        same_side_origin=f"survived the raid on {city['name']} together",
+        opposite_side_origin=f"ended up on opposite sides during the raid on {city['name']}"
+    )
+    form_relationships_from_battle(
+        conn, attackers, defenders,
+        origin=f"met and bonded during the raid on {city['name']}"
+    )    
 
     from Data.Events.events import raid_event
     raid_event(conn, city, result, participants=[npc["id"] for npc in attackers + defenders])
@@ -340,6 +351,17 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     apply_morale_impact(conn, gather_population(attacker_cities), "war_won" if attacker_wins else "war_lost")
     apply_morale_impact(conn, gather_population(defender_cities), "war_lost" if attacker_wins else "war_won")
 
+    from Data.Relationships.relationships import evolve_relationships_from_battle, form_relationships_from_battle
+    evolve_relationships_from_battle(
+        conn, attacker_military, defender_military,
+        same_side_origin=f"fought together in the war between {attacker_kingdom['name']} and {defender_kingdom['name']}",
+        opposite_side_origin=f"fought on opposite sides of the war between {attacker_kingdom['name']} and {defender_kingdom['name']}"
+    )
+    form_relationships_from_battle(
+        conn, attacker_military, defender_military,
+        origin=f"met and bonded fighting in the war between {attacker_kingdom['name']} and {defender_kingdom['name']}"
+    )
+
     from Data.Events.events import war_event
     war_event(conn, attacker_kingdom, defender_kingdom, result,
               participants=[npc["id"] for npc in attacker_military + defender_military]
@@ -454,6 +476,17 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
         apply_grief(conn, npc)
 
     apply_morale_impact(conn, living, "civil_war_rebels_won" if rebels_win else "civil_war_loyalists_won")
+
+    from Data.Relationships.relationships import evolve_relationships_from_battle, form_relationships_from_battle
+    evolve_relationships_from_battle(
+        conn, loyalists, rebels,
+        same_side_origin=f"stood together in {kingdom['name']}'s civil war",
+        opposite_side_origin=f"found themselves on opposite sides of {kingdom['name']}'s civil war"
+    )
+    form_relationships_from_battle(
+        conn, loyalists, rebels,
+        origin=f"met and bonded standing together in {kingdom['name']}'s civil war"
+    )
 
     ruler_overthrown = False
 

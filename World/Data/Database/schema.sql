@@ -46,6 +46,17 @@ CREATE TABLE IF NOT EXISTS caravans (
     status              TEXT NOT NULL DEFAULT 'En Route'  -- En Route, Delivered, Raided
 );
 
+CREATE TABLE IF NOT EXISTS npc_travels (
+    id                  INTEGER PRIMARY KEY,
+    npc_id              INTEGER NOT NULL REFERENCES npcs(id),
+    origin_city_id      INTEGER NOT NULL REFERENCES cities(id),
+    destination_city_id INTEGER NOT NULL REFERENCES cities(id),
+    purpose             TEXT NOT NULL,
+    status              TEXT NOT NULL DEFAULT 'Traveling Out',
+    days_remaining      INTEGER NOT NULL,
+    planned_stay_days   INTEGER NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS cities (
     id          INTEGER PRIMARY KEY,
     kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
@@ -143,6 +154,7 @@ CREATE TABLE IF NOT EXISTS relationships (
     npc_b_id    INTEGER NOT NULL REFERENCES npcs(id),
     type        TEXT NOT NULL,
     reputation  INTEGER NOT NULL,
+    origin      TEXT,
     PRIMARY KEY (npc_a_id, npc_b_id),
     CHECK (npc_a_id < npc_b_id)   -- store each pair once; query with
                                    -- WHERE npc_a_id = ? OR npc_b_id = ?

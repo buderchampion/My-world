@@ -60,6 +60,10 @@ def init_database():
         "needs_stress": "INTEGER NOT NULL DEFAULT 20",
     })
 
+    _add_missing_columns(connection, "relationships", {
+        "origin": "TEXT",
+    })
+
     connection.commit()
     connection.close()
 

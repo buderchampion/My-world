@@ -60,7 +60,9 @@ def get_npc(conn, npc_id):
         "SELECT * FROM relationships WHERE npc_a_id = ? OR npc_b_id = ?", (npc_id, npc_id)
     ):
         other_id = rel_row["npc_b_id"] if rel_row["npc_a_id"] == npc_id else rel_row["npc_a_id"]
-        npc["relationships"][str(other_id)] = {"type": rel_row["type"], "reputation": rel_row["reputation"]}
+        npc["relationships"][str(other_id)] = {
+            "type": rel_row["type"], "reputation": rel_row["reputation"], "origin": rel_row["origin"]
+        }
 
     return npc
 
@@ -71,7 +73,7 @@ def save_npc(conn, npc):
         """
         UPDATE npcs SET
             name = ?, gender = ?, age = ?, class = ?, profession = ?,
-            workplace_id = ?, home_id = ?, gold = ?, spouse_id = ?, title = ?,
+            city_id = ?, workplace_id = ?, home_id = ?, gold = ?, spouse_id = ?, title = ?,
             location_id = ?, schedule_json = ?,
             needs_hunger = ?, needs_energy = ?, needs_social = ?,
             needs_happiness = ?, needs_stress = ?,
@@ -80,7 +82,7 @@ def save_npc(conn, npc):
         """,
         (
             npc["name"], npc["gender"], npc["age"], npc["class"], npc["profession"],
-            npc["workplace"], npc["home"], npc["gold"], npc["spouse"], npc["title"],
+            npc["city_id"], npc["workplace"], npc["home"], npc["gold"], npc["spouse"], npc["title"],
             npc["location"], json.dumps(npc.get("schedule", {})),
             npc["needs"]["hunger"], npc["needs"]["energy"], npc["needs"]["social"],
             npc["needs"]["happiness"], npc["needs"]["stress"],
@@ -521,16 +523,19 @@ def get_world_kingdoms(conn, world_id):
 # Relationships
 # ---------------------------------------------------------------------------
 
-def set_relationship(conn, npc_a_id, npc_b_id, rel_type, reputation):
+def set_relationship(conn, npc_a_id, npc_b_id, rel_type, reputation, origin=None):
 
     a_id, b_id = sorted((npc_a_id, npc_b_id))
 
     conn.execute(
         """
-        INSERT INTO relationships (npc_a_id, npc_b_id, type, reputation) VALUES (?, ?, ?, ?)
-        ON CONFLICT(npc_a_id, npc_b_id) DO UPDATE SET type = excluded.type, reputation = excluded.reputation
+        INSERT INTO relationships (npc_a_id, npc_b_id, type, reputation, origin) VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(npc_a_id, npc_b_id) DO UPDATE SET
+            type = excluded.type,
+            reputation = excluded.reputation,
+            origin = COALESCE(excluded.origin, relationships.origin)
         """,
-        (a_id, b_id, rel_type, reputation)
+        (a_id, b_id, rel_type, reputation, origin)
     )
 
 

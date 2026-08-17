@@ -3,5 +3,6 @@
     "Tavern":              {"hunger": 15, "energy": -8, "social": 25,  "happiness": 8, "stress": -8},
     "Market":              {"hunger": 10, "energy": -8, "social": 20,  "happiness": 4, "stress": -4},
     "Bakery":              {"hunger": 25, "energy": -3, "social": 5,   "happiness": 3, "stress": -3},
-    "_default_workplace":  {"hunger": -12, "energy": -10, "social": 5, "happiness": 1, "stress": 6}
+    "_default_workplace":  {"hunger": -12, "energy": -10, "social": 5, "happiness": 1, "stress": 6},
+    "Traveling":           {"hunger": -8,  "energy": -6, "social": -3, "happiness": 2, "stress": -2}
 }

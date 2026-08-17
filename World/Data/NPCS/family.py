@@ -109,7 +109,10 @@ def form_families(conn, city):
 
     for npc_a, npc_b in new_marriages:
         marriage_event(conn, npc_a, npc_b)
-        set_relationship(conn, npc_a["id"], npc_b["id"], "Spouse", random.randint(*SPOUSE_REPUTATION_RANGE))
+        set_relationship(
+            conn, npc_a["id"], npc_b["id"], "Spouse",
+            random.randint(*SPOUSE_REPUTATION_RANGE), origin="married"
+        )
 
     conn.commit()
 
