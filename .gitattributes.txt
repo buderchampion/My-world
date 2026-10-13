@@ -1,0 +1,4 @@
+* text=auto
+*.db binary
+*.db-wal binary
+*.db-shm binary

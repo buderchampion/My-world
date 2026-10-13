@@ -34,6 +34,17 @@ CREATE TABLE IF NOT EXISTS kingdom_relations (
     PRIMARY KEY (kingdom_a_id, kingdom_b_id)
 );
 
+CREATE TABLE IF NOT EXISTS kingdom_favor (
+    from_kingdom_id INTEGER NOT NULL REFERENCES kingdoms(id),
+    to_kingdom_id   INTEGER NOT NULL REFERENCES kingdoms(id),
+    favor           REAL NOT NULL DEFAULT 0,
+
+    PRIMARY KEY (from_kingdom_id, to_kingdom_id)
+    -- deliberately NOT sorted like kingdom_relations/relationships --
+    -- from_kingdom's favor toward to_kingdom is independent of the
+    -- reverse, so (A,B) and (B,A) are two real, separate rows
+);
+
 CREATE TABLE IF NOT EXISTS caravans (
     id                  INTEGER PRIMARY KEY,
     origin_city_id      INTEGER NOT NULL REFERENCES cities(id),

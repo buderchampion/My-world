@@ -263,6 +263,7 @@ class SimulationManager:
                     if city["id"] == kingdom.get("capital"):
                         assign_kingdom_ruler(kingdom, city)
                         save_kingdom(self.conn, kingdom)
+
         from Data.Infrastructure.travel import consider_tourism
         consider_tourism(self.conn, self.world_id)
 

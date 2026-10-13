@@ -314,6 +314,17 @@ def simulate_kingdom_trade_day(cities, trade_fraction=DEFAULT_TRADE_FRACTION):
 # real gold rather than free barter.
 DEFAULT_CROSS_KINGDOM_TRADE_FRACTION = 0.3
 
+# Every successful cross-kingdom trade shifts favor for both sides --
+# the buyer's favor toward the seller rises (real aid received), and
+# the seller's favor toward the buyer dips slightly (giving up stock
+# someone else benefits from). The gain is deliberately 3x the loss:
+# two kingdoms trading back and forth nets out POSITIVE for both over
+# time (a real, growing friendship), while a kingdom that only ever
+# gives and never receives anything back still drifts down on its
+# own, exactly the "one-sided trade route wears thin" dynamic wanted.
+TRADE_FAVOR_GAIN = 3.0
+TRADE_FAVOR_LOSS = -1.0
+
 
 def simulate_cross_kingdom_trade_day(
     conn, world_id, trade_fraction=DEFAULT_CROSS_KINGDOM_TRADE_FRACTION
@@ -345,6 +356,7 @@ def simulate_cross_kingdom_trade_day(
         save_city,
         spend_treasury,
         add_treasury,
+        adjust_kingdom_favor,
     )
 
     resource_types = load_json(RESOURCE_TYPES)
@@ -432,6 +444,9 @@ def simulate_cross_kingdom_trade_day(
                     continue
 
                 add_treasury(conn, seller_kingdom["id"], cost)
+
+                adjust_kingdom_favor(conn, buyer_kingdom["id"], seller_kingdom["id"], TRADE_FAVOR_GAIN)
+                adjust_kingdom_favor(conn, seller_kingdom["id"], buyer_kingdom["id"], TRADE_FAVOR_LOSS)
 
                 seller_capital["resources"][resource] = round(seller_capital["resources"].get(resource, 0) - amount, 2)
                 save_city(conn, seller_capital)

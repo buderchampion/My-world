@@ -370,6 +370,38 @@ def set_kingdom_relation(conn, kingdom_a_id, kingdom_b_id, status, peace_until_y
         (a_id, b_id, status, peace_until_year)
     )
 
+
+def get_kingdom_favor(conn, from_kingdom_id, to_kingdom_id):
+    """Returns from_kingdom's favor toward to_kingdom -- 0 if there's
+    no history between them yet (favor starts implicitly neutral).
+    Directional: this is NOT the same value as the reverse lookup."""
+
+    row = conn.execute(
+        "SELECT favor FROM kingdom_favor WHERE from_kingdom_id = ? AND to_kingdom_id = ?",
+        (from_kingdom_id, to_kingdom_id)
+    ).fetchone()
+
+    return row["favor"] if row else 0.0
+
+
+def adjust_kingdom_favor(conn, from_kingdom_id, to_kingdom_id, delta):
+    """Shifts from_kingdom's favor toward to_kingdom by delta (can be
+    negative), clamped to [-100, 100]. Returns the new value."""
+
+    current = get_kingdom_favor(conn, from_kingdom_id, to_kingdom_id)
+    new_favor = max(-100.0, min(100.0, current + delta))
+
+    conn.execute(
+        """
+        INSERT INTO kingdom_favor (from_kingdom_id, to_kingdom_id, favor) VALUES (?, ?, ?)
+        ON CONFLICT(from_kingdom_id, to_kingdom_id) DO UPDATE SET favor = excluded.favor
+        """,
+        (from_kingdom_id, to_kingdom_id, new_favor)
+    )
+
+    return new_favor
+
+
 def save_kingdom(conn, kingdom):
 
     conn.execute(

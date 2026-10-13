@@ -1,0 +1,16 @@
+# Generated world data -- regenerates every run, never version it
+world.db
+world.db-wal
+world.db-shm
+*.db-wal
+*.db-shm
+
+# Python
+__pycache__/
+*.pyc
+
+# Runtime logs
+Logs/
+
+# Visual Studio
+.vs/
