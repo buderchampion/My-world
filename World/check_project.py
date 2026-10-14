@@ -155,6 +155,14 @@ FEATURES = [
         "functions": {"Data/Database/repository.py": ["get_kingdom_favor", "adjust_kingdom_favor"]},
         "wired": {"Data/Economy/economy.py": ["adjust_kingdom_favor", "TRADE_FAVOR_GAIN", "TRADE_FAVOR_LOSS"]},
     },
+        {
+        "name": "Alliances",
+        "functions": {
+            "Data/Government/diplomacy.py": ["check_alliances", "get_allied_kingdom_ids"],
+            "Data/Events/events.py": ["alliance_event"],
+        },
+        "wired": {"Data/Simulation/simulation_manager.py": ["check_alliances"]},
+    },
 ]
 
 
@@ -719,6 +727,38 @@ def _smoke_body(r, holder):
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
         r.warn("fewer than 2 kingdoms generated -- favor check skipped")
+    def alliances():
+        from Data.Government.diplomacy import check_alliances, ALLIANCE_FAVOR_THRESHOLD
+        from Data.Database.repository import adjust_kingdom_favor, get_kingdom_relation
+
+        a, b = kingdoms[0], kingdoms[1]
+
+        def clear():
+            conn.execute("DELETE FROM kingdom_favor")
+            conn.execute("DELETE FROM kingdom_relations")
+            conn.execute("DELETE FROM events WHERE type = 'Alliance'")
+            conn.commit()
+
+        clear()
+
+        # one kingdom adoring another that does not return the feeling is not an alliance
+        adjust_kingdom_favor(conn, a["id"], b["id"], ALLIANCE_FAVOR_THRESHOLD + 10)
+        assert not check_alliances(conn, world_id, 1), "an alliance formed although only one kingdom liked the other"
+
+        # mutual goodwill forms exactly one alliance, and logs it once
+        adjust_kingdom_favor(conn, b["id"], a["id"], ALLIANCE_FAVOR_THRESHOLD + 10)
+        formed = check_alliances(conn, world_id, 1)
+        assert len(formed) == 1, f"mutual goodwill should form 1 alliance, formed {len(formed)}"
+        assert get_kingdom_relation(conn, a["id"], b["id"])["status"] == "Allied", "the pair's relation was not set to Allied"
+        assert not check_alliances(conn, world_id, 2), "an alliance that already existed was formed a second time"
+
+        logged = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Alliance'").fetchone()[0]
+        assert logged == 1, f"expected 1 Alliance event in the log, found {logged}"
+
+        clear()   # leave the world as we found it for the steps after this one
+
+    if len(kingdoms) >= 2:
+        run_step(r, "mutual goodwill forms an alliance, one-sided does not", alliances)    
 
     def backfill():
         from Data.Buildings.building_generator import ensure_production_chain_buildings

@@ -305,6 +305,11 @@ class SimulationManager:
                     save_npc(self.conn, npc)
 
         self.conn.commit()
+        # Alliances: kingdoms whose goodwill toward each other has grown
+        # high enough ally. Checked before wars, so a pair that has just
+        # become allies cannot be sent to war the very same year.
+        from Data.Government.diplomacy import check_alliances
+        check_alliances(self.conn, self.world_id, self.clock.year)
 
         # Kingdom wars: weighted toward whichever neighboring kingdom
         # is closest via the Trade Route road network, so kingdoms

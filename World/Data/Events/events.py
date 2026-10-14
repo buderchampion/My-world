@@ -109,3 +109,14 @@ def war_event(conn, attacker_kingdom, defender_kingdom, result, participants=Non
         participants=participants,
         kingdom_id=attacker_kingdom["id"]
     )
+def alliance_event(conn, kingdom_a, kingdom_b):
+
+    from Data.Database.repository import create_event
+
+    return create_event(
+        conn,
+        "Alliance",
+        f"{kingdom_a['name']} and {kingdom_b['name']} forged an alliance, "
+        f"their peoples bound by long years of trade and goodwill.",
+        kingdom_id=kingdom_a["id"]
+    )
