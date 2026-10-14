@@ -474,7 +474,85 @@ def find_repo_root(start):
     return None
 
 
+def why_git_cannot_use(repo, name):
+    """Explains, in plain words, why a git config file isn't working."""
+
+    path = repo / name
+
+    if path.exists():
+        if path.read_bytes()[:2] in (b"\xff\xfe", b"\xfe\xff"):
+            return (f"{name} is saved as UTF-16, which git cannot read -- "
+                    f"re-save it as UTF-8 (in Notepad: File > Save As > Encoding: UTF-8)")
+        return f"{name} exists in {repo} but does not do the job -- check its contents"
+
+    if (repo / (name + ".txt")).exists():
+        return f"found '{name}.txt' in {repo} -- rename it to '{name}'"
+
+    return f"there is no {name} in {repo}"
+
+
 def check_repo(r):
+    r.section("Git hygiene")
+
+    repo = find_repo_root(ROOT)
+
+    if repo is None:
+        r.info("this folder is not inside a git repository -- skipped")
+        return
+
+    r.info(f"repository root: {repo}")
+    start = r.failures
+
+    def git(*args):
+        return subprocess.run(["git", *args], cwd=repo, capture_output=True, text=True, timeout=30)
+
+    try:
+        git("--version")
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        r.info("git is not available on PATH -- skipped")
+        return
+
+    db_path = (ROOT / "Data" / "Database" / "world.db").relative_to(repo).as_posix()
+
+    # Ask git itself rather than parsing .gitignore by hand: git is the authority
+    # (it honours nested .gitignore files, global ignores, and encoding quirks).
+    # --no-index so a file that is already tracked is still judged on its pattern.
+    ignored = git("check-ignore", "-q", "--no-index", "--", db_path)
+
+    if ignored.returncode == 1:
+        r.fail(f"git is NOT ignoring world.db -- {why_git_cannot_use(repo, '.gitignore')}")
+    elif ignored.returncode != 0:
+        r.info("could not ask git about .gitignore -- ignore check skipped")
+
+    attribute = git("check-attr", "text", "--", db_path)
+
+    if attribute.returncode == 0 and "text: unset" not in attribute.stdout:
+        r.warn(f"git does not treat *.db as binary -- {why_git_cannot_use(repo, '.gitattributes')}"
+               f" (it should contain the line: *.db binary)")
+
+    tracked = git("ls-files")
+
+    if tracked.returncode != 0:
+        r.info("could not list tracked files -- tracked-file check skipped")
+        return
+
+    generated = []
+
+    for name in tracked.stdout.splitlines():
+        base = name.rsplit("/", 1)[-1]
+        if base in ("world.db", "world.db-wal", "world.db-shm"):
+            r.fail(f"git is tracking '{name}' -- run: git rm --cached \"{name}\"")
+        elif "__pycache__/" in name or name.endswith(".pyc"):
+            generated.append(name)
+
+    if generated:
+        r.warn(
+            f"git is tracking {len(generated)} generated file(s), e.g. '{generated[0]}' -- "
+            f"run: git rm -r --cached .   then: git add .   (your .gitignore will skip them)"
+        )
+
+    if r.failures == start:
+        r.ok("world.db is ignored and not tracked")
     r.section("Git hygiene")
 
     repo = find_repo_root(ROOT)
