@@ -305,10 +305,12 @@ class SimulationManager:
                     save_npc(self.conn, npc)
 
         self.conn.commit()
-        # Alliances: kingdoms whose goodwill toward each other has grown
-        # high enough ally. Checked before wars, so a pair that has just
-        # become allies cannot be sent to war the very same year.
-        from Data.Government.diplomacy import check_alliances
+        # Peaceful years warm kingdoms toward each other, then any pair whose
+        # goodwill has grown high enough allies. Both run before wars, so a
+        # pair that has just become allies cannot be sent to war the very
+        # same year.
+        from Data.Government.diplomacy import apply_peace_dividend, check_alliances
+        apply_peace_dividend(self.conn, self.world_id, self.clock.year)
         check_alliances(self.conn, self.world_id, self.clock.year)
 
         # Kingdom wars: weighted toward whichever neighboring kingdom

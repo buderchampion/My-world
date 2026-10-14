@@ -155,13 +155,13 @@ FEATURES = [
         "functions": {"Data/Database/repository.py": ["get_kingdom_favor", "adjust_kingdom_favor"]},
         "wired": {"Data/Economy/economy.py": ["adjust_kingdom_favor", "TRADE_FAVOR_GAIN", "TRADE_FAVOR_LOSS"]},
     },
-        {
-        "name": "Alliances",
+    {
+        "name": "Alliances and the peace dividend",
         "functions": {
-            "Data/Government/diplomacy.py": ["check_alliances", "get_allied_kingdom_ids"],
+            "Data/Government/diplomacy.py": ["apply_peace_dividend", "check_alliances", "get_allied_kingdom_ids"],
             "Data/Events/events.py": ["alliance_event"],
         },
-        "wired": {"Data/Simulation/simulation_manager.py": ["check_alliances"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["apply_peace_dividend", "check_alliances"]},
     },
 ]
 
@@ -759,7 +759,37 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "mutual goodwill forms an alliance, one-sided does not", alliances)    
+    
+    def peace_dividend():
+        from Data.Government.diplomacy import apply_peace_dividend
+        from Data.Database.repository import get_kingdom_favor, set_kingdom_relation
 
+        a, b = kingdoms[0], kingdoms[1]
+
+        def clear():
+            conn.execute("DELETE FROM kingdom_favor")
+            conn.execute("DELETE FROM kingdom_relations")
+            conn.commit()
+
+        clear()
+
+        apply_peace_dividend(conn, world_id, 5)
+        warmed_ab = get_kingdom_favor(conn, a["id"], b["id"])
+        warmed_ba = get_kingdom_favor(conn, b["id"], a["id"])
+        assert warmed_ab > 0 and warmed_ba > 0, "a year of peace did not warm the pair in both directions"
+
+        # a recent war (an active peace treaty) pauses the warming
+        set_kingdom_relation(conn, a["id"], b["id"], "Peace Treaty", peace_until_year=10)
+        conn.commit()
+        apply_peace_dividend(conn, world_id, 5)
+        assert (get_kingdom_favor(conn, a["id"], b["id"]) == warmed_ab
+                and get_kingdom_favor(conn, b["id"], a["id"]) == warmed_ba), \
+            "favor kept growing while a peace treaty was active"
+
+        clear()
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a peaceful year warms kingdoms, a recent war pauses it", peace_dividend)
     def backfill():
         from Data.Buildings.building_generator import ensure_production_chain_buildings
 

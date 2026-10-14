@@ -322,8 +322,8 @@ DEFAULT_CROSS_KINGDOM_TRADE_FRACTION = 0.3
 # time (a real, growing friendship), while a kingdom that only ever
 # gives and never receives anything back still drifts down on its
 # own, exactly the "one-sided trade route wears thin" dynamic wanted.
-TRADE_FAVOR_GAIN = 3.0
-TRADE_FAVOR_LOSS = -1.0
+TRADE_FAVOR_GAIN = 0.3
+TRADE_FAVOR_LOSS = -0.1
 
 
 def simulate_cross_kingdom_trade_day(

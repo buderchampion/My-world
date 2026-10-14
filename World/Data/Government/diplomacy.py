@@ -1,3 +1,4 @@
+import random
 from itertools import combinations
 
 # How much each kingdom must like the other before an alliance can form.
@@ -9,6 +10,64 @@ ALLIANCE_FAVOR_THRESHOLD = 60.0
 # all trade well would slowly ally with everyone, and since war target
 # selection skips allies, wars would stop happening entirely.
 MAX_ALLIES_PER_KINGDOM = 2
+
+
+def _world_kingdoms(conn, world_id):
+    """Just each kingdom's id and name. Diplomacy needs nothing more, and
+    get_world_kingdoms builds a full record per kingdom (about 400 ms each
+    call) that would be thrown away."""
+
+    rows = conn.execute("SELECT id, name FROM kingdoms WHERE world_id = ? ORDER BY id", (world_id,)).fetchall()
+
+    return [dict(row) for row in rows]
+
+
+# Each year two kingdoms spend at peace, each one's favor toward the other
+# grows by a random amount in this range (rolled separately for each
+# direction). At an average of 5 a year a pair needs about 12 years to
+# reach the alliance threshold -- long enough to feel earned, and the
+# randomness means pairs cross it in different years instead of every
+# friendship in the world maturing on the same day.
+PEACE_DIVIDEND_RANGE = (2.0, 8.0)
+
+
+def apply_peace_dividend(conn, world_id, current_year):
+    """
+    Yearly: every pair of kingdoms that is not under an active Peace Treaty
+    (that is, has not recently been at war) grows a little fonder of each
+    other. This is how kingdoms that never trade -- or never fight -- can
+    still become friends; trade only warms a pair when each side happens to
+    need what the other has.
+
+    A recent war pauses the dividend for as long as its Peace Treaty lasts.
+    Allied pairs keep growing closer. Returns how many pairs were warmed.
+    """
+
+    from Data.Database.repository import get_kingdom_relation, adjust_kingdom_favor
+
+    kingdoms = _world_kingdoms(conn, world_id)
+
+    warmed = 0
+
+    for kingdom_a, kingdom_b in combinations(kingdoms, 2):
+
+        relation = get_kingdom_relation(conn, kingdom_a["id"], kingdom_b["id"])
+
+        if (
+            relation["status"] == "Peace Treaty"
+            and relation["peace_until_year"]
+            and current_year < relation["peace_until_year"]
+        ):
+            continue
+
+        adjust_kingdom_favor(conn, kingdom_a["id"], kingdom_b["id"], random.uniform(*PEACE_DIVIDEND_RANGE))
+        adjust_kingdom_favor(conn, kingdom_b["id"], kingdom_a["id"], random.uniform(*PEACE_DIVIDEND_RANGE))
+
+        warmed += 1
+
+    conn.commit()
+
+    return warmed
 
 
 def get_allied_kingdom_ids(conn, kingdom_id):
@@ -45,12 +104,10 @@ def check_alliances(conn, world_id, current_year):
     year (empty if none), so later systems can react to them.
     """
 
-    from Data.Database.repository import (
-        get_world_kingdoms, get_kingdom_relation, set_kingdom_relation, get_kingdom_favor,
-    )
+    from Data.Database.repository import get_kingdom_relation, set_kingdom_relation, get_kingdom_favor
     from Data.Events.events import alliance_event
 
-    kingdoms = get_world_kingdoms(conn, world_id)
+    kingdoms = _world_kingdoms(conn, world_id)
 
     candidates = []
 
@@ -78,7 +135,11 @@ def check_alliances(conn, world_id, current_year):
 
         candidates.append((strength, kingdom_a, kingdom_b, favor_a_to_b, favor_b_to_a))
 
-    candidates.sort(key=lambda c: (-c[0], c[1]["id"], c[2]["id"]))
+    # Warmest friendships first. Shuffling beforehand makes ties (common when
+    # several pairs have been warmed by the same peaceful years) break at
+    # random, rather than always favoring whichever kingdoms have low ids.
+    random.shuffle(candidates)
+    candidates.sort(key=lambda c: -c[0])
 
     ally_counts = {k["id"]: len(get_allied_kingdom_ids(conn, k["id"])) for k in kingdoms}
 
