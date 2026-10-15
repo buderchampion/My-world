@@ -333,6 +333,9 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
         conn, attacker_kingdom["id"], defender_kingdom["id"],
         "Peace Treaty", peace_until_year=current_year + PEACE_TREATY_YEARS
     )
+    # A war leaves lasting resentment, felt far more by the kingdom invaded.
+    from Data.Government.diplomacy import apply_war_favor
+    apply_war_favor(conn, attacker_kingdom["id"], defender_kingdom["id"], captured_city=captured_city is not None)
 
     result = {
         "outcome": "attacker_wins" if attacker_wins else "defender_wins",
@@ -492,6 +495,10 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
 
     if rebels_win and capital_city is not None:
         conn.execute("UPDATE cities SET ruler_id = NULL WHERE id = ?", (capital_city["id"],))
+        # on_year re-saves these same city objects right afterward; without
+        # clearing it here too, that save would quietly restore the ruler
+        # who was just overthrown.
+        capital_city["ruler"] = None
         ruler_overthrown = True
 
     from Data.Database.repository import spend_treasury, set_last_civil_war_year

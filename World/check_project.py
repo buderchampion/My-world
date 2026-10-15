@@ -156,12 +156,30 @@ FEATURES = [
         "wired": {"Data/Economy/economy.py": ["adjust_kingdom_favor", "TRADE_FAVOR_GAIN", "TRADE_FAVOR_LOSS"]},
     },
     {
-        "name": "Alliances and the peace dividend",
+        "name": "Diplomacy: alliances, succession shocks, war by favor",
         "functions": {
-            "Data/Government/diplomacy.py": ["apply_peace_dividend", "check_alliances", "get_allied_kingdom_ids"],
-            "Data/Events/events.py": ["alliance_event"],
+            "Data/Government/diplomacy.py": [
+                "apply_peace_dividend", "end_failed_alliances", "check_alliances", "get_allied_kingdom_ids",
+                "apply_succession_shock", "apply_war_favor", "war_chance", "grudge_factor",
+                "war_candidates", "choose_war_target",
+            ],
+            "Data/Events/events.py": ["alliance_event", "alliance_ended_event"],
         },
-        "wired": {"Data/Simulation/simulation_manager.py": ["apply_peace_dividend", "check_alliances"]},
+        # the trailing "(" matters: it proves the function is CALLED, not merely imported
+        "wired": {
+            "Data/Simulation/simulation_manager.py": [
+                "apply_peace_dividend(", "end_failed_alliances(", "check_alliances(",
+                "apply_succession_shock(", "war_candidates(", "choose_war_target(",
+            ],
+            "Data/Combat/combat.py": ["apply_war_favor("],
+        },
+    },
+    {
+        "name": "Rulers are saved (one coronation per succession, not per month)",
+        "wired": {
+            "Data/Government/government.py": ["UPDATE cities SET ruler_id"],
+            "Data/Combat/combat.py": ['capital_city["ruler"] = None'],
+        },
     },
 ]
 
@@ -790,6 +808,57 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a peaceful year warms kingdoms, a recent war pauses it", peace_dividend)
+    def alliances_end():
+        from Data.Government.diplomacy import end_failed_alliances, ALLIANCE_BREAK_THRESHOLD
+        from Data.Database.repository import adjust_kingdom_favor, get_kingdom_relation, set_kingdom_relation
+
+        a, b = kingdoms[0], kingdoms[1]
+
+        def clear():
+            conn.execute("DELETE FROM kingdom_favor")
+            conn.execute("DELETE FROM kingdom_relations")
+            conn.execute("DELETE FROM events WHERE type = 'Alliance Ended'")
+            conn.commit()
+
+        clear()
+        set_kingdom_relation(conn, a["id"], b["id"], "Allied")
+        adjust_kingdom_favor(conn, a["id"], b["id"], 90)
+        adjust_kingdom_favor(conn, b["id"], a["id"], 90)
+        conn.commit()
+        assert not end_failed_alliances(conn, world_id, 1), "a healthy alliance was ended"
+
+        # one side souring is enough to end it
+        adjust_kingdom_favor(conn, b["id"], a["id"], ALLIANCE_BREAK_THRESHOLD - 90 - 1)
+        ended = end_failed_alliances(conn, world_id, 2)
+        assert len(ended) == 1, f"a soured alliance should end, but {len(ended)} ended"
+        assert get_kingdom_relation(conn, a["id"], b["id"])["status"] == "Neutral", "the ended alliance was not set back to Neutral"
+        logged = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Alliance Ended'").fetchone()[0]
+        assert logged == 1, f"expected 1 Alliance Ended event, found {logged}"
+
+        clear()
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a soured alliance ends, a healthy one does not", alliances_end)
+
+    def war_costs_favor():
+        from Data.Government.diplomacy import apply_war_favor, war_chance, WAR_FAVOR_DEFENDER, WAR_FAVOR_ATTACKER
+        from Data.Database.repository import get_kingdom_favor
+
+        a, b = kingdoms[0], kingdoms[1]
+
+        conn.execute("DELETE FROM kingdom_favor")
+        conn.commit()
+
+        apply_war_favor(conn, a["id"], b["id"])
+        assert get_kingdom_favor(conn, b["id"], a["id"]) == WAR_FAVOR_DEFENDER, "the defender's favor toward the attacker did not drop"
+        assert get_kingdom_favor(conn, a["id"], b["id"]) == WAR_FAVOR_ATTACKER, "the attacker's favor toward the defender did not drop"
+        assert war_chance([-100]) > war_chance([0]) > 0, "a grievance should make war more likely than having none"
+
+        conn.execute("DELETE FROM kingdom_favor")
+        conn.commit()
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a war costs favor, and a grievance makes war likelier", war_costs_favor)
     def backfill():
         from Data.Buildings.building_generator import ensure_production_chain_buildings
 
@@ -853,6 +922,47 @@ def _smoke_body(r, holder):
     run_step(r, "hour tick  (needs and schedules)", manager.on_hour)
     run_step(r, "day tick   (economy, wages, trade, caravans, travel)", manager.on_day)
     run_step(r, "month tick (families, relationships, tourism, migration)", manager.on_month)
+    def rulers_saved():
+        saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]
+        total = conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
+        assert saved >= total * 0.9, f"only {saved} of {total} cities have a saved ruler after the monthly tick"
+
+        before = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
+        manager.on_month()
+        after = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
+        assert after == before, f"a second month with every ruler alive crowned {after - before} more rulers (rulers are not being saved)"
+
+    run_step(r, "rulers are saved: a second month crowns nobody new", rulers_saved)
+
+    def succession_shakes_relationships():
+        from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor
+
+        kingdom = kingdoms[0]
+        others = kingdoms[1:]
+
+        monarch = get_kingdom(conn, kingdom["id"])["ruler"]
+        assert monarch is not None, "no monarch was crowned by the monthly tick"
+
+        conn.execute("DELETE FROM kingdom_favor")
+        for other in others:
+            adjust_kingdom_favor(conn, kingdom["id"], other["id"], 100)
+            adjust_kingdom_favor(conn, other["id"], kingdom["id"], 100)
+        conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (monarch,))
+        conn.commit()
+
+        manager.on_month()
+
+        assert get_kingdom(conn, kingdom["id"])["ruler"] != monarch, "the dead monarch was not replaced"
+        shaken = [get_kingdom_favor(conn, kingdom["id"], o["id"]) for o in others]
+        assert all(abs(f - 100) > 1e-6 for f in shaken), "a new monarch was crowned but the kingdom's feelings were not shaken"
+        untouched = [get_kingdom_favor(conn, o["id"], kingdom["id"]) for o in others]
+        assert all(f == 100 for f in untouched), "the neighbors' feelings changed although only this kingdom changed ruler"
+
+        conn.execute("DELETE FROM kingdom_favor")
+        conn.commit()
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a new monarch shakes the kingdom's relationships", succession_shakes_relationships)
     run_step(r, "year tick  (aging, wars, civil war check)", manager.on_year)
 
     # --- invariants that should hold after any amount of simulation ----------

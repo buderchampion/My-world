@@ -236,6 +236,7 @@ class SimulationManager:
     def on_month(self) -> None:
         from Data.NPCS.family import form_families
         from Data.Government.government import assign_city_ruler, assign_kingdom_ruler
+        from Data.Government.diplomacy import apply_succession_shock
         from Data.Relationships.relationships import form_relationships
         from Data.Quests.quests import generate_quests_for_city
         from Data.Database.repository import get_npc, save_kingdom
@@ -258,25 +259,126 @@ class SimulationManager:
 
                 if not ruler_alive:
 
+                    is_capital = city["id"] == kingdom.get("capital")
+                    previous_monarch_id = kingdom.get("ruler") if is_capital else None
+
                     assign_city_ruler(self.conn, city)
 
-                    if city["id"] == kingdom.get("capital"):
+                    if is_capital:
                         assign_kingdom_ruler(kingdom, city)
                         save_kingdom(self.conn, kingdom)
+
+                        # A real succession shakes the kingdom's relationships.
+                        # The very first crowning (nobody had ruled yet, so
+                        # there is no previous monarch) does not -- rulers are
+                        # not placed when a world is created. A previous
+                        # monarch who is still alive was deposed, not
+                        # replaced after dying.
+                        if previous_monarch_id is not None:
+                            previous = get_npc(self.conn, previous_monarch_id)
+                            apply_succession_shock(
+                                self.conn, kingdom["id"],
+                                overthrown=bool(previous and previous["alive"])
+                            )
 
         from Data.Infrastructure.travel import consider_tourism
         consider_tourism(self.conn, self.world_id)
 
         from Data.Infrastructure.migration import consider_migration
         consider_migration(self.conn, self.world_id)
-        
-        self.conn.commit()
 
+        self.conn.commit()
     def on_season(self) -> None:
         # Reserved.
         pass
 
     def on_year(self) -> None:
+        from Data.NPCS.aging import apply_aging
+        from Data.Events.events import death_event
+        from Data.Relationships.relationships import apply_grief
+        from Data.Combat.combat import (
+            resolve_kingdom_war, check_civil_war_eligibility, resolve_civil_war,
+            CIVIL_WAR_CHANCE_IF_ELIGIBLE
+        )
+        from Data.Database.repository import get_kingdom, get_world_roads
+        import random
+
+        kingdoms = get_world_kingdoms(self.conn, self.world_id)
+
+        # Aging + natural old-age death for every living NPC.
+        for kingdom in kingdoms:
+            for city in get_kingdom_cities(self.conn, kingdom["id"]):
+                for npc in get_city_npcs(self.conn, city["id"]):
+                    if apply_aging(npc):
+                        death_event(self.conn, npc, "old age", city_id=city["id"])
+                        apply_grief(self.conn, npc)
+                    save_npc(self.conn, npc)
+
+        self.conn.commit()
+
+        # Diplomacy, all before wars so a pair that has just become allies
+        # cannot be sent to war the very same year: peaceful years warm
+        # kingdoms toward each other, alliances whose favor has soured end,
+        # and then any pair whose goodwill has grown high enough allies
+        # (ending first, so a freed-up ally slot can be used right away).
+        from Data.Government.diplomacy import (
+            apply_peace_dividend, end_failed_alliances, check_alliances,
+            war_candidates, choose_war_target,
+        )
+        apply_peace_dividend(self.conn, self.world_id, self.clock.year)
+        end_failed_alliances(self.conn, self.world_id, self.clock.year)
+        check_alliances(self.conn, self.world_id, self.clock.year)
+
+        # Kingdom wars. Whether a kingdom goes to war this year depends on its
+        # grievances (a kingdom with no enemies rarely does), and who it
+        # attacks favors near neighbors it also resents -- see
+        # Data.Government.diplomacy.choose_war_target. Allies and kingdoms it
+        # is still under a Peace Treaty with are never candidates.
+        trade_routes = [r for r in get_world_roads(self.conn, self.world_id) if r["kind"] == "Trade Route"]
+
+        for kingdom in kingdoms:
+
+            candidates = war_candidates(self.conn, kingdom, trade_routes, self.clock.year)
+
+            choice = choose_war_target(self.conn, kingdom["id"], candidates)
+
+            if choice is None:
+                continue
+
+            chosen_route, defender_kingdom_id = choice
+
+            defender_kingdom = get_kingdom(self.conn, defender_kingdom_id)
+
+            attacker_cities = get_kingdom_cities(self.conn, kingdom["id"])
+            defender_cities = get_kingdom_cities(self.conn, defender_kingdom["id"])
+
+            resolve_kingdom_war(self.conn, kingdom, defender_kingdom, attacker_cities, defender_cities)
+
+        self.conn.commit()
+
+        # Civil wars: checked after kingdom wars, so a kingdom that
+        # just fought (and spent treasury, took casualties) has that
+        # already reflected before eligibility gets checked, and one
+        # that just had a civil war respects its own fresh cooldown.
+        for kingdom_summary in kingdoms:
+
+            kingdom = get_kingdom(self.conn, kingdom_summary["id"])
+            cities = get_kingdom_cities(self.conn, kingdom["id"])
+
+            eligibility = check_civil_war_eligibility(self.conn, kingdom, cities, self.clock.year)
+
+            if not eligibility["eligible"]:
+                continue
+
+            if random.random() >= CIVIL_WAR_CHANCE_IF_ELIGIBLE:
+                continue
+
+            resolve_civil_war(self.conn, kingdom, cities, self.clock.year)
+
+            for city in cities:
+                save_city(self.conn, city)
+
+        self.conn.commit()
         from Data.NPCS.aging import apply_aging
         from Data.Events.events import death_event
         from Data.Relationships.relationships import apply_grief

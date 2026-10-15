@@ -44,6 +44,12 @@ def assign_city_ruler(conn, city):
     conn.commit()
 
     city["ruler"] = ruler["id"]
+    
+    # Save it. Setting city["ruler"] only changes the copy in memory, and
+    # nothing else writes it back, so without this every city looked
+    # rulerless again at the next monthly tick and crowned yet another
+    # king or mayor -- one coronation per city per month, forever.
+    conn.execute("UPDATE cities SET ruler_id = ? WHERE id = ?", (ruler["id"], city["id"]))
 
     from Data.Events.events import coronation_event
     coronation_event(conn, ruler, city)

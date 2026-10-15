@@ -120,3 +120,14 @@ def alliance_event(conn, kingdom_a, kingdom_b):
         f"their peoples bound by long years of trade and goodwill.",
         kingdom_id=kingdom_a["id"]
     )
+def alliance_ended_event(conn, kingdom_a, kingdom_b):
+
+    from Data.Database.repository import create_event
+
+    return create_event(
+        conn,
+        "Alliance Ended",
+        f"The alliance between {kingdom_a['name']} and {kingdom_b['name']} came to an end, "
+        f"the old friendship worn thin.",
+        kingdom_id=kingdom_a["id"]
+    )
