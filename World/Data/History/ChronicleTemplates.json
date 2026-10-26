@@ -1,0 +1,17 @@
+{
+  "Alliance Formed": [
+    "{When}, {kingdom} did forge an alliance most binding with the realm of {other}, their peoples bound by long years of kinship and mutual aid.",
+    "{When}, the crown of {kingdom} and the crown of {other} swore a covenant of friendship, and thereafter each stood as shield to the other.",
+    "{When}, after many seasons of kind dealings, {kingdom} clasped hands with {other}, and an alliance was sworn betwixt the two realms."
+  ],
+  "Alliance Ended (cooled)": [
+    "{When}, the bond with {other} fell away, for the regard of {kingdom} for that realm had grown cold, and the alliance was no more.",
+    "{When}, {kingdom} turned its face from {other}, and the covenant that had joined them was broken.",
+    "{When}, {kingdom} withdrew its hand from {other}, the old friendship worn as thin as an ill-mended cloak."
+  ],
+  "Alliance Ended (spurned)": [
+    "{When}, {other} grew cold toward {kingdom}, and the alliance between the two realms was no more.",
+    "{When}, {kingdom} was forsaken by {other}, whose friendship had faded, and the covenant between them lapsed.",
+    "{When}, {other} withdrew its hand from {kingdom}, and the long alliance was at an end."
+  ]
+}

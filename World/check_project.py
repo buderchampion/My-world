@@ -181,6 +181,18 @@ FEATURES = [
             "Data/Combat/combat.py": ['capital_city["ruler"] = None'],
         },
     },
+    {
+        "name": "Chronicle: each kingdom writes its own history",
+        "tables": ["chronicle_entries"],
+        "functions": {
+            "Data/History/chronicle.py": [
+                "write_entry", "pick_template", "format_when", "get_chronicle",
+                "record_alliance_formed", "record_alliance_ended",
+            ],
+            "read_chronicle.py": ["main"],
+        },
+        "wired": {"Data/Government/diplomacy.py": ["record_alliance_formed(", "record_alliance_ended("]},
+    },
 ]
 
 
@@ -403,8 +415,27 @@ def check_config(r):
     except Exception as e:
         r.warn(f"could not cross-check CHAIN_CATEGORIES ({type(e).__name__}: {e})")
 
+    try:
+        from Data.History import chronicle
+        templates = load_json("Data/History/ChronicleTemplates.json")
+
+        for key in chronicle.REQUIRED_TEMPLATE_KEYS:
+            if not templates.get(key):
+                r.fail(f"ChronicleTemplates.json: no templates for '{key}'")
+
+        for key, options in templates.items():
+            for number, text in enumerate(options, start=1):
+                try:
+                    text.format(**{field: "x" for field in chronicle.TEMPLATE_FIELDS})
+                except (KeyError, IndexError, ValueError) as e:
+                    r.fail(f"ChronicleTemplates.json '{key}' #{number}: unknown or broken placeholder {e}")
+    except (OSError, json.JSONDecodeError) as e:
+        r.fail(f"could not load ChronicleTemplates.json: {e}")
+    except Exception as e:
+        r.warn(f"could not cross-check the chronicle templates ({type(e).__name__}: {e})")
+
     if r.failures == start:
-        r.ok("resources, production, professions, kits, and needs effects are consistent")
+        r.ok("resources, production, professions, kits, needs effects and chronicle templates are consistent")
 
 
 # ---------------------------------------------------------------------------
@@ -839,7 +870,58 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a soured alliance ends, a healthy one does not", alliances_end)
+    
+    def chronicle_records_alliances():
+        from Data.Government.diplomacy import check_alliances, end_failed_alliances, ALLIANCE_FAVOR_THRESHOLD
+        from Data.Database.repository import adjust_kingdom_favor
+        from Data.History.chronicle import get_chronicle, load_templates, format_when
 
+        a, b = kingdoms[0], kingdoms[1]
+
+        def clear():
+            conn.execute("DELETE FROM kingdom_favor")
+            conn.execute("DELETE FROM kingdom_relations")
+            conn.execute("DELETE FROM chronicle_entries")
+            conn.execute("DELETE FROM events WHERE type IN ('Alliance', 'Alliance Ended')")
+            conn.commit()
+
+        clear()
+
+        adjust_kingdom_favor(conn, a["id"], b["id"], ALLIANCE_FAVOR_THRESHOLD + 10)
+        adjust_kingdom_favor(conn, b["id"], a["id"], ALLIANCE_FAVOR_THRESHOLD + 10)
+        conn.commit()
+        check_alliances(conn, world_id, 3)
+
+        for me, other in ((a, b), (b, a)):
+            entries = get_chronicle(conn, me["id"])
+            assert len(entries) == 1, f"{me['name']}'s chronicle should hold 1 entry after an alliance, but holds {len(entries)}"
+            text = entries[0]["text"]
+            assert me["name"] in text and other["name"] in text, f"{me['name']}'s alliance entry does not name both realms: {text!r}"
+            assert "{" not in text and "}" not in text, f"an alliance entry has an unfilled placeholder: {text!r}"
+
+        # the alliance sours on B's side: B tells it as withdrawing, A as being forsaken
+        adjust_kingdom_favor(conn, b["id"], a["id"], -100)
+        conn.commit()
+        end_failed_alliances(conn, world_id, 4)
+
+        capitalized, lowercase = format_when(4, "Spring")
+        templates = load_templates()
+
+        def told_as(text, key, me, other):
+            return any(
+                t.format(When=capitalized, when=lowercase, kingdom=me["name"], other=other["name"]) == text
+                for t in templates[key]
+            )
+
+        entries_a, entries_b = get_chronicle(conn, a["id"]), get_chronicle(conn, b["id"])
+        assert len(entries_a) == 2 and len(entries_b) == 2, "both chronicles should record the alliance ending"
+        assert told_as(entries_b[1]["text"], "Alliance Ended (cooled)", b, a), "the kingdom whose regard fell did not tell it as withdrawing"
+        assert told_as(entries_a[1]["text"], "Alliance Ended (spurned)", a, b), "the kingdom that was left did not tell it as being forsaken"
+
+        clear()
+
+    if len(kingdoms) >= 2:
+        run_step(r, "alliances are written into both chronicles, each from its own side", chronicle_records_alliances)
     def war_costs_favor():
         from Data.Government.diplomacy import apply_war_favor, war_chance, WAR_FAVOR_DEFENDER, WAR_FAVOR_ATTACKER
         from Data.Database.repository import get_kingdom_favor

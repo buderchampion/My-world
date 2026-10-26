@@ -198,6 +198,19 @@ CREATE TABLE IF NOT EXISTS events (
                             -- auto-filled by create_event() from the world's current
                             -- clock position unless explicitly overridden
 );
+CREATE TABLE IF NOT EXISTS chronicle_entries (
+    id              INTEGER PRIMARY KEY,
+    kingdom_id      INTEGER NOT NULL REFERENCES kingdoms(id),
+    event_type      TEXT NOT NULL,        -- e.g. "Alliance Formed"; what kind of big event this records
+    text            TEXT NOT NULL,        -- the finished olde-English sentence, written from this kingdom's point of view
+    year            INTEGER NOT NULL,
+    season          TEXT,                 -- Spring, Summer, Autumn or Winter
+    era             TEXT,                 -- left empty until the Era system exists
+    source_event_id INTEGER REFERENCES events(id) ON DELETE SET NULL
+                                          -- the raw event this entry tells the story of
+);
+
+CREATE INDEX IF NOT EXISTS idx_chronicle_kingdom ON chronicle_entries(kingdom_id, id);
 
 CREATE TABLE IF NOT EXISTS event_participants (
     event_id    INTEGER NOT NULL REFERENCES events(id),

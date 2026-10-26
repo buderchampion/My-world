@@ -160,6 +160,7 @@ def end_failed_alliances(conn, world_id, current_year):
 
     from Data.Database.repository import get_kingdom_relation, set_kingdom_relation, get_kingdom_favor
     from Data.Events.events import alliance_ended_event
+    from Data.History.chronicle import record_alliance_ended
 
     kingdoms = _world_kingdoms(conn, world_id)
 
@@ -178,8 +179,11 @@ def end_failed_alliances(conn, world_id, current_year):
         if min(favor_a_to_b, favor_b_to_a) >= ALLIANCE_BREAK_THRESHOLD:
             continue
 
+        cooler = kingdom_a if favor_a_to_b < favor_b_to_a else kingdom_b
+
         set_kingdom_relation(conn, kingdom_a["id"], kingdom_b["id"], "Neutral")
-        alliance_ended_event(conn, kingdom_a, kingdom_b)
+        event = alliance_ended_event(conn, kingdom_a, kingdom_b)
+        record_alliance_ended(conn, world_id, kingdom_a, kingdom_b, cooler, current_year, event["id"])
 
         ended.append({
             "kingdom_a": kingdom_a,
@@ -187,7 +191,7 @@ def end_failed_alliances(conn, world_id, current_year):
             "year": current_year,
             "favor_a_to_b": favor_a_to_b,
             "favor_b_to_a": favor_b_to_a,
-            "cooler": kingdom_a if favor_a_to_b < favor_b_to_a else kingdom_b,
+            "cooler": cooler,
         })
 
     conn.commit()
@@ -214,6 +218,7 @@ def check_alliances(conn, world_id, current_year):
 
     from Data.Database.repository import get_kingdom_relation, set_kingdom_relation, get_kingdom_favor
     from Data.Events.events import alliance_event
+    from Data.History.chronicle import record_alliance_formed
 
     kingdoms = _world_kingdoms(conn, world_id)
 
@@ -258,7 +263,8 @@ def check_alliances(conn, world_id, current_year):
             continue
 
         set_kingdom_relation(conn, kingdom_a["id"], kingdom_b["id"], "Allied")
-        alliance_event(conn, kingdom_a, kingdom_b)
+        event = alliance_event(conn, kingdom_a, kingdom_b)
+        record_alliance_formed(conn, world_id, kingdom_a, kingdom_b, current_year, event["id"])
 
         ally_counts[kingdom_a["id"]] += 1
         ally_counts[kingdom_b["id"]] += 1
@@ -274,7 +280,6 @@ def check_alliances(conn, world_id, current_year):
     conn.commit()
 
     return formed
-
 
 def apply_succession_shock(conn, kingdom_id, overthrown=False):
     """
