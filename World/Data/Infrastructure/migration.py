@@ -17,6 +17,13 @@ MIGRATION_MIN_HAPPINESS_ADVANTAGE = 20
 MIGRATION_MIN_GOLD_SOLO = 150
 MIGRATION_GOLD_PER_ADDITIONAL_MEMBER = 75
 
+# A reigning king, queen or mayor never abandons the realm, and neither does
+# a household that includes one. Without this, a desperate ruler (or a
+# ruler's desperate spouse, who brings the whole household along) could
+# emigrate and leave a throne occupied by someone living in another kingdom,
+# which is never noticed as empty and never passed on.
+RULING_TITLES = ("King", "Queen", "Mayor")
+
 # Chance, per month, that an eligible NPC actually decides to go.
 # Deliberately much rarer than Tourism -- this is the biggest
 # decision an NPC can make, not a whim.
@@ -221,6 +228,9 @@ def consider_migration(conn, world_id):
                 family = get_family_members(conn, npc)
 
                 already_handled_ids.update(m["id"] for m in family)
+                
+                if any(m.get("title") in RULING_TITLES for m in family):
+                    continue
 
                 family_avg_stress = sum(m["needs"]["stress"] for m in family) / len(family)
                 if family_avg_stress < MIGRATION_MIN_STRESS:

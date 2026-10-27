@@ -26,6 +26,7 @@ import argparse
 import ast
 import difflib
 import json
+import os
 import sqlite3
 import subprocess
 import sys
@@ -55,6 +56,9 @@ KNOWN_EMPTY_JSON = {"Data/Counters.json"}
 #   resources  -- names that must exist in ResourceTypes.json
 #   functions  -- {file: [top-level function names that must exist]}
 #   wired      -- {file: [text that must appear in it]}  (proves it's called)
+#   once       -- {file: [text that must appear EXACTLY once]}  (catches a
+#                 new version pasted above an old one without deleting it,
+#                 which leaves both copies running one after the other)
 # ---------------------------------------------------------------------------
 
 FEATURES = [
@@ -186,12 +190,41 @@ FEATURES = [
         "tables": ["chronicle_entries"],
         "functions": {
             "Data/History/chronicle.py": [
-                "write_entry", "pick_template", "format_when", "get_chronicle",
-                "record_alliance_formed", "record_alliance_ended",
+                "write_entry", "pick_template", "format_when", "get_chronicle", "current_date",
+                "record_alliance_formed", "record_alliance_ended", "record_ruler_death", "record_coronation",
             ],
             "read_chronicle.py": ["main"],
         },
-        "wired": {"Data/Government/diplomacy.py": ["record_alliance_formed(", "record_alliance_ended("]},
+        "wired": {
+            "Data/Government/diplomacy.py": ["record_alliance_formed(", "record_alliance_ended("],
+            "Data/Events/events.py": ["record_ruler_death("],
+            "Data/Simulation/simulation_manager.py": ["record_coronation("],
+            "Data/Combat/combat.py": ["foe_kingdom=defender_kingdom", "foe_kingdom=attacker_kingdom"],
+        },
+    },
+    {
+        "name": "Grief survives being saved (widows and widowers are freed and actually grieve)",
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["grieving.add(", 'if npc["id"] in grieving:'],
+            "Data/Combat/combat.py": ["survivors = [npc for city in cities"],
+        },
+    },
+    {
+        "name": "Each tick runs each system once (no leftover duplicate code)",
+        "once": {
+            "Data/Simulation/simulation_manager.py": [
+                "def on_hour(", "def on_day(", "def on_month(", "def on_year(",
+                "form_families(", "consider_tourism(", "consider_migration(", "record_coronation(",
+                "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
+                "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
+                "apply_starvation_check(npc)",
+            ],
+            "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
+        },
+    },
+    {
+        "name": "Ruling households do not emigrate",
+        "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
 ]
 
@@ -431,8 +464,10 @@ def check_config(r):
                     r.fail(f"ChronicleTemplates.json '{key}' #{number}: unknown or broken placeholder {e}")
     except (OSError, json.JSONDecodeError) as e:
         r.fail(f"could not load ChronicleTemplates.json: {e}")
+    except ImportError as e:
+        r.fail(f"Data/History/chronicle.py could not be imported ({e}) -- check it exists with exactly that name, all lowercase")
     except Exception as e:
-        r.warn(f"could not cross-check the chronicle templates ({type(e).__name__}: {e})")
+        r.fail(f"the chronicle templates could not be checked ({type(e).__name__}: {e})")
 
     if r.failures == start:
         r.ok("resources, production, professions, kits, needs effects and chronicle templates are consistent")
@@ -441,6 +476,62 @@ def check_config(r):
 # ---------------------------------------------------------------------------
 # 3. Feature manifest ("is this copy up to date?")
 # ---------------------------------------------------------------------------
+
+def find_exact(relative):
+    """
+    Looks for ROOT/relative the way Python's import will: names must match
+    EXACTLY, letter case included. (Windows' own file checks ignore case, so
+    a file saved as Chronicle.py looks present there but fails to import.)
+    Returns (exact_match, the name actually on disk or None).
+    """
+
+    current, actual = ROOT, []
+
+    for part in Path(relative).parts:
+        try:
+            entries = os.listdir(current)
+        except OSError:
+            return False, None
+        if part in entries:
+            match = part
+        else:
+            near = [e for e in entries if e.lower() == part.lower()]
+            if not near:
+                return False, None
+            match = near[0]
+        actual.append(match)
+        current = current / match
+
+    actual_path = "/".join(actual)
+    return actual_path == Path(relative).as_posix(), actual_path
+
+
+def file_problem(relative):
+    """None if the file is exactly where and what it should be; otherwise a
+    plain explanation of what is wrong with it."""
+
+    exact, actual = find_exact(relative)
+
+    if exact:
+        return None
+    if actual:
+        return f"{actual} must be named exactly {relative} (Python names are case-sensitive, even on Windows)"
+
+    _, as_txt = find_exact(relative + ".txt")
+    if as_txt:
+        return f"found {as_txt} -- rename it to {relative} (the editor added .txt)"
+
+    name = Path(relative).name.lower()
+    elsewhere = [
+        rel(p) for p in ROOT.rglob("*")
+        if p.is_file() and p.name.lower() == name
+        and not any(part in SKIP_DIRS for part in p.relative_to(ROOT).parts)
+    ]
+    if elsewhere:
+        return f"{relative} is missing, but {elsewhere[0]} exists -- it belongs at {relative}"
+
+    return f"file {relative} is missing"
+
 
 def top_level_functions(path):
     try:
@@ -490,8 +581,9 @@ def check_features(r):
 
         for file, names in feature.get("functions", {}).items():
             path = ROOT / file
-            if not path.exists():
-                gaps.append(f"file {file} is missing")
+            problem = file_problem(file)
+            if problem:
+                gaps.append(problem)
                 continue
             found = top_level_functions(path)
             if found is None:
@@ -502,13 +594,32 @@ def check_features(r):
 
         for file, snippets in feature.get("wired", {}).items():
             path = ROOT / file
-            if not path.exists():
-                gaps.append(f"file {file} is missing")
+            problem = file_problem(file)
+            if problem:
+                gaps.append(problem)
                 continue
             text = read_text(path)
             for snippet in snippets:
                 if snippet not in text:
                     gaps.append(f"'{snippet}' never appears in {file}")
+
+        for file, snippets in feature.get("once", {}).items():
+            problem = file_problem(file)
+            if problem:
+                gaps.append(problem)
+                continue
+            text = read_text(ROOT / file)
+            repeated = []
+            for snippet in snippets:
+                # a quoted mention (like the ones in this manifest) is not a copy of the code
+                count = text.count(snippet) - text.count('"' + snippet) - text.count("'" + snippet)
+                if count == 0:
+                    gaps.append(f"'{snippet}' never appears in {file}")
+                elif count > 1:
+                    repeated.append(f"{snippet} (x{count})")
+            if repeated:
+                gaps.append(f"{file} contains leftover duplicate code -- an old copy is probably still below "
+                            f"a newer one, and both run. Repeated: " + ", ".join(repeated))
 
         if gaps:
             incomplete += 1
@@ -596,54 +707,6 @@ def check_repo(r):
     generated = []
 
     for name in tracked.stdout.splitlines():
-        base = name.rsplit("/", 1)[-1]
-        if base in ("world.db", "world.db-wal", "world.db-shm"):
-            r.fail(f"git is tracking '{name}' -- run: git rm --cached \"{name}\"")
-        elif "__pycache__/" in name or name.endswith(".pyc"):
-            generated.append(name)
-
-    if generated:
-        r.warn(
-            f"git is tracking {len(generated)} generated file(s), e.g. '{generated[0]}' -- "
-            f"run: git rm -r --cached .   then: git add .   (your .gitignore will skip them)"
-        )
-
-    if r.failures == start:
-        r.ok("world.db is ignored and not tracked")
-    r.section("Git hygiene")
-
-    repo = find_repo_root(ROOT)
-
-    if repo is None:
-        r.info("this folder is not inside a git repository -- skipped")
-        return
-
-    start = r.failures
-
-    ignore = repo / ".gitignore"
-    ignored_lines = {line.strip() for line in read_text(ignore).splitlines()} if ignore.exists() else set()
-
-    if "world.db" not in ignored_lines:
-        r.fail("'.gitignore' is missing or does not list world.db (git can corrupt it)")
-
-    if not (repo / ".gitattributes").exists():
-        r.warn("no .gitattributes -- add one marking *.db as binary")
-
-    try:
-        result = subprocess.run(
-            ["git", "ls-files"], cwd=repo, capture_output=True, text=True, timeout=30,
-        )
-    except (FileNotFoundError, subprocess.TimeoutExpired):
-        r.info("git is not available on PATH -- tracked-file check skipped")
-        return
-
-    if result.returncode != 0:
-        r.info("could not list tracked files -- tracked-file check skipped")
-        return
-
-    generated = []
-
-    for name in result.stdout.splitlines():
         base = name.rsplit("/", 1)[-1]
         if base in ("world.db", "world.db-wal", "world.db-shm"):
             r.fail(f"git is tracking '{name}' -- run: git rm --cached \"{name}\"")
@@ -776,6 +839,7 @@ def _smoke_body(r, holder):
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
         r.warn("fewer than 2 kingdoms generated -- favor check skipped")
+
     def alliances():
         from Data.Government.diplomacy import check_alliances, ALLIANCE_FAVOR_THRESHOLD
         from Data.Database.repository import adjust_kingdom_favor, get_kingdom_relation
@@ -807,8 +871,8 @@ def _smoke_body(r, holder):
         clear()   # leave the world as we found it for the steps after this one
 
     if len(kingdoms) >= 2:
-        run_step(r, "mutual goodwill forms an alliance, one-sided does not", alliances)    
-    
+        run_step(r, "mutual goodwill forms an alliance, one-sided does not", alliances)
+
     def peace_dividend():
         from Data.Government.diplomacy import apply_peace_dividend
         from Data.Database.repository import get_kingdom_favor, set_kingdom_relation
@@ -839,6 +903,7 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a peaceful year warms kingdoms, a recent war pauses it", peace_dividend)
+
     def alliances_end():
         from Data.Government.diplomacy import end_failed_alliances, ALLIANCE_BREAK_THRESHOLD
         from Data.Database.repository import adjust_kingdom_favor, get_kingdom_relation, set_kingdom_relation
@@ -870,7 +935,7 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a soured alliance ends, a healthy one does not", alliances_end)
-    
+
     def chronicle_records_alliances():
         from Data.Government.diplomacy import check_alliances, end_failed_alliances, ALLIANCE_FAVOR_THRESHOLD
         from Data.Database.repository import adjust_kingdom_favor
@@ -922,6 +987,7 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "alliances are written into both chronicles, each from its own side", chronicle_records_alliances)
+
     def war_costs_favor():
         from Data.Government.diplomacy import apply_war_favor, war_chance, WAR_FAVOR_DEFENDER, WAR_FAVOR_ATTACKER
         from Data.Database.repository import get_kingdom_favor
@@ -941,6 +1007,7 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a war costs favor, and a grievance makes war likelier", war_costs_favor)
+
     def backfill():
         from Data.Buildings.building_generator import ensure_production_chain_buildings
 
@@ -1004,17 +1071,27 @@ def _smoke_body(r, holder):
     run_step(r, "hour tick  (needs and schedules)", manager.on_hour)
     run_step(r, "day tick   (economy, wages, trade, caravans, travel)", manager.on_day)
     run_step(r, "month tick (families, relationships, tourism, migration)", manager.on_month)
+
     def rulers_saved():
         saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]
         total = conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
         assert saved >= total * 0.9, f"only {saved} of {total} cities have a saved ruler after the monthly tick"
 
+        founding = conn.execute(
+            "SELECT kingdom_id, COUNT(*) n FROM chronicle_entries WHERE event_type = 'Coronation' GROUP BY kingdom_id"
+        ).fetchall()
+        assert len(founding) == len(kingdoms) and all(row["n"] == 1 for row in founding), \
+            "every kingdom's chronicle should open with exactly one coronation, its founding monarch"
+
         before = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
+        entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
         manager.on_month()
         after = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
         assert after == before, f"a second month with every ruler alive crowned {after - before} more rulers (rulers are not being saved)"
+        entries_after = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
+        assert entries_after == entries_before, "a quiet month added chronicle entries (the founding coronation is being written again)"
 
-    run_step(r, "rulers are saved: a second month crowns nobody new", rulers_saved)
+    run_step(r, "rulers are saved, each realm's founding monarch is chronicled once", rulers_saved)
 
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor
@@ -1035,6 +1112,11 @@ def _smoke_body(r, holder):
         manager.on_month()
 
         assert get_kingdom(conn, kingdom["id"])["ruler"] != monarch, "the dead monarch was not replaced"
+        from Data.History.chronicle import get_chronicle
+        crowned = [e for e in get_chronicle(conn, kingdom["id"]) if e["event_type"] == "Coronation"]
+        old_name = conn.execute("SELECT name FROM npcs WHERE id = ?", (monarch,)).fetchone()["name"]
+        assert len(crowned) == 2 and old_name in crowned[-1]["text"], \
+            "the successor's crowning was not chronicled, or does not name the monarch it replaced"
         shaken = [get_kingdom_favor(conn, kingdom["id"], o["id"]) for o in others]
         assert all(abs(f - 100) > 1e-6 for f in shaken), "a new monarch was crowned but the kingdom's feelings were not shaken"
         untouched = [get_kingdom_favor(conn, o["id"], kingdom["id"]) for o in others]
@@ -1045,7 +1127,61 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a new monarch shakes the kingdom's relationships", succession_shakes_relationships)
-    run_step(r, "year tick  (aging, wars, civil war check)", manager.on_year)
+    def monarch_deaths():
+        from Data.Database.repository import get_kingdom, get_npc
+        from Data.Events.events import death_event
+        from Data.History.chronicle import get_chronicle
+
+        before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
+        commoner = conn.execute("SELECT id FROM npcs WHERE alive = 1 AND title IS NULL LIMIT 1").fetchone()["id"]
+        death_event(conn, get_npc(conn, commoner), "old age")
+        conn.commit()
+        assert conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0] == before, "a commoner's death was written into a chronicle"
+
+        kingdom, foe = kingdoms[0], kingdoms[1]
+        monarch = get_npc(conn, get_kingdom(conn, kingdom["id"])["ruler"])
+        death_event(conn, monarch, "War", kingdom_id=kingdom["id"], foe_kingdom=foe)
+        conn.commit()
+        died = [e for e in get_chronicle(conn, kingdom["id"]) if e["event_type"] == "Ruler Died"]
+        assert died and monarch["name"] in died[-1]["text"] and foe["name"] in died[-1]["text"], \
+            "a monarch slain in war was not chronicled with their name and the enemy's"
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a monarch's death is chronicled (naming any foe), a commoner's is not", monarch_deaths)
+
+    def year_tick_and_grief():
+        import Data.NPCS.aging as aging
+        from Data.Database.repository import get_npc
+
+        # A couple in one city where the one who dies comes EARLIER in the city's
+        # list -- the case where the yearly tick used to save the survivor's old
+        # copy over their grief, leaving them married to the dead.
+        city = conn.execute(
+            """SELECT city_id FROM npcs WHERE alive = 1 AND title IS NULL AND profession NOT IN ('Unemployed', 'Child')
+               GROUP BY city_id HAVING COUNT(*) >= 2 LIMIT 1"""
+        ).fetchone()["city_id"]
+        pool = [row["id"] for row in conn.execute(
+            """SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND title IS NULL
+               AND profession NOT IN ('Unemployed', 'Child') ORDER BY id""", (city,))]
+        dead, survivor = pool[0], pool[-1]
+        for a, b in ((dead, survivor), (survivor, dead)):
+            conn.execute("UPDATE npcs SET spouse_id = ?, needs_stress = 10 WHERE id = ?", (b, a))
+        conn.execute("UPDATE npcs SET age = 200 WHERE id = ?", (dead,))
+        conn.commit()
+
+        real = aging.natural_death_chance
+        aging.natural_death_chance = lambda age: 1.0 if age > 150 else real(age)
+        try:
+            manager.on_year()
+        finally:
+            aging.natural_death_chance = real
+
+        assert not get_npc(conn, dead)["alive"], "(setup) the chosen NPC did not die of old age"
+        widow = get_npc(conn, survivor)
+        assert widow["spouse"] is None, "a widow is still married to the dead after the yearly tick (grief erased by a stale save)"
+        assert widow["needs"]["stress"] > 10, "a widow felt no grief after the yearly tick (grief erased by a stale save)"
+
+    run_step(r, "year tick  (aging, wars, civil war check) -- and a widow's grief survives it", year_tick_and_grief)
 
     # --- invariants that should hold after any amount of simulation ----------
 

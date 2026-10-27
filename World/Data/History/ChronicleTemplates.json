@@ -13,5 +13,50 @@
     "{When}, {other} grew cold toward {kingdom}, and the alliance between the two realms was no more.",
     "{When}, {kingdom} was forsaken by {other}, whose friendship had faded, and the covenant between them lapsed.",
     "{When}, {other} withdrew its hand from {kingdom}, and the long alliance was at an end."
+  ],
+  "Coronation (founding)": [
+    "{When}, {ruler} was crowned the first {title} of {kingdom}, and so began the long tale of that realm.",
+    "{When}, the crown of {kingdom} was set upon the brow of {ruler}, first {title} of all that land.",
+    "{When}, {kingdom} raised up {ruler} as its {title}, the first ever to sit upon its throne."
+  ],
+  "Coronation (succession)": [
+    "{When}, {ruler} was crowned {title} of {kingdom} in the stead of {predecessor}.",
+    "{When}, the crown of {kingdom} passed from {predecessor} to {ruler}, who was hailed as {title}.",
+    "{When}, with {predecessor} laid to rest, {kingdom} crowned {ruler} its {title}."
+  ],
+  "Coronation (after overthrow)": [
+    "{When}, with {predecessor} cast down, {ruler} was raised to the throne of {kingdom} as {title}.",
+    "{When}, the victors of the rebellion crowned {ruler} {title} of {kingdom}, and the reign of {predecessor} was ended.",
+    "{When}, {kingdom} took {ruler} for its {title}, for {predecessor} had been driven from the throne."
+  ],
+  "Ruler Died (old age)": [
+    "{When}, {ruler}, {title} of {kingdom}, passed from this world full of years, having seen {age} winters.",
+    "{When}, {title} {ruler} of {kingdom} breathed {possessive} last in peace at the age of {age}, and the realm mourned.",
+    "{When}, death came gently for {ruler}, {title} of {kingdom}, in the {age_ordinal} winter of {possessive} life."
+  ],
+  "Ruler Died (war)": [
+    "{When}, {ruler}, {title} of {kingdom}, fell in battle against {other}, and the realm mourned a sovereign lost to war.",
+    "{When}, {title} {ruler} of {kingdom} was slain upon the field in the war with {other}.",
+    "{When}, the host of {other} struck down {ruler}, {title} of {kingdom}, sword in hand."
+  ],
+  "Ruler Died (civil war)": [
+    "{When}, {ruler}, {title} of {kingdom}, perished in the civil war that tore the realm asunder.",
+    "{When}, {title} {ruler} of {kingdom} was slain by rebels of {possessive} own realm.",
+    "{When}, kin fought kin in {kingdom}, and {ruler}, its {title}, did not live to see the peace."
+  ],
+  "Ruler Died (raid)": [
+    "{When}, {ruler}, {title} of {kingdom}, was slain when raiders fell upon the city.",
+    "{When}, brigands struck at {kingdom}, and {title} {ruler} fell defending the walls.",
+    "{When}, {ruler}, {title} of {kingdom}, perished at the hands of raiders."
+  ],
+  "Ruler Died (starvation)": [
+    "{When}, famine claimed {ruler}, {title} of {kingdom}, as it claimed the poorest of the realm.",
+    "{When}, {title} {ruler} of {kingdom} wasted away in a time of hunger.",
+    "{When}, want of bread brought low even {ruler}, {title} of {kingdom}."
+  ],
+  "Ruler Died (other)": [
+    "{When}, {ruler}, {title} of {kingdom}, passed from this world.",
+    "{When}, the realm of {kingdom} mourned the death of {title} {ruler}.",
+    "{When}, {title} {ruler} of {kingdom} was taken from the realm."
   ]
 }

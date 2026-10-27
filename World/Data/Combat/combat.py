@@ -276,10 +276,10 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     from Data.Events.events import death_event
     from Data.Relationships.relationships import apply_grief
     for npc in attacker_deaths:
-        death_event(conn, npc, "War", kingdom_id=attacker_kingdom["id"])
+        death_event(conn, npc, "War", kingdom_id=attacker_kingdom["id"], foe_kingdom=defender_kingdom)
         apply_grief(conn, npc)
     for npc in defender_deaths:
-        death_event(conn, npc, "War", kingdom_id=defender_kingdom["id"])
+        death_event(conn, npc, "War", kingdom_id=defender_kingdom["id"], foe_kingdom=attacker_kingdom)
         apply_grief(conn, npc)
 
     captured_city = None
@@ -478,7 +478,11 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
         death_event(conn, npc, "Civil War", kingdom_id=kingdom["id"])
         apply_grief(conn, npc)
 
-    apply_morale_impact(conn, living, "civil_war_rebels_won" if rebels_win else "civil_war_loyalists_won")
+    # Reload everyone for the morale hit, as raids and wars do: the 'living'
+    # list was loaded before the fighting, and saving those old copies now
+    # would erase the grief just applied to the slain's spouses.
+    survivors = [npc for city in cities for npc in get_city_npcs(conn, city["id"]) if npc["alive"]]
+    apply_morale_impact(conn, survivors, "civil_war_rebels_won" if rebels_win else "civil_war_loyalists_won")
 
     from Data.Relationships.relationships import evolve_relationships_from_battle, form_relationships_from_battle
     evolve_relationships_from_battle(

@@ -121,8 +121,12 @@ class SimulationManager:
         )
         from Data.Combat.combat import resolve_raid
         from Data.Government.military import apply_military_upkeep, MILITARY_PROFESSIONS
-        from Data.Database.repository import add_treasury, add_city_wealth
+        from Data.Database.repository import add_treasury, add_city_wealth, get_npc
         import random
+
+        # NPCs whose record grief changed today (a spouse starved); see the
+        # per-NPC loop below for why they must be reloaded.
+        grieving = set()
         
         # Chance, per city per day, that a city's own Bandit Camp (if
         # it has one, with living occupants) actually raids that day --
@@ -162,12 +166,21 @@ class SimulationManager:
 
                 for npc in get_city_npcs(self.conn, city["id"]):
 
+                    # This list was loaded before anyone died today. If grief
+                    # has since changed this person (a spouse just died), reload
+                    # them, or saving their old copy below would erase the grief
+                    # and leave them married to the dead.
+                    if npc["id"] in grieving:
+                        npc = get_npc(self.conn, npc["id"])
+
                     if not npc["alive"]:
                         continue
 
                     if apply_starvation_check(npc):
                         death_event(self.conn, npc, "starvation", city_id=city["id"])
-                        apply_grief(self.conn, npc)
+                        spouse_id = npc.get("spouse")
+                        if apply_grief(self.conn, npc) and spouse_id:
+                            grieving.add(spouse_id)
                         save_npc(self.conn, npc)
                         continue
 
@@ -237,6 +250,7 @@ class SimulationManager:
         from Data.NPCS.family import form_families
         from Data.Government.government import assign_city_ruler, assign_kingdom_ruler
         from Data.Government.diplomacy import apply_succession_shock
+        from Data.History.chronicle import record_coronation
         from Data.Relationships.relationships import form_relationships
         from Data.Quests.quests import generate_quests_for_city
         from Data.Database.repository import get_npc, save_kingdom
@@ -268,17 +282,27 @@ class SimulationManager:
                         assign_kingdom_ruler(kingdom, city)
                         save_kingdom(self.conn, kingdom)
 
-                        # A real succession shakes the kingdom's relationships.
-                        # The very first crowning (nobody had ruled yet, so
-                        # there is no previous monarch) does not -- rulers are
-                        # not placed when a world is created. A previous
+                        # Rulers are not placed when a world is created, so the
+                        # very first crowning has no previous monarch: that is
+                        # the realm's founding, not a succession. A previous
                         # monarch who is still alive was deposed, not
                         # replaced after dying.
+                        previous = get_npc(self.conn, previous_monarch_id) if previous_monarch_id is not None else None
+                        overthrown = bool(previous and previous["alive"])
+
+                        # A real succession shakes the kingdom's relationships.
                         if previous_monarch_id is not None:
-                            previous = get_npc(self.conn, previous_monarch_id)
-                            apply_succession_shock(
-                                self.conn, kingdom["id"],
-                                overthrown=bool(previous and previous["alive"])
+                            apply_succession_shock(self.conn, kingdom["id"], overthrown=overthrown)
+
+                        # The chronicle records every crowning, the first included.
+                        if kingdom.get("ruler") is not None:
+                            if previous_monarch_id is None:
+                                kind = "founding"
+                            else:
+                                kind = "overthrow" if overthrown else "succession"
+                            record_coronation(
+                                self.conn, self.world_id, kingdom,
+                                get_npc(self.conn, kingdom["ruler"]), kind, predecessor=previous
                             )
 
         from Data.Infrastructure.travel import consider_tourism
@@ -286,8 +310,9 @@ class SimulationManager:
 
         from Data.Infrastructure.migration import consider_migration
         consider_migration(self.conn, self.world_id)
-
+        
         self.conn.commit()
+
     def on_season(self) -> None:
         # Reserved.
         pass
@@ -300,18 +325,28 @@ class SimulationManager:
             resolve_kingdom_war, check_civil_war_eligibility, resolve_civil_war,
             CIVIL_WAR_CHANCE_IF_ELIGIBLE
         )
-        from Data.Database.repository import get_kingdom, get_world_roads
+        from Data.Database.repository import get_kingdom, get_world_roads, get_npc
         import random
 
         kingdoms = get_world_kingdoms(self.conn, self.world_id)
 
-        # Aging + natural old-age death for every living NPC.
+        # Aging + natural old-age death for every living NPC. The list for
+        # each city is loaded up front, so anyone whose record grief has
+        # changed since (their spouse just died) is reloaded before being
+        # aged and saved -- otherwise saving their old copy would erase the
+        # grief and leave them married to the dead.
+        grieving = set()
+
         for kingdom in kingdoms:
             for city in get_kingdom_cities(self.conn, kingdom["id"]):
                 for npc in get_city_npcs(self.conn, city["id"]):
+                    if npc["id"] in grieving:
+                        npc = get_npc(self.conn, npc["id"])
                     if apply_aging(npc):
                         death_event(self.conn, npc, "old age", city_id=city["id"])
-                        apply_grief(self.conn, npc)
+                        spouse_id = npc.get("spouse")
+                        if apply_grief(self.conn, npc) and spouse_id:
+                            grieving.add(spouse_id)
                     save_npc(self.conn, npc)
 
         self.conn.commit()
@@ -346,120 +381,6 @@ class SimulationManager:
                 continue
 
             chosen_route, defender_kingdom_id = choice
-
-            defender_kingdom = get_kingdom(self.conn, defender_kingdom_id)
-
-            attacker_cities = get_kingdom_cities(self.conn, kingdom["id"])
-            defender_cities = get_kingdom_cities(self.conn, defender_kingdom["id"])
-
-            resolve_kingdom_war(self.conn, kingdom, defender_kingdom, attacker_cities, defender_cities)
-
-        self.conn.commit()
-
-        # Civil wars: checked after kingdom wars, so a kingdom that
-        # just fought (and spent treasury, took casualties) has that
-        # already reflected before eligibility gets checked, and one
-        # that just had a civil war respects its own fresh cooldown.
-        for kingdom_summary in kingdoms:
-
-            kingdom = get_kingdom(self.conn, kingdom_summary["id"])
-            cities = get_kingdom_cities(self.conn, kingdom["id"])
-
-            eligibility = check_civil_war_eligibility(self.conn, kingdom, cities, self.clock.year)
-
-            if not eligibility["eligible"]:
-                continue
-
-            if random.random() >= CIVIL_WAR_CHANCE_IF_ELIGIBLE:
-                continue
-
-            resolve_civil_war(self.conn, kingdom, cities, self.clock.year)
-
-            for city in cities:
-                save_city(self.conn, city)
-
-        self.conn.commit()
-        from Data.NPCS.aging import apply_aging
-        from Data.Events.events import death_event
-        from Data.Relationships.relationships import apply_grief
-        from Data.Combat.combat import (
-            resolve_kingdom_war, check_civil_war_eligibility, resolve_civil_war,
-            CIVIL_WAR_CHANCE_IF_ELIGIBLE
-        )
-        from Data.Database.repository import get_kingdom, get_city, get_world_roads
-        import random
-
-        # Each kingdom independently rolls a small yearly chance of
-        # going to war -- rare and weighty, not a constant background
-        # hum. Roughly one war every 2-3 years across a typical
-        # 5-kingdom world at this rate.
-        WAR_CHANCE_PER_KINGDOM_PER_YEAR = 0.08
-
-        kingdoms = get_world_kingdoms(self.conn, self.world_id)
-
-        # Aging + natural old-age death for every living NPC.
-        for kingdom in kingdoms:
-            for city in get_kingdom_cities(self.conn, kingdom["id"]):
-                for npc in get_city_npcs(self.conn, city["id"]):
-                    if apply_aging(npc):
-                        death_event(self.conn, npc, "old age", city_id=city["id"])
-                        apply_grief(self.conn, npc)
-                    save_npc(self.conn, npc)
-
-        self.conn.commit()
-        # Peaceful years warm kingdoms toward each other, then any pair whose
-        # goodwill has grown high enough allies. Both run before wars, so a
-        # pair that has just become allies cannot be sent to war the very
-        # same year.
-        from Data.Government.diplomacy import apply_peace_dividend, check_alliances
-        apply_peace_dividend(self.conn, self.world_id, self.clock.year)
-        check_alliances(self.conn, self.world_id, self.clock.year)
-
-        # Kingdom wars: weighted toward whichever neighboring kingdom
-        # is closest via the Trade Route road network, so kingdoms
-        # that are actually near each other fight more often than
-        # distant strangers who'd have no real reason to clash.
-        from Data.Database.repository import get_kingdom_relation
-
-        trade_routes = [r for r in get_world_roads(self.conn, self.world_id) if r["kind"] == "Trade Route"]
-
-        for kingdom in kingdoms:
-
-            if random.random() >= WAR_CHANCE_PER_KINGDOM_PER_YEAR:
-                continue
-
-            capital_id = kingdom.get("capital")
-            if capital_id is None:
-                continue
-
-            neighbor_routes = [r for r in trade_routes if capital_id in (r["city_a_id"], r["city_b_id"])]
-            if not neighbor_routes:
-                continue
-
-            candidates = []
-
-            for route in neighbor_routes:
-
-                other_capital_id = route["city_b_id"] if route["city_a_id"] == capital_id else route["city_a_id"]
-                other_capital = get_city(self.conn, other_capital_id)
-                other_kingdom_id = other_capital["kingdom"]
-
-                relation = get_kingdom_relation(self.conn, kingdom["id"], other_kingdom_id)
-
-                if relation["status"] == "Allied":
-                    continue
-
-                if relation["status"] == "Peace Treaty" and relation["peace_until_year"]:
-                    if self.clock.year < relation["peace_until_year"]:
-                        continue
-
-                candidates.append((route, other_kingdom_id))
-
-            if not candidates:
-                continue
-
-            weights = [1.0 / max(1.0, route["distance"]) for route, _ in candidates]
-            chosen_route, defender_kingdom_id = random.choices(candidates, weights=weights, k=1)[0]
 
             defender_kingdom = get_kingdom(self.conn, defender_kingdom_id)
 

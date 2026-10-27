@@ -11,11 +11,12 @@ def marriage_event(conn, npc_a, npc_b):
     )
 
 
-def death_event(conn, npc, cause, city_id=None, kingdom_id=None):
+def death_event(conn, npc, cause, city_id=None, kingdom_id=None, foe_kingdom=None):
 
     from Data.Database.repository import create_event
+    from Data.History.chronicle import record_ruler_death
 
-    return create_event(
+    event = create_event(
         conn,
         "Death",
         f"{npc['name']} died ({cause}).",
@@ -23,6 +24,13 @@ def death_event(conn, npc, cause, city_id=None, kingdom_id=None):
         city_id=city_id if city_id is not None else npc.get("city_id"),
         kingdom_id=kingdom_id
     )
+
+    # Every death in the game comes through here, so a reigning monarch's
+    # death can never be missed; anyone else's writes nothing to the chronicle.
+    # foe_kingdom (given for war deaths) lets the chronicle name the enemy.
+    record_ruler_death(conn, npc, cause, event["id"], foe_kingdom=foe_kingdom)
+
+    return event
 
 
 def coronation_event(conn, ruler, city):

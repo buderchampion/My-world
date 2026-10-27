@@ -11,13 +11,43 @@ REQUIRED_TEMPLATE_KEYS = (
     "Alliance Formed",
     "Alliance Ended (cooled)",
     "Alliance Ended (spurned)",
+    "Coronation (founding)",
+    "Coronation (succession)",
+    "Coronation (after overthrow)",
+    "Ruler Died (old age)",
+    "Ruler Died (war)",
+    "Ruler Died (civil war)",
+    "Ruler Died (raid)",
+    "Ruler Died (starvation)",
+    "Ruler Died (other)",
 )
 
 # The only {placeholders} a template may use. {When} is the date opening a
 # sentence ("In the spring of the 14th year"), {when} the same in lowercase
 # for mid-sentence use; {kingdom} is the kingdom whose chronicle this is and
-# {other} the realm it is writing about.
-TEMPLATE_FIELDS = ("When", "when", "kingdom", "other")
+# {other} the realm it is writing about. For rulers: {ruler} and {title}
+# ("King"/"Queen"), {predecessor} (whom a new monarch replaced), {age} and
+# {age_ordinal} ("81st"), and {possessive} ("his"/"her").
+TEMPLATE_FIELDS = (
+    "When", "when", "kingdom", "other",
+    "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
+)
+
+# Which wording a monarch's death gets, by the cause death_event was given.
+# Anything not listed here falls back to "Ruler Died (other)".
+DEATH_CAUSE_TEMPLATES = {
+    "old age": "Ruler Died (old age)",
+    "war": "Ruler Died (war)",
+    "civil war": "Ruler Died (civil war)",
+    "raid": "Ruler Died (raid)",
+    "starvation": "Ruler Died (starvation)",
+}
+
+CORONATION_TEMPLATES = {
+    "founding": "Coronation (founding)",
+    "succession": "Coronation (succession)",
+    "overthrow": "Coronation (after overthrow)",
+}
 
 
 def ordinal(n):
@@ -73,6 +103,23 @@ def current_season(conn, world_id):
     row = conn.execute("SELECT clock_month FROM worlds WHERE id = ?", (world_id,)).fetchone()
 
     return SEASON_BY_MONTH.get(row["clock_month"]) if row else None
+
+
+def current_date(conn, world_id):
+    """The world's current (year, season), from the saved clock."""
+
+    from Data.Simulation.clock import SEASON_BY_MONTH
+
+    row = conn.execute("SELECT clock_year, clock_month FROM worlds WHERE id = ?", (world_id,)).fetchone()
+
+    if row is None:
+        return 1, None
+
+    return row["clock_year"], SEASON_BY_MONTH.get(row["clock_month"])
+
+
+def _possessive(npc):
+    return {"Male": "his", "Female": "her"}.get(npc.get("gender"), "their")
 
 
 def write_entry(conn, kingdom_id, event_type, template_key, year, season, fields, source_event_id=None, seed_parts=()):
@@ -139,6 +186,73 @@ def record_alliance_ended(conn, world_id, kingdom_a, kingdom_b, cooler, year, so
         ))
 
     return entries
+
+
+def record_ruler_death(conn, npc, cause, source_event_id=None, foe_kingdom=None):
+    """
+    If the NPC who just died was a reigning monarch, their kingdom records
+    the death, worded for how they died. Anyone else's death is not
+    chronicle-worthy and nothing is written (returns None). Called for EVERY
+    death by Data.Events.events.death_event, so no death path can miss it.
+
+    foe_kingdom names the enemy for a death in war; without one, a war death
+    falls back to the general wording rather than naming no one.
+    """
+
+    kingdom = conn.execute(
+        "SELECT id, name, world_id FROM kingdoms WHERE ruler_id = ?", (npc["id"],)
+    ).fetchone()
+
+    if kingdom is None:
+        return None
+
+    key = DEATH_CAUSE_TEMPLATES.get(str(cause).lower(), "Ruler Died (other)")
+
+    if key == "Ruler Died (war)" and not foe_kingdom:
+        key = "Ruler Died (other)"
+
+    year, season = current_date(conn, kingdom["world_id"])
+    age = npc.get("age") or 0
+
+    fields = {
+        "kingdom": kingdom["name"],
+        "other": foe_kingdom["name"] if foe_kingdom else "",
+        "ruler": npc["name"],
+        "title": npc.get("title") or "monarch",
+        "age": age,
+        "age_ordinal": ordinal(age),
+        "possessive": _possessive(npc),
+    }
+
+    return write_entry(conn, kingdom["id"], "Ruler Died", key, year, season, fields, source_event_id, seed_parts=(npc["id"],))
+
+
+def record_coronation(conn, world_id, kingdom, ruler, kind, predecessor=None):
+    """
+    A new monarch was crowned. kind is "founding" (the realm's first ruler),
+    "succession" (after the old one died) or "overthrow" (after the old one
+    was deposed). Points back to the Coronation event the crowning logged.
+    """
+
+    year, season = current_date(conn, world_id)
+
+    source = conn.execute(
+        "SELECT id FROM events WHERE type = 'Coronation' AND city_id = ? ORDER BY id DESC LIMIT 1",
+        (kingdom.get("capital"),)
+    ).fetchone()
+
+    fields = {
+        "kingdom": kingdom["name"],
+        "ruler": ruler["name"],
+        "title": ruler.get("title") or "monarch",
+        "predecessor": predecessor["name"] if predecessor else "the old monarch",
+        "possessive": _possessive(ruler),
+    }
+
+    return write_entry(
+        conn, kingdom["id"], "Coronation", CORONATION_TEMPLATES[kind], year, season, fields,
+        source["id"] if source else None, seed_parts=(ruler["id"],)
+    )
 
 
 def get_chronicle(conn, kingdom_id):
