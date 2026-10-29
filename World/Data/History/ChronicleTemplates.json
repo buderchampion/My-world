@@ -58,5 +58,35 @@
     "{When}, {ruler}, {title} of {kingdom}, passed from this world.",
     "{When}, the realm of {kingdom} mourned the death of {title} {ruler}.",
     "{When}, {title} {ruler} of {kingdom} was taken from the realm."
+  ],
+  "War (attacker won)": [
+    "{When}, the armies of {kingdom} marched upon {other} and won the day, though no city of that realm was taken.",
+    "{When}, {kingdom} made war upon {other}, and its banners carried the field.",
+    "{When}, the host of {kingdom} met the host of {other} in battle and put it to flight."
+  ],
+  "War (attacker won, city taken)": [
+    "{When}, the armies of {kingdom} marched upon {other}, won the day, and took the city of {city} for the crown.",
+    "{When}, {kingdom} made war upon {other} and wrested {city} from its grasp.",
+    "{When}, the banners of {kingdom} were raised over {city}, taken by the sword from {other}."
+  ],
+  "War (attacker lost)": [
+    "{When}, {kingdom} marched upon {other}, but its armies were thrown back and the venture came to nothing.",
+    "{When}, the host of {kingdom} went forth against {other} and was broken upon the field.",
+    "{When}, {kingdom} made war upon {other} and was bested, and its soldiers came home in sorrow."
+  ],
+  "War (defender held)": [
+    "{When}, {other} came against {kingdom} with sword and fire, and was driven from the realm.",
+    "{When}, the armies of {other} invaded {kingdom}, and the defenders of the realm threw them back.",
+    "{When}, {kingdom} stood firm against the host of {other}, and not one city was lost."
+  ],
+  "War (defender lost)": [
+    "{When}, {other} came against {kingdom} with sword and fire, and the realm was bested in the field.",
+    "{When}, the armies of {kingdom} fell back before {other}, though every city of the realm held.",
+    "{When}, {other} defeated the host of {kingdom} in battle, and the realm knew a bitter season."
+  ],
+  "War (defender lost, city taken)": [
+    "{When}, {other} came against {kingdom} with sword and fire, and the city of {city} was lost.",
+    "{When}, {kingdom} was bested by {other}, and {city} passed from the realm into the hands of the foe.",
+    "{When}, the banners of {other} were raised over {city}, torn from {kingdom} by the sword."
   ]
 }

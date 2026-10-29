@@ -20,6 +20,12 @@ REQUIRED_TEMPLATE_KEYS = (
     "Ruler Died (raid)",
     "Ruler Died (starvation)",
     "Ruler Died (other)",
+    "War (attacker won)",
+    "War (attacker won, city taken)",
+    "War (attacker lost)",
+    "War (defender held)",
+    "War (defender lost)",
+    "War (defender lost, city taken)",
 )
 
 # The only {placeholders} a template may use. {When} is the date opening a
@@ -27,10 +33,12 @@ REQUIRED_TEMPLATE_KEYS = (
 # for mid-sentence use; {kingdom} is the kingdom whose chronicle this is and
 # {other} the realm it is writing about. For rulers: {ruler} and {title}
 # ("King"/"Queen"), {predecessor} (whom a new monarch replaced), {age} and
-# {age_ordinal} ("81st"), and {possessive} ("his"/"her").
+# {age_ordinal} ("81st"), and {possessive} ("his"/"her"). For wars: {city},
+# the city taken, if any.
 TEMPLATE_FIELDS = (
     "When", "when", "kingdom", "other",
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
+    "city",
 )
 
 # Which wording a monarch's death gets, by the cause death_event was given.
@@ -253,6 +261,46 @@ def record_coronation(conn, world_id, kingdom, ruler, kind, predecessor=None):
         conn, kingdom["id"], "Coronation", CORONATION_TEMPLATES[kind], year, season, fields,
         source["id"] if source else None, seed_parts=(ruler["id"],)
     )
+
+
+def record_war(conn, attacker_kingdom, defender_kingdom, attacker_won, captured_city=None):
+    """
+    Both kingdoms record a war that was actually fought, each from its own
+    side: the attacker tells of marching out and winning or being thrown
+    back, the defender of being invaded and holding or falling. A city taken
+    (captured_city is its name) is named in both accounts.
+
+    Call it before the war's deaths are recorded, so a chronicle tells of the
+    war first and then of any ruler who fell in it. Returns both entries;
+    point them at the War event once it exists with attach_source_event().
+    """
+
+    year, season = current_date(conn, attacker_kingdom["world_id"])
+
+    if attacker_won:
+        attacker_key = "War (attacker won, city taken)" if captured_city else "War (attacker won)"
+        defender_key = "War (defender lost, city taken)" if captured_city else "War (defender lost)"
+    else:
+        attacker_key, defender_key = "War (attacker lost)", "War (defender held)"
+
+    entries = []
+
+    for me, other, key in ((attacker_kingdom, defender_kingdom, attacker_key), (defender_kingdom, attacker_kingdom, defender_key)):
+        entries.append(write_entry(
+            conn, me["id"], "War", key, year, season,
+            {"kingdom": me["name"], "other": other["name"], "city": captured_city or ""},
+            seed_parts=(other["id"],)
+        ))
+
+    return entries
+
+
+def attach_source_event(conn, entries, event_id):
+    """Points entries written before their event existed at that event."""
+
+    for entry in entries:
+        conn.execute("UPDATE chronicle_entries SET source_event_id = ? WHERE id = ?", (event_id, entry["id"]))
+        entry["source_event_id"] = event_id
 
 
 def get_chronicle(conn, kingdom_id):

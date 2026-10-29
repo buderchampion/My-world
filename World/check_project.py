@@ -192,6 +192,7 @@ FEATURES = [
             "Data/History/chronicle.py": [
                 "write_entry", "pick_template", "format_when", "get_chronicle", "current_date",
                 "record_alliance_formed", "record_alliance_ended", "record_ruler_death", "record_coronation",
+                "record_war", "attach_source_event",
             ],
             "read_chronicle.py": ["main"],
         },
@@ -199,7 +200,9 @@ FEATURES = [
             "Data/Government/diplomacy.py": ["record_alliance_formed(", "record_alliance_ended("],
             "Data/Events/events.py": ["record_ruler_death("],
             "Data/Simulation/simulation_manager.py": ["record_coronation("],
-            "Data/Combat/combat.py": ["foe_kingdom=defender_kingdom", "foe_kingdom=attacker_kingdom"],
+            "Data/Combat/combat.py": [
+                "foe_kingdom=defender_kingdom", "foe_kingdom=attacker_kingdom", "record_war(", "attach_source_event(",
+            ],
         },
     },
     {
@@ -219,6 +222,7 @@ FEATURES = [
                 "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
                 "apply_starvation_check(npc)",
             ],
+            "Data/Combat/combat.py": ["def resolve_kingdom_war(", "record_war(", "def resolve_civil_war("],
             "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
         },
     },
@@ -1148,6 +1152,78 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a monarch's death is chronicled (naming any foe), a commoner's is not", monarch_deaths)
+
+    def war_chronicled():
+        import Data.Combat.combat as combat
+        from Data.Database.repository import get_kingdom, get_kingdom_cities
+        from Data.History.chronicle import get_chronicle, load_templates, format_when, current_date
+
+        a, d = kingdoms[0], kingdoms[1]
+        wars = lambda k: [e for e in get_chronicle(conn, k["id"]) if e["event_type"] == "War"]
+        before_a, before_d = len(wars(a)), len(wars(d))
+        last_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM chronicle_entries").fetchone()[0]
+
+        # A real war, except that the defender's monarch is sure to fall in it,
+        # so the order of the chronicle (the war, then the fallen) is always tested.
+        from Data.Database.repository import get_npc, save_npc
+        monarch_id = get_kingdom(conn, d["id"])["ruler"]
+        assert monarch_id is not None, "(setup) the defending kingdom has no monarch"
+        real_casualties, calls = combat.apply_casualties, {"n": 0}
+
+        def casualties_with_the_monarch(conn_, side, won):
+            dead = real_casualties(conn_, side, won)
+            calls["n"] += 1
+            if calls["n"] == 2 and all(n["id"] != monarch_id for n in dead):   # the second call is the defender's side
+                monarch = get_npc(conn_, monarch_id)
+                monarch["alive"] = False
+                save_npc(conn_, monarch)
+                dead.append(monarch)
+            return dead
+
+        combat.apply_casualties = casualties_with_the_monarch
+        try:
+            result = combat.resolve_kingdom_war(
+                conn, get_kingdom(conn, a["id"]), get_kingdom(conn, d["id"]),
+                get_kingdom_cities(conn, a["id"]), get_kingdom_cities(conn, d["id"])
+            )
+        finally:
+            combat.apply_casualties = real_casualties
+        assert result["outcome"] != "no_battle", "(setup) the test war never came to battle"
+
+        wa, wd = wars(a), wars(d)
+        assert len(wa) == before_a + 1 and len(wd) == before_d + 1, "a war was not written into both kingdoms' chronicles"
+
+        city = result["captured_city"]
+        if result["outcome"] == "attacker_wins":
+            attacker_key = "War (attacker won, city taken)" if city else "War (attacker won)"
+            defender_key = "War (defender lost, city taken)" if city else "War (defender lost)"
+        else:
+            attacker_key, defender_key = "War (attacker lost)", "War (defender held)"
+
+        capitalized, lowercase = format_when(*current_date(conn, world_id))
+        templates = load_templates()
+
+        def told_as(text, key, me, other):
+            return any(
+                t.format(When=capitalized, when=lowercase, kingdom=me["name"], other=other["name"], city=city or "") == text
+                for t in templates[key]
+            )
+
+        assert told_as(wa[-1]["text"], attacker_key, a, d), f"the attacker's account does not match the outcome ({result['outcome']}, city: {city})"
+        assert told_as(wd[-1]["text"], defender_key, d, a), f"the defender's account does not match the outcome ({result['outcome']}, city: {city})"
+        assert wa[-1]["source_event_id"] and wa[-1]["source_event_id"] == wd[-1]["source_event_id"], \
+            "the two war entries are not linked to the same War event"
+
+        fallen = conn.execute(
+            "SELECT MIN(id) FROM chronicle_entries WHERE event_type = 'Ruler Died' AND kingdom_id = ? AND id > ?",
+            (d["id"], last_id)
+        ).fetchone()[0]
+        assert fallen is not None, "the monarch who fell in the war was not chronicled"
+        assert fallen > max(wa[-1]["id"], wd[-1]["id"]), \
+            "a ruler who fell in the war was written into the chronicle before the war itself"
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a war is written into both chronicles, each from its own side, before its fallen", war_chronicled)
 
     def year_tick_and_grief():
         import Data.NPCS.aging as aging

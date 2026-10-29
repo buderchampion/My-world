@@ -273,15 +273,6 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins)
     defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins)
 
-    from Data.Events.events import death_event
-    from Data.Relationships.relationships import apply_grief
-    for npc in attacker_deaths:
-        death_event(conn, npc, "War", kingdom_id=attacker_kingdom["id"], foe_kingdom=defender_kingdom)
-        apply_grief(conn, npc)
-    for npc in defender_deaths:
-        death_event(conn, npc, "War", kingdom_id=defender_kingdom["id"], foe_kingdom=attacker_kingdom)
-        apply_grief(conn, npc)
-
     captured_city = None
     spoils = 0
 
@@ -321,6 +312,25 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
             if spoils > 0:
                 spend_treasury(conn, defender_kingdom["id"], spoils)
                 add_treasury(conn, attacker_kingdom["id"], spoils)
+
+    # The chronicle tells of the war before anyone who fell in it: both
+    # kingdoms record it now, each from its own side, and the deaths below
+    # (a ruler's included) follow. Taking the city above does not depend on
+    # who died, so it is decided first to let both accounts name it.
+    from Data.History.chronicle import record_war
+    war_entries = record_war(
+        conn, attacker_kingdom, defender_kingdom, attacker_wins,
+        captured_city=captured_city["name"] if captured_city else None
+    )
+
+    from Data.Events.events import death_event
+    from Data.Relationships.relationships import apply_grief
+    for npc in attacker_deaths:
+        death_event(conn, npc, "War", kingdom_id=attacker_kingdom["id"], foe_kingdom=defender_kingdom)
+        apply_grief(conn, npc)
+    for npc in defender_deaths:
+        death_event(conn, npc, "War", kingdom_id=defender_kingdom["id"], foe_kingdom=attacker_kingdom)
+        apply_grief(conn, npc)
 
     from Data.Database.repository import set_kingdom_relation
 
@@ -366,9 +376,11 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     )
 
     from Data.Events.events import war_event
-    war_event(conn, attacker_kingdom, defender_kingdom, result,
+    event = war_event(conn, attacker_kingdom, defender_kingdom, result,
               participants=[npc["id"] for npc in attacker_military + defender_military]
               )
+    from Data.History.chronicle import attach_source_event
+    attach_source_event(conn, war_entries, event["id"])
     conn.commit()
 
     return result
