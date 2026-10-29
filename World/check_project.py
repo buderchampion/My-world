@@ -228,6 +228,19 @@ FEATURES = [
         },
     },
     {
+        "name": "Consumption sinks and starting stock (Tools, Cloth, repairs, Potions)",
+        "functions": {
+            "Data/Economy/economy.py": ["maintain_buildings", "spoil_potions", "stock_starting_supplies", "produce_resources"],
+            "Data/NPCS/healing.py": ["drink_potion"],
+        },
+        "wired": {
+            "Data/Economy/economy.py": ["maintain_buildings(city)", "spoil_potions(city)", "tool_factor", "TOOLS_WEAR_PER_WORKER"],
+            "Data/Simulation/simulation_manager.py": ["drink_potion(npc, city)", "NO_CLOTH_HAPPINESS_PER_DAY"],
+            "Data/World/world_generator.py": ["stock_starting_supplies("],
+            "Data/Database/repository.py": ["UPDATE buildings SET condition"],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -452,6 +465,17 @@ def check_config(r):
                     r.fail(f"building_generator.CHAIN_CATEGORIES['{category}'] lists '{name}', not in BuildingTypes.json")
     except Exception as e:
         r.warn(f"could not cross-check CHAIN_CATEGORIES ({type(e).__name__}: {e})")
+
+    try:
+        starting = load_json("Data/Economy/StartingStock.json")
+        known = load_json("Data/Economy/ResourceTypes.json")
+        for resource, amount in starting.items():
+            if resource not in known:
+                r.fail(f"StartingStock.json: '{resource}' is not a resource in ResourceTypes.json")
+            elif not isinstance(amount, (int, float)) or amount < 0:
+                r.fail(f"StartingStock.json: '{resource}' should be a non-negative amount per person, not {amount!r}")
+    except (OSError, json.JSONDecodeError) as e:
+        r.fail(f"could not load StartingStock.json: {e}")
 
     try:
         from Data.History import chronicle
@@ -841,6 +865,21 @@ def _smoke_body(r, holder):
         assert caravans == len(trades), f"{len(trades)} trades happened but {caravans} caravans were dispatched"
 
     if len(kingdoms) >= 2:
+        def starting_stock():
+            per_person = load_json("Data/Economy/StartingStock.json")
+            wrong = []
+            for city in conn.execute("SELECT id, name, population FROM cities"):
+                for resource, amount in per_person.items():
+                    row = conn.execute(
+                        "SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = ?", (city["id"], resource)
+                    ).fetchone()
+                    expected = round(city["population"] * amount, 2)
+                    if row is None or abs(row["amount"] - expected) > 0.01:
+                        wrong.append(f"{city['name']} {resource}: {row['amount'] if row else 'none'} (expected {expected})")
+            assert not wrong, f"{len(wrong)} starting stocks are wrong, e.g. " + "; ".join(wrong[:3])
+
+        run_step(r, "every city starts with its storehouses stocked for its population", starting_stock)
+
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
         r.warn("fewer than 2 kingdoms generated -- favor check skipped")
@@ -1287,6 +1326,52 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a civil war is chronicled by its own kingdom, naming the sovereign, before its fallen", civil_war_chronicled)
+
+    def sinks_work():
+        from Data.Database.repository import get_city, save_city, get_npc
+        from Data.Economy import economy
+        from Data.NPCS.healing import drink_potion, POTION_HEAL
+
+        # a city with workers: production with no Tools is clearly lower than with plenty
+        city_id = conn.execute(
+            """SELECT b.city_id FROM buildings b JOIN npcs n ON n.workplace_id = b.id
+               WHERE n.alive = 1 AND b.type IN ('Farm', 'Quarry', 'Mine') GROUP BY b.city_id ORDER BY COUNT(*) DESC LIMIT 1"""
+        ).fetchone()[0]
+
+        def made_with(tools):
+            city = get_city(conn, city_id)
+            city["resources"] = {"Tools": tools}
+            economy.produce_resources(city)
+            return sum(v for k, v in city["resources"].items() if k != "Tools"), city["resources"]["Tools"]
+
+        made_without, _ = made_with(0)
+        made_with_plenty, tools_left = made_with(100000)
+        assert made_without < made_with_plenty * 0.75, "a city with no Tools produced nearly as much as one with plenty"
+        assert tools_left < 100000, "working did not wear out any Tools"
+
+        # buildings wear without Wood and Stone, the wear is SAVED, and repairs restore it
+        city = get_city(conn, city_id)
+        city["resources"]["Wood"] = city["resources"]["Stone"] = 0
+        economy.maintain_buildings(city)
+        save_city(conn, city)
+        worn = get_city(conn, city_id)
+        assert all(b["condition"] < 100 for b in worn["buildings"]), "buildings did not wear, or their wear was not saved"
+        worn["resources"]["Wood"] = worn["resources"]["Stone"] = 100000
+        economy.maintain_buildings(worn)
+        assert all(b["condition"] == 100 for b in worn["buildings"]), "repairs did not restore worn buildings"
+        assert worn["resources"]["Wood"] < 100000 and worn["resources"]["Stone"] < 100000, "repairs cost no Wood or Stone"
+        save_city(conn, worn)
+
+        # a wounded person drinks a potion; a healthy one does not
+        npc = get_npc(conn, conn.execute("SELECT id FROM npcs WHERE alive = 1 LIMIT 1").fetchone()["id"])
+        city = {"resources": {"Potions": 5}}
+        npc["health"] = 50
+        assert drink_potion(npc, city) and npc["health"] == 50 + POTION_HEAL and city["resources"]["Potions"] == 4, \
+            "a wounded NPC did not drink a potion"
+        npc["health"] = 100
+        assert not drink_potion(npc, city) and city["resources"]["Potions"] == 4, "a healthy NPC drank a potion"
+
+    run_step(r, "Tools, repairs and Potions are used up, and building wear is saved", sinks_work)
 
     def year_tick_and_grief():
         import Data.NPCS.aging as aging

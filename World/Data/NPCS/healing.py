@@ -30,6 +30,34 @@ def apply_healing(npc: dict, city_has_active_temple: bool) -> bool:
     return True
 
 
+# Anyone hurt worse than this (combat wounds take 20 to 50 health) drinks a
+# Potion from their city's stock if there is one: POTION_HEAL extra health,
+# at most one a day.
+POTION_HEALTH_THRESHOLD = 80
+POTION_HEAL = 25
+
+
+def drink_potion(npc: dict, city: dict) -> bool:
+    """
+    A wounded NPC drinks one Potion from their city's stock, if it has any.
+    Mutates both the NPC and the city; returns True if a potion was drunk.
+    The caller saves both, as with apply_healing.
+    """
+
+    if not npc["alive"] or npc["health"] >= POTION_HEALTH_THRESHOLD:
+        return False
+
+    stock = city.get("resources", {}).get("Potions", 0)
+
+    if stock < 1:
+        return False
+
+    city["resources"]["Potions"] = round(stock - 1, 2)
+    npc["health"] = min(100, npc["health"] + POTION_HEAL)
+
+    return True
+
+
 def city_has_active_temple(city: dict) -> bool:
     """True if this city has a Temple building with at least one
     living NPC working there."""

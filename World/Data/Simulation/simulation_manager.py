@@ -111,7 +111,7 @@ class SimulationManager:
 
     def on_day(self) -> None:
         from Data.NPCS.employment import apply_workday
-        from Data.NPCS.healing import apply_healing, city_has_active_temple
+        from Data.NPCS.healing import apply_healing, city_has_active_temple, drink_potion
         from Data.NPCS.starvation import apply_starvation_check
         from Data.Events.events import death_event
         from Data.Relationships.relationships import apply_grief
@@ -145,6 +145,10 @@ class SimulationManager:
         # happy in the first place.
         VISITOR_HAPPINESS_THRESHOLD = 60
         VISITOR_REVENUE_PER_HAPPINESS_POINT = 0.01
+
+        # People in a kingdom that has run out of Cloth entirely lose this
+        # much happiness a day, until supplies arrive.
+        NO_CLOTH_HAPPINESS_PER_DAY = 1
 
         for kingdom in get_world_kingdoms(self.conn, self.world_id):
 
@@ -193,6 +197,9 @@ class SimulationManager:
                         tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
                         changed = True
 
+                    if drink_potion(npc, city):
+                        changed = True
+
                     if apply_healing(npc, has_temple):
                         changed = True
 
@@ -226,6 +233,19 @@ class SimulationManager:
                 apply_military_upkeep(self.conn, kingdom, military_npcs, capital_city)
 
             simulate_kingdom_trade_day(cities)
+
+            # A kingdom with no Cloth left anywhere, even after its cities have
+            # traded, is genuinely without: everyone in it is a little less
+            # happy. A city that simply makes none, or is still waiting for its
+            # share, is not -- the realm has cloth, and trade will bring it.
+            # Done in the database, after each city's people were saved above,
+            # so no older copy can overwrite it.
+            if sum(c["resources"].get("Cloth", 0) for c in cities) <= 0:
+                for city in cities:
+                    self.conn.execute(
+                        "UPDATE npcs SET needs_happiness = MAX(0, needs_happiness - ?) WHERE city_id = ? AND alive = 1",
+                        (NO_CLOTH_HAPPINESS_PER_DAY, city["id"])
+                    )
 
             for city in cities:
                 save_city(self.conn, city)

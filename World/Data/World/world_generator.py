@@ -26,6 +26,11 @@ def generate_world():
 
     generate_roads(conn, world["id"])
 
+    # Cities open with stocked storehouses, not empty ones -- see
+    # Data.Economy.economy.stock_starting_supplies.
+    from Data.Economy.economy import stock_starting_supplies
+    stock_starting_supplies(conn, world["id"])
+
     conn.commit()
 
     conn.close()

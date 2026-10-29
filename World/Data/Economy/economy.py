@@ -6,6 +6,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent
 RESOURCE_TYPES = DATA_DIR / "Economy" / "ResourceTypes.json"
 BUILDING_PRODUCTION = DATA_DIR / "Economy" / "BuildingProduction.json"
 CONSUMPTION_RATES = DATA_DIR / "Economy" / "ConsumptionRates.json"
+STARTING_STOCK = DATA_DIR / "Economy" / "StartingStock.json"
 
 # For consumable resources (currently just Food), the "target stock" a
 # city aims to hold scales with its own population instead of being a
@@ -13,6 +14,30 @@ CONSUMPTION_RATES = DATA_DIR / "Economy" / "ConsumptionRates.json"
 # share the same target. This is how many days of consumption a city
 # tries to keep in reserve.
 CONSUMABLE_BUFFER_DAYS = 3
+
+# --- Consumption sinks -------------------------------------------------
+# Without these, Tools, Cloth, Wood, Stone and Potions were produced every
+# day and never used for anything, so they only ever piled up.
+
+# Everyone working in a producing building wears out this much Tools a day.
+# A city without enough produces less: with none at all, NO_TOOLS_OUTPUT of
+# its normal output.
+TOOLS_WEAR_PER_WORKER = 0.06
+NO_TOOLS_OUTPUT = 0.5
+
+# Every building loses this much condition a day (out of 100). Each day a
+# city repairs its most worn buildings first, paying Wood and Stone per
+# point restored, for as long as its stock lasts. A worn building produces
+# less: at condition 0, WORN_OUTPUT of its normal output.
+BUILDING_WEAR_PER_DAY = 0.1
+REPAIR_WOOD_PER_POINT = 0.6
+REPAIR_STONE_PER_POINT = 1.2
+WORN_OUTPUT = 0.5
+
+# Potions slowly lose potency: this share of a city's stock spoils each day.
+# Their real use is healing the wounded (Data.NPCS.healing.drink_potion);
+# this only keeps a long peace from piling them up forever.
+POTION_SPOILAGE_PER_DAY = 0.005
 
 # Price multiplier is clamped between these so a resource never goes
 # free (deep surplus) or absurdly expensive (deep shortage).
@@ -81,6 +106,22 @@ def produce_resources(city):
     if "resources" not in city:
         city["resources"] = {}
 
+    # Tools: every producing worker wears some out today. If the city cannot
+    # cover all of it, every building works at a reduced pace.
+    producing_workers = sum(
+        len(b["workers"]) for b in city["buildings"] if building_production.get(b["type"])
+    )
+    tools_needed = producing_workers * TOOLS_WEAR_PER_WORKER
+    tools_on_hand = city["resources"].get("Tools", 0)
+
+    if tools_needed > 0:
+        tool_coverage = min(1.0, tools_on_hand / tools_needed)
+        city["resources"]["Tools"] = round(max(0.0, tools_on_hand - tools_needed), 2)
+    else:
+        tool_coverage = 1.0
+
+    tool_factor = NO_TOOLS_OUTPUT + (1 - NO_TOOLS_OUTPUT) * tool_coverage
+
     for building in city["buildings"]:
 
         rule = building_production.get(building["type"])
@@ -93,17 +134,22 @@ def produce_resources(city):
         if workers <= 0:
             continue
 
-        desired_amount = workers * rule["amount_per_worker"]
+        # How well this building can work today: worn tools and a worn
+        # building both slow it down, and it uses its inputs at that pace too.
+        condition = building.get("condition", 100)
+        efficiency = tool_factor * (WORN_OUTPUT + (1 - WORN_OUTPUT) * condition / 100)
+
+        desired_amount = workers * rule["amount_per_worker"] * efficiency
         resource = rule["resource"]
 
         secondary_resource = rule.get("secondary_resource")
-        secondary_desired = workers * rule.get("secondary_amount_per_worker", 0) if secondary_resource else 0
+        secondary_desired = workers * rule.get("secondary_amount_per_worker", 0) * efficiency if secondary_resource else 0
 
         input_resource = rule.get("input_resource")
 
         if input_resource:
 
-            input_needed = workers * rule.get("input_per_worker", 0)
+            input_needed = workers * rule.get("input_per_worker", 0) * efficiency
 
             if input_needed <= 0:
                 continue
@@ -121,8 +167,8 @@ def produce_resources(city):
             city["resources"][input_resource] = round(available_input - input_consumed, 2)
 
         else:
-            actual_amount = desired_amount
-            actual_secondary = secondary_desired
+            actual_amount = round(desired_amount, 2)
+            actual_secondary = round(secondary_desired, 2)
 
         city["resources"][resource] = round(
             city["resources"].get(resource, 0) + actual_amount, 2
@@ -159,15 +205,97 @@ def consume_resources(city):
     return city
 
 
+def maintain_buildings(city):
+    """
+    One day of wear and repair. Every building loses BUILDING_WEAR_PER_DAY
+    condition; then the city repairs its most worn buildings first, paying
+    Wood and Stone for each point restored, until the stock runs out or
+    everything is whole. Mutates the city; save_city() persists conditions.
+    """
+
+    resources = city.setdefault("resources", {})
+
+    for building in city["buildings"]:
+        building["condition"] = round(max(0.0, building.get("condition", 100) - BUILDING_WEAR_PER_DAY), 2)
+
+    for building in sorted(city["buildings"], key=lambda b: b["condition"]):
+
+        missing = 100 - building["condition"]
+
+        if missing <= 0:
+            break
+
+        wood, stone = resources.get("Wood", 0), resources.get("Stone", 0)
+        affordable = min(wood / REPAIR_WOOD_PER_POINT, stone / REPAIR_STONE_PER_POINT)
+
+        if affordable <= 0:
+            break
+
+        points = min(missing, affordable)
+
+        building["condition"] = round(building["condition"] + points, 2)
+        resources["Wood"] = round(max(0.0, wood - points * REPAIR_WOOD_PER_POINT), 2)
+        resources["Stone"] = round(max(0.0, stone - points * REPAIR_STONE_PER_POINT), 2)
+
+    return city
+
+
+def spoil_potions(city):
+    """A little of every city's Potions loses its potency each day."""
+
+    resources = city.setdefault("resources", {})
+    stock = resources.get("Potions", 0)
+
+    if stock > 0:
+        resources["Potions"] = round(stock * (1 - POTION_SPOILAGE_PER_DAY), 2)
+
+    return city
+
+
+def stock_starting_supplies(conn, world_id):
+    """
+    A new world is generated mid-history: its cities are full of people who
+    have plainly been living and working there for years, so they should not
+    open with empty storehouses. Each city starts with StartingStock.json's
+    amount PER PERSON of each resource listed there -- roughly a month of
+    ordinary use, enough for trade to settle before anyone runs short.
+    Everything else (Grain, Flour, Ore, Steel) the city makes for itself.
+    Called once, by generate_world, after every city has its people.
+    """
+
+    per_person = load_json(STARTING_STOCK)
+
+    cities = conn.execute(
+        """
+        SELECT c.id, c.population FROM cities c
+        JOIN kingdoms k ON k.id = c.kingdom_id
+        WHERE k.world_id = ?
+        """,
+        (world_id,)
+    ).fetchall()
+
+    for city in cities:
+        for resource, amount in per_person.items():
+            conn.execute(
+                """
+                INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, ?, ?)
+                ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = city_resources.amount + excluded.amount
+                """,
+                (city["id"], resource, round(city["population"] * amount, 2))
+            )
+
+
 def simulate_city_economy_day(city):
     """
-    Applies one day of production followed by one day of consumption.
-    No day/tick loop calls this yet -- ready for a later simulation
-    phase to call repeatedly, same pattern as employment.apply_workday.
+    One day of a city's economy: production (slowed by missing Tools and
+    worn buildings), the population's consumption (Food and Cloth), wear
+    and repair of buildings, and Potions losing potency.
     """
 
     produce_resources(city)
     consume_resources(city)
+    maintain_buildings(city)
+    spoil_potions(city)
 
     return city
 

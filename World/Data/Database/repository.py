@@ -263,6 +263,14 @@ def save_city(conn, city):
             (city["id"], resource, amount)
         )
 
+    # Buildings wear down and get repaired (Data.Economy.economy.maintain_buildings),
+    # so their condition is saved with the city -- before this, nothing about a
+    # building was ever saved after the world was created.
+    conn.executemany(
+        "UPDATE buildings SET condition = ? WHERE id = ?",
+        [(b["condition"], b["id"]) for b in city.get("buildings", []) if "condition" in b]
+    )
+
     conn.commit()
 
 
