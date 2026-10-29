@@ -26,6 +26,8 @@ REQUIRED_TEMPLATE_KEYS = (
     "War (defender held)",
     "War (defender lost)",
     "War (defender lost, city taken)",
+    "Civil War (rebels won)",
+    "Civil War (loyalists won)",
 )
 
 # The only {placeholders} a template may use. {When} is the date opening a
@@ -34,11 +36,12 @@ REQUIRED_TEMPLATE_KEYS = (
 # {other} the realm it is writing about. For rulers: {ruler} and {title}
 # ("King"/"Queen"), {predecessor} (whom a new monarch replaced), {age} and
 # {age_ordinal} ("81st"), and {possessive} ("his"/"her"). For wars: {city},
-# the city taken, if any.
+# the city taken, if any. For civil wars: {sovereign}, the monarch the people
+# rose against ("Queen Daisy"), or "the crown" if the throne was empty.
 TEMPLATE_FIELDS = (
     "When", "when", "kingdom", "other",
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
-    "city",
+    "city", "sovereign",
 )
 
 # Which wording a monarch's death gets, by the cause death_event was given.
@@ -293,6 +296,44 @@ def record_war(conn, attacker_kingdom, defender_kingdom, attacker_won, captured_
         ))
 
     return entries
+
+
+def sovereign_of(conn, kingdom):
+    """How a chronicle names the kingdom's reigning monarch right now:
+    "Queen Daisy", or "the crown" if the throne is empty (its holder dead
+    and not yet replaced). Take this BEFORE a battle, so a monarch who then
+    falls in it is still named as the one the people rose against."""
+
+    from Data.Database.repository import get_npc
+
+    monarch = get_npc(conn, kingdom["ruler"]) if kingdom.get("ruler") is not None else None
+
+    if monarch and monarch["alive"]:
+        return f"{monarch.get('title') or 'the monarch'} {monarch['name']}"
+
+    return "the crown"
+
+
+def record_civil_war(conn, kingdom, rebels_won, sovereign):
+    """
+    The kingdom records a civil war that was actually fought -- in its own
+    chronicle only, since no other realm took part. sovereign is who the
+    people rose against, from sovereign_of() taken before the fighting.
+
+    Call it before the uprising's deaths are recorded, so the chronicle tells
+    of the uprising first and then of any ruler who fell in it. Returns a list
+    holding the one entry, for attach_source_event().
+    """
+
+    year, season = current_date(conn, kingdom["world_id"])
+
+    key = "Civil War (rebels won)" if rebels_won else "Civil War (loyalists won)"
+
+    return [write_entry(
+        conn, kingdom["id"], "Civil War", key, year, season,
+        {"kingdom": kingdom["name"], "sovereign": sovereign},
+        seed_parts=(sovereign,)
+    )]
 
 
 def attach_source_event(conn, entries, event_id):

@@ -88,5 +88,15 @@
     "{When}, {other} came against {kingdom} with sword and fire, and the city of {city} was lost.",
     "{When}, {kingdom} was bested by {other}, and {city} passed from the realm into the hands of the foe.",
     "{When}, the banners of {other} were raised over {city}, torn from {kingdom} by the sword."
+  ],
+  "Civil War (rebels won)": [
+    "{When}, the people of {kingdom} rose in arms against {sovereign}, and the rebellion carried the day.",
+    "{When}, civil war tore {kingdom} asunder, and the rebels cast down {sovereign}.",
+    "{When}, the realm of {kingdom} turned upon itself, and the rebels overthrew {sovereign}."
+  ],
+  "Civil War (loyalists won)": [
+    "{When}, rebellion flared in {kingdom}, but those loyal to {sovereign} crushed it, though the unrest that bred it lingered.",
+    "{When}, the people of {kingdom} rose against {sovereign} and were put down by the loyal soldiery.",
+    "{When}, civil strife shook {kingdom}, yet the throne held fast against the rebels."
   ]
 }

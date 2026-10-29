@@ -481,8 +481,17 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
 
     rebels_win = random.random() < (rebel_power / total_power)
 
+    # Who the people rose against -- taken before anyone falls, so a monarch
+    # killed in the fighting is still the one the chronicle names.
+    from Data.History.chronicle import sovereign_of, record_civil_war
+    sovereign = sovereign_of(conn, kingdom)
+
     loyalist_deaths = apply_casualties(conn, loyalists, won=not rebels_win)
     rebel_deaths = apply_casualties(conn, rebels, won=rebels_win)
+
+    # The chronicle tells of the uprising before anyone who fell in it --
+    # the deaths below, a ruler's included, follow it.
+    civil_war_entries = record_civil_war(conn, kingdom, rebels_win, sovereign)
 
     from Data.Events.events import death_event
     from Data.Relationships.relationships import apply_grief
@@ -537,7 +546,9 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
     }
 
     from Data.Events.events import civil_war_event
-    civil_war_event(conn, kingdom, result, participants=[npc["id"] for npc in loyalists + rebels])
+    event = civil_war_event(conn, kingdom, result, participants=[npc["id"] for npc in loyalists + rebels])
+    from Data.History.chronicle import attach_source_event
+    attach_source_event(conn, civil_war_entries, event["id"])
     conn.commit()
 
     return result
