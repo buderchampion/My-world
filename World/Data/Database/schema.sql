@@ -198,6 +198,31 @@ CREATE TABLE IF NOT EXISTS events (
                             -- auto-filled by create_event() from the world's current
                             -- clock position unless explicitly overridden
 );
+CREATE TABLE IF NOT EXISTS armies (
+    id                  INTEGER PRIMARY KEY,
+    kingdom_id          INTEGER NOT NULL REFERENCES kingdoms(id),
+    name                TEXT NOT NULL,
+    status              TEXT NOT NULL,      -- Mustered, Marching, Encamped or Disbanded
+    home_city_id        INTEGER NOT NULL REFERENCES cities(id),
+    location_city_id    INTEGER NOT NULL REFERENCES cities(id),  -- where it is, or the last city it passed
+    next_city_id        INTEGER REFERENCES cities(id),           -- the city it is marching toward (NULL unless Marching)
+    leg_days_remaining  INTEGER NOT NULL DEFAULT 0,              -- days left on the current road
+    route               TEXT NOT NULL DEFAULT '[]',              -- JSON list of the cities still to reach after next_city_id
+    destination_city_id INTEGER REFERENCES cities(id),
+    food                REAL NOT NULL DEFAULT 0,                 -- supplies carried in its wagons
+    weapons             REAL NOT NULL DEFAULT 0,
+    potions             REAL NOT NULL DEFAULT 0,
+    days_without_food   INTEGER NOT NULL DEFAULT 0
+);
+
+-- Who serves in which army. A soldier serves in one army at a time; when an
+-- army disbands its rows are removed and its soldiers go home.
+CREATE TABLE IF NOT EXISTS army_members (
+    army_id INTEGER NOT NULL REFERENCES armies(id),
+    npc_id  INTEGER NOT NULL UNIQUE REFERENCES npcs(id),
+    PRIMARY KEY (army_id, npc_id)
+);
+
 CREATE TABLE IF NOT EXISTS chronicle_entries (
     id              INTEGER PRIMARY KEY,
     kingdom_id      INTEGER NOT NULL REFERENCES kingdoms(id),

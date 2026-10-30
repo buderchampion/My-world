@@ -127,6 +127,11 @@ class SimulationManager:
         # NPCs whose record grief changed today (a spouse starved); see the
         # per-NPC loop below for why they must be reloaded.
         grieving = set()
+
+        # Soldiers away with an army are fed and armed from its wagons, not
+        # from their capital's upkeep.
+        from Data.Government.armies import get_army_npc_ids
+        deployed_ids = get_army_npc_ids(self.conn, self.world_id)
         
         # Chance, per city per day, that a city's own Bandit Camp (if
         # it has one, with living occupants) actually raids that day --
@@ -230,7 +235,7 @@ class SimulationManager:
 
             capital_city = next((c for c in cities if c["id"] == kingdom.get("capital")), None)
             if capital_city is not None:
-                apply_military_upkeep(self.conn, kingdom, military_npcs, capital_city)
+                apply_military_upkeep(self.conn, kingdom, military_npcs, capital_city, deployed_ids=deployed_ids)
 
             simulate_kingdom_trade_day(cities)
 
@@ -263,6 +268,12 @@ class SimulationManager:
         for trip in travel_result["arrived"]:
             if trip["purpose"] == "Migration":
                 relocate_npc(self.conn, trip["npc_id"], trip["destination_city_id"])
+
+        # Armies eat from their wagons and march on. This changes soldiers'
+        # hunger in the database, so it runs after the per-NPC loop above has
+        # saved everyone -- otherwise those older copies would overwrite it.
+        from Data.Government.armies import advance_armies
+        advance_armies(self.conn, self.world_id)
 
         self.conn.commit()
 

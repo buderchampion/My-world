@@ -77,7 +77,10 @@ def get_traveling_npc_ids(conn, world_id):
         (world_id,)
     ).fetchall()
 
-    return {row["npc_id"] for row in rows}
+    # Soldiers marching or encamped with an army are away from home too.
+    from Data.Government.armies import get_army_npc_ids
+
+    return {row["npc_id"] for row in rows} | get_army_npc_ids(conn, world_id)
 
 
 def advance_npc_travels(conn, world_id):

@@ -16,7 +16,7 @@ DESERTION_FRACTION = 0.05
 MILITARY_PROFESSIONS = ("Guard", "Soldier", "Captian", "Knight")
 
 
-def apply_military_upkeep(conn, kingdom, military_npcs, capital_city):
+def apply_military_upkeep(conn, kingdom, military_npcs, capital_city, deployed_ids=frozenset()):
     """
     Charges one day of upkeep for a kingdom's standing military:
     gold from the treasury, Food and Weapons from the kingdom's
@@ -28,6 +28,10 @@ def apply_military_upkeep(conn, kingdom, military_npcs, capital_city):
     spent at all -- no partial payment -- and some fraction of the
     military deserts instead.
 
+    Soldiers in deployed_ids are away with an army: they are still paid,
+    but they eat from and are armed by the army's own wagons, so the capital
+    is not charged Food or Weapons for them.
+
     Returns a dict describing what happened, for logging/testing.
     """
 
@@ -37,10 +41,11 @@ def apply_military_upkeep(conn, kingdom, military_npcs, capital_city):
         return {"gold_cost": 0.0, "food_cost": 0.0, "weapons_cost": 0.0, "paid": True, "deserters": 0}
 
     count = len(military_npcs)
+    at_home = sum(1 for npc in military_npcs if npc["id"] not in deployed_ids)
 
     gold_cost = round(count * UPKEEP_GOLD_PER_SOLDIER_PER_DAY, 2)
-    food_cost = round(count * UPKEEP_FOOD_PER_SOLDIER_PER_DAY, 2)
-    weapons_cost = round(count * UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY, 2)
+    food_cost = round(at_home * UPKEEP_FOOD_PER_SOLDIER_PER_DAY, 2)
+    weapons_cost = round(at_home * UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY, 2)
 
     available_food = capital_city.get("resources", {}).get("Food", 0)
     available_weapons = capital_city.get("resources", {}).get("Weapons", 0)

@@ -221,7 +221,7 @@ FEATURES = [
                 "form_families(", "consider_tourism(", "consider_migration(", "record_coronation(",
                 "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
                 "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
-                "apply_starvation_check(npc)",
+                "apply_starvation_check(npc)", "advance_armies(",
             ],
             "Data/Combat/combat.py": ["def resolve_kingdom_war(", "record_war(", "def resolve_civil_war(", "record_civil_war("],
             "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
@@ -238,6 +238,20 @@ FEATURES = [
             "Data/Simulation/simulation_manager.py": ["drink_potion(npc, city)", "NO_CLOTH_HAPPINESS_PER_DAY"],
             "Data/World/world_generator.py": ["stock_starting_supplies("],
             "Data/Database/repository.py": ["UPDATE buildings SET condition"],
+        },
+    },
+    {
+        "name": "Armies: one record each (roster, supplies, position on the roads)",
+        "tables": ["armies", "army_members"],
+        "functions": {
+            "Data/Government/armies.py": [
+                "find_route", "raise_army", "march_army", "advance_armies", "disband_army", "get_army_npc_ids",
+            ],
+        },
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["advance_armies(self.conn", "deployed_ids=deployed_ids"],
+            "Data/Infrastructure/travel.py": ["get_army_npc_ids(conn, world_id)"],
+            "Data/Government/military.py": ["deployed_ids"],
         },
     },
     {
@@ -1372,6 +1386,73 @@ def _smoke_body(r, holder):
         assert not drink_potion(npc, city) and city["resources"]["Potions"] == 4, "a healthy NPC drank a potion"
 
     run_step(r, "Tools, repairs and Potions are used up, and building wear is saved", sinks_work)
+
+    def armies_march():
+        from Data.Database.repository import get_kingdom, get_city, get_kingdom_cities
+        from Data.Government import armies as A
+        from Data.Government.military import apply_military_upkeep
+        from Data.Infrastructure.travel import get_traveling_npc_ids, get_travel_days
+
+        kingdom = get_kingdom(conn, kingdoms[0]["id"])
+        capital = get_city(conn, kingdom["capital"])
+        target = next(
+            (c for other in kingdoms[1:] for c in get_kingdom_cities(conn, other["id"])
+             if A.find_route(conn, capital["id"], c["id"])),
+            None
+        )
+        assert target, "(setup) no city in another kingdom can be reached by road"
+
+        # stock the capital first: earlier steps empty stockpiles on purpose
+        # (the trade step forces a Food shortage), and this step should not
+        # depend on whatever they left behind
+        from Data.Database.repository import save_city
+        capital["resources"].update({"Food": 5000.0, "Weapons": 500.0, "Potions": 50.0})
+        save_city(conn, capital)
+
+        army = A.raise_army(conn, kingdom, capital, size=5)
+        assert army and len(army["members"]) == 5, "an army of 5 soldiers could not be raised"
+        assert army["food"] > 0, "the army set out with no Food in its wagons"
+        assert set(army["members"]) <= get_traveling_npc_ids(conn, kingdom["world_id"]), \
+            "soldiers in an army do not count as away from home"
+
+        route = A.find_route(conn, capital["id"], target["id"])
+        stops = [capital["id"]] + route
+        road_days = sum(get_travel_days(conn, a, b) for a, b in zip(stops, stops[1:]))
+        assert A.march_army(conn, army["id"], target["id"]), "the army could not set out"
+
+        # the first day through the real daily tick: armies must advance there, and
+        # the soldiers' meal must survive the day's saves of everyone
+        members = ",".join(map(str, army["members"]))
+        conn.execute(f"UPDATE npcs SET needs_hunger = 30 WHERE id IN ({members})")
+        conn.commit()
+        manager.on_day()
+        hunger = [row[0] for row in conn.execute(f"SELECT needs_hunger FROM npcs WHERE id IN ({members}) AND alive = 1")]
+        assert hunger and min(hunger) > 30, "the daily tick did not feed the army, or a later save erased the meal"
+
+        days = 1
+        while A.get_army(conn, army["id"])["status"] == "Marching" and days < 400:
+            A.advance_armies(conn, kingdom["world_id"])
+            days += 1
+        arrived = A.get_army(conn, army["id"])
+        assert arrived["status"] == "Encamped" and arrived["location_city_id"] == target["id"], "the army never reached its destination"
+        assert days == road_days, f"the march took {days} days, but the roads add up to {road_days}"
+        assert abs(arrived["food"] - (army["food"] - 5 * days)) < 0.01, "the army did not eat 1 Food per soldier per day"
+        assert not A.disband_army(conn, army["id"]), "an army was allowed to disband abroad"
+
+        result = apply_military_upkeep(
+            conn, kingdom, [{"id": i, "profession": "Soldier"} for i in range(1, 5)],
+            {"resources": {"Food": 100, "Weapons": 100}}, deployed_ids={1, 2}
+        )
+        assert result["food_cost"] == 2 and result["gold_cost"] == 8, "deployed soldiers are fed by the capital as well as their wagons"
+
+        A.march_army(conn, army["id"], capital["id"])
+        while A.get_army(conn, army["id"])["status"] == "Marching":
+            A.advance_armies(conn, kingdom["world_id"])
+        assert A.disband_army(conn, army["id"]), "the army could not disband at home"
+        assert not (set(army["members"]) & get_traveling_npc_ids(conn, kingdom["world_id"])), "disbanded soldiers still count as away"
+
+    if len(kingdoms) >= 2:
+        run_step(r, "an army marches by road at road speed, eats from its wagons, and disbands at home", armies_march)
 
     def year_tick_and_grief():
         import Data.NPCS.aging as aging
