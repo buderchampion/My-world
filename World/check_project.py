@@ -221,7 +221,7 @@ FEATURES = [
                 "form_families(", "consider_tourism(", "consider_migration(", "record_coronation(",
                 "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
                 "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
-                "apply_starvation_check(npc)", "advance_armies(",
+                "apply_starvation_check(npc)", "advance_armies(", "advance_supply_lines(",
             ],
             "Data/Combat/combat.py": ["def resolve_kingdom_war(", "record_war(", "def resolve_civil_war(", "record_civil_war("],
             "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
@@ -253,6 +253,14 @@ FEATURES = [
             "Data/Infrastructure/travel.py": ["get_army_npc_ids(conn, world_id)"],
             "Data/Government/military.py": ["deployed_ids"],
         },
+    },
+    {
+        "name": "Supply lines: caravans from the capital feed armies in the field",
+        "tables": ["supply_caravans"],
+        "functions": {
+            "Data/Government/supply.py": ["dispatch_supplies", "advance_supply_lines", "resupply_threshold_days"],
+        },
+        "wired": {"Data/Simulation/simulation_manager.py": ["advance_supply_lines(self.conn"]},
     },
     {
         "name": "Ruling households do not emigrate",
@@ -1284,10 +1292,18 @@ def _smoke_body(r, holder):
         from Data.Database.repository import get_kingdom, get_kingdom_cities, get_npc, save_npc
         from Data.History.chronicle import get_chronicle, load_templates, format_when, current_date
 
-        kingdom = get_kingdom(conn, kingdoms[0]["id"])
+        # any kingdom whose monarch is alive: an earlier step's war can kill a
+        # monarch who happens to be a soldier, so do not assume the first one
+        def living_monarch(k):
+            ruler = get_kingdom(conn, k["id"]).get("ruler")
+            npc = get_npc(conn, ruler) if ruler else None
+            return npc if npc and npc["alive"] else None
+
+        chosen = next((k for k in kingdoms if living_monarch(k)), None)
+        assert chosen, "(setup) no kingdom has a living monarch"
+        kingdom = get_kingdom(conn, chosen["id"])
         cities = get_kingdom_cities(conn, kingdom["id"])
-        monarch = get_npc(conn, kingdom["ruler"]) if kingdom.get("ruler") else None
-        assert monarch and monarch["alive"], "(setup) the kingdom has no living monarch"
+        monarch = living_monarch(kingdom)
         sovereign = f"{monarch['title']} {monarch['name']}"
 
         # an armed uprising, in which the monarch is sure to fall
@@ -1453,6 +1469,76 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "an army marches by road at road speed, eats from its wagons, and disbands at home", armies_march)
+
+    def supply_lines():
+        from Data.Database.repository import get_kingdom, get_city, get_kingdom_cities, save_city
+        from Data.Government import armies as A
+        import Data.Government.supply as S
+        from Data.Infrastructure.travel import get_travel_days
+
+        class Dice:
+            def __init__(self, roll): self.roll = roll
+            def random(self): return self.roll
+
+        kingdom = get_kingdom(conn, kingdoms[0]["id"])
+        capital = get_city(conn, kingdom["capital"])
+        capital["resources"].update({"Food": 20000.0, "Weapons": 500.0, "Potions": 50.0})
+        save_city(conn, capital)
+        target = next(
+            (c for other in kingdoms[1:] for c in get_kingdom_cities(conn, other["id"])
+             if A.find_route(conn, capital["id"], c["id"])),
+            None
+        )
+        assert target, "(setup) no city in another kingdom can be reached by road"
+
+        army = A.raise_army(conn, kingdom, get_city(conn, kingdom["capital"]), size=5)
+        A.march_army(conn, army["id"], target["id"])
+        while A.get_army(conn, army["id"])["status"] == "Marching":
+            A.advance_armies(conn, kingdom["world_id"])
+
+        stops = [capital["id"]] + A.find_route(conn, capital["id"], target["id"])
+        journey = sum(get_travel_days(conn, a, b) for a, b in zip(stops, stops[1:]))
+        threshold = S.resupply_threshold_days(conn, capital["id"], A.get_army(conn, army["id"]))
+        assert threshold == max(S.RESUPPLY_BELOW_DAYS, journey + S.RESUPPLY_SAFETY_DAYS), \
+            f"an army {journey} days from home asks at {threshold} days of Food, not its journey plus the safety margin"
+
+        real_random = S.random
+        S.random = Dice(0.99)          # no raids, so the delivery is certain
+        try:
+            conn.execute("UPDATE armies SET food = 10 WHERE id = ?", (army["id"],))
+            conn.commit()
+            manager.on_day()
+            sent = conn.execute("SELECT * FROM supply_caravans WHERE army_id = ?", (army["id"],)).fetchall()
+            assert len(sent) == 1, "the daily tick did not send supplies to a hungry army in the field"
+            # (a whole day also moves the capital's Food through farming, eating and
+            # trade deliveries, so check the caravan itself rather than the stock)
+            assert sent[0]["origin_city_id"] == capital["id"] and sent[0]["food"] > 0, \
+                "the supply caravan did not set out from the capital carrying Food"
+
+            days = 1
+            while conn.execute("SELECT status FROM supply_caravans WHERE army_id = ?", (army["id"],)).fetchone()[0] == "En Route" and days < 400:
+                A.advance_armies(conn, kingdom["world_id"])
+                S.advance_supply_lines(conn, kingdom["world_id"])
+                days += 1
+            status = conn.execute("SELECT status FROM supply_caravans WHERE army_id = ?", (army["id"],)).fetchone()[0]
+            assert status == "Delivered", f"the supply caravan never reached the camp ({status})"
+            assert days == journey, f"the supply caravan took {days} days, but the roads add up to {journey}"
+            cargo = conn.execute("SELECT food FROM supply_caravans WHERE army_id = ?", (army["id"],)).fetchone()[0]
+            assert A.get_army(conn, army["id"])["food"] >= cargo, \
+                f"the caravan delivered {cargo} Food, but the army's wagons hold only {A.get_army(conn, army['id'])['food']}"
+
+            conn.execute("UPDATE armies SET food = 10 WHERE id = ?", (army["id"],))
+            conn.commit()
+            S.random = Dice(0.0)       # this one is raided
+            S.advance_supply_lines(conn, kingdom["world_id"])
+            raided = conn.execute("SELECT COUNT(*) FROM supply_caravans WHERE army_id = ? AND status = 'Raided'", (army["id"],)).fetchone()[0]
+            logged = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Supply Raided'").fetchone()[0]
+            assert raided == 1 and logged >= 1, "a raided supply caravan was not lost, or the raid was not logged"
+        finally:
+            S.random = real_random
+
+    if len(kingdoms) >= 2:
+        run_step(r, "a supply caravan reaches an army in the field at road speed, and can be raided", supply_lines)
 
     def year_tick_and_grief():
         import Data.NPCS.aging as aging

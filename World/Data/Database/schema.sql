@@ -223,6 +223,22 @@ CREATE TABLE IF NOT EXISTS army_members (
     PRIMARY KEY (army_id, npc_id)
 );
 
+-- Supply caravans carry Food, Weapons and Potions from a kingdom's capital to
+-- one of its armies in the field, following it wherever it goes.
+CREATE TABLE IF NOT EXISTS supply_caravans (
+    id                  INTEGER PRIMARY KEY,
+    army_id             INTEGER NOT NULL REFERENCES armies(id),
+    origin_city_id      INTEGER NOT NULL REFERENCES cities(id),
+    status              TEXT NOT NULL,       -- En Route, Returning, Delivered, Raided or Returned
+                                             -- (its cargo stays on the record: what it delivered, returned or lost)
+    location_city_id    INTEGER NOT NULL REFERENCES cities(id),   -- where it is, or the last city it passed
+    next_city_id        INTEGER REFERENCES cities(id),            -- the city it is heading for (NULL between legs)
+    leg_days_remaining  INTEGER NOT NULL DEFAULT 0,
+    food                REAL NOT NULL DEFAULT 0,
+    weapons             REAL NOT NULL DEFAULT 0,
+    potions             REAL NOT NULL DEFAULT 0
+);
+
 CREATE TABLE IF NOT EXISTS chronicle_entries (
     id              INTEGER PRIMARY KEY,
     kingdom_id      INTEGER NOT NULL REFERENCES kingdoms(id),

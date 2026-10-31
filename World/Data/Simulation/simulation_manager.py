@@ -275,6 +275,12 @@ class SimulationManager:
         from Data.Government.armies import advance_armies
         advance_armies(self.conn, self.world_id)
 
+        # Supply lines: armies running low send home for more, and supply
+        # caravans on the road travel, deliver, or get raided. After the
+        # armies have eaten and moved today, for the same reason as above.
+        from Data.Government.supply import advance_supply_lines
+        advance_supply_lines(self.conn, self.world_id)
+
         self.conn.commit()
 
     def on_month(self) -> None:
