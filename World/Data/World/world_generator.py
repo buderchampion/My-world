@@ -26,6 +26,11 @@ def generate_world():
 
     generate_roads(conn, world["id"])
 
+    # The land itself: terrain, climate, rivers and farmland, and which
+    # region each settlement sits in -- see Data.World.regions.
+    from Data.World.regions import ensure_regions
+    ensure_regions(conn, world["id"])
+
     # Cities open with stocked storehouses, not empty ones -- see
     # Data.Economy.economy.stock_starting_supplies.
     from Data.Economy.economy import stock_starting_supplies

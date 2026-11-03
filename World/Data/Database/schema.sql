@@ -198,6 +198,22 @@ CREATE TABLE IF NOT EXISTS events (
                             -- auto-filled by create_event() from the world's current
                             -- clock position unless explicitly overridden
 );
+-- Regions are natural areas of land, not political ones: a region can straddle
+-- a kingdom border, as a river valley does. Every settlement belongs to one.
+CREATE TABLE IF NOT EXISTS regions (
+    id          INTEGER PRIMARY KEY,
+    world_id    INTEGER NOT NULL REFERENCES worlds(id),
+    name        TEXT NOT NULL,
+    center_x    INTEGER NOT NULL,
+    center_y    INTEGER NOT NULL,
+    terrain     TEXT NOT NULL,     -- Mountains, Hills, Forest, Marsh, Plains or Steppe
+    climate     TEXT NOT NULL,     -- Cold, Temperate or Warm (by latitude)
+    elevation   REAL NOT NULL,     -- 0 (the world's lowest land) to 1 (its highest)
+    moisture    REAL NOT NULL,     -- 0 (the driest) to 1 (the wettest)
+    has_river   INTEGER NOT NULL DEFAULT 0,
+    farmland    REAL NOT NULL      -- how well it grows food; 1.0 is good open farmland
+);
+
 CREATE TABLE IF NOT EXISTS armies (
     id                  INTEGER PRIMARY KEY,
     kingdom_id          INTEGER NOT NULL REFERENCES kingdoms(id),

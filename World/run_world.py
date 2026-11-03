@@ -49,6 +49,12 @@ def get_or_create_world():
                 f"  (backfilled {len(created)} roads onto this world -- it predates the road network)"
             )
 
+        # Regions: a world made before they existed gets its land now.
+        from Data.World.regions import ensure_regions
+        regions_created = ensure_regions(connection, world["id"])
+        if regions_created:
+            print(f"  (gave this world {regions_created} regions -- it predates regions)")
+
         districts_created = 0
         mills_bakeries_created = 0
         for kingdom in get_world_kingdoms(connection, world["id"]):

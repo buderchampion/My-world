@@ -263,6 +263,19 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["advance_supply_lines(self.conn"]},
     },
     {
+        "name": "Regions: terrain, climate, rivers and farmland; every settlement in one",
+        "tables": ["regions"],
+        "functions": {
+            "Data/World/regions.py": ["generate_regions", "ensure_regions", "assign_settlements_to_regions", "region_neighbors"],
+            "read_regions.py": ["main"],
+        },
+        "wired": {
+            "Data/World/world_generator.py": ["ensure_regions("],
+            "run_world.py": ["ensure_regions("],
+            "Data/Database/database.py": ['"region_id"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -487,6 +500,19 @@ def check_config(r):
                     r.fail(f"building_generator.CHAIN_CATEGORIES['{category}'] lists '{name}', not in BuildingTypes.json")
     except Exception as e:
         r.warn(f"could not cross-check CHAIN_CATEGORIES ({type(e).__name__}: {e})")
+
+    try:
+        from Data.World.regions import TERRAIN_FARMLAND
+        names = load_json("Data/Names/RegionNames.json")
+        if not names.get("prefixes"):
+            r.fail("RegionNames.json: no prefixes")
+        for terrain in TERRAIN_FARMLAND:
+            if not names.get("words", {}).get(terrain):
+                r.fail(f"RegionNames.json: no name words for {terrain} regions")
+    except (OSError, json.JSONDecodeError) as e:
+        r.fail(f"could not load RegionNames.json: {e}")
+    except ImportError as e:
+        r.fail(f"Data/World/regions.py could not be imported ({e})")
 
     try:
         starting = load_json("Data/Economy/StartingStock.json")
@@ -901,6 +927,41 @@ def _smoke_body(r, holder):
             assert not wrong, f"{len(wrong)} starting stocks are wrong, e.g. " + "; ".join(wrong[:3])
 
         run_step(r, "every city starts with its storehouses stocked for its population", starting_stock)
+
+        def regions_made():
+            import statistics
+            from Data.World import regions as R
+            from Data.Kingdoms.kingdom_generator import MAP_WIDTH, MAP_HEIGHT
+
+            regs = R.get_regions(conn, world_id)
+            expected = max(1, round(MAP_WIDTH / R.REGION_SIZE)) * max(1, round(MAP_HEIGHT / R.REGION_SIZE))
+            assert len(regs) == expected, f"the map should hold {expected} regions, but has {len(regs)}"
+
+            misplaced = 0
+            for city in conn.execute("SELECT map_x, map_y, region_id FROM cities"):
+                nearest = min(regs, key=lambda g: (g["center_x"] - city["map_x"]) ** 2 + (g["center_y"] - city["map_y"]) ** 2)
+                misplaced += nearest["id"] != city["region_id"]
+            assert misplaced == 0, f"{misplaced} settlements are not in the region they sit in (or in none)"
+
+            kinds = {t: sum(g["terrain"] == t for g in regs) for t in R.TERRAIN_FARMLAND}
+            assert all(kinds.values()), f"not every kind of land appears: {kinds}"
+
+            neighbors = R.region_neighbors(regs)
+            by_id = {g["id"]: g for g in regs}
+            gap = statistics.mean(abs(by_id[a]["elevation"] - by_id[b]["elevation"]) for a in neighbors for b in neighbors[a])
+            assert gap < 0.26, f"neighboring regions do not resemble each other (height gap {gap:.2f}; random land is about 0.33)"
+
+            rivers = [g for g in regs if g["has_river"]]
+            stranded = [g["name"] for g in rivers if not any(by_id[n]["has_river"] for n in neighbors[g["id"]])]
+            assert rivers and not stranded, f"rivers are missing or broken (stranded: {stranded})"
+            heights = [g["elevation"] for g in rivers]
+            assert min(heights) < 0.6 and max(heights) - min(heights) >= 0.4, \
+                f"rivers do not flow down from the heights into the lowlands (river heights {min(heights):.2f} to {max(heights):.2f})"
+
+            assert R.ensure_regions(conn, world_id) == 0 and len(R.get_regions(conn, world_id)) == len(regs), \
+                "running the region setup again changed the world"
+
+        run_step(r, "the land has regions (terrain, climate, rivers) and every settlement sits in one", regions_made)
 
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:

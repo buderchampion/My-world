@@ -1,0 +1,15 @@
+{
+    "prefixes": [
+        "North", "South", "East", "West", "High", "Low", "Old", "Grey", "Green", "Red",
+        "Black", "White", "Gold", "Silver", "Iron", "Long", "Far", "Mist", "Storm", "Wind",
+        "Stone", "Ash", "Oak", "Elm", "Raven", "Wolf", "Elk", "Hart", "Sun", "Moon"
+    ],
+    "words": {
+        "Mountains": ["peaks", "fells", "spires", "crags", "heights"],
+        "Hills":     ["downs", "hills", "tors", "knolls", "brae"],
+        "Forest":    ["wood", "weald", "holt", "shaw", "forest"],
+        "Marsh":     ["fen", "mere", "moss", "marsh", "carr"],
+        "Plains":    ["fields", "wold", "lea", "vale", "mead"],
+        "Steppe":    ["steppe", "reach", "barrens", "plain", "heath"]
+    }
+}
