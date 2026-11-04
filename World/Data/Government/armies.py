@@ -93,7 +93,7 @@ def get_army_npc_ids(conn, world_id):
     return {row["npc_id"] for row in rows}
 
 
-def raise_army(conn, kingdom, home_city, size=None, name=None,
+def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0,
                food_days=DEFAULT_FOOD_DAYS,
                weapons_per_soldier=DEFAULT_WEAPONS_PER_SOLDIER,
                potions_per_soldier=DEFAULT_POTIONS_PER_SOLDIER):
@@ -127,6 +127,14 @@ def raise_army(conn, kingdom, home_city, size=None, name=None,
 
     soldiers = candidates if size is None else candidates[:size]
 
+    # Levies: young men drawn from the kingdom's villages to serve this once
+    # (Data.World.villagers). They go home as Farmers when the army disbands.
+    levied = []
+    if levies:
+        from Data.World.villagers import levy_villagers
+        levied = [npc["id"] for npc in levy_villagers(conn, kingdom["id"], levies)]
+        soldiers = soldiers + levied
+
     if not soldiers:
         return None
 
@@ -156,7 +164,10 @@ def raise_army(conn, kingdom, home_city, size=None, name=None,
     )
     army_id = cursor.lastrowid
 
-    conn.executemany("INSERT INTO army_members (army_id, npc_id) VALUES (?, ?)", [(army_id, s) for s in soldiers])
+    conn.executemany(
+        "INSERT INTO army_members (army_id, npc_id, levied) VALUES (?, ?, ?)",
+        [(army_id, s, int(s in levied)) for s in soldiers]
+    )
     conn.commit()
 
     return get_army(conn, army_id)
@@ -315,7 +326,15 @@ def disband_army(conn, army_id):
                 (army["location_city_id"], resource, amount)
             )
 
+    levied = [row["npc_id"] for row in conn.execute(
+        "SELECT npc_id FROM army_members WHERE army_id = ? AND levied = 1", (army_id,))]
+
     conn.execute("DELETE FROM army_members WHERE army_id = ?", (army_id,))
+
+    # levies go back to the land
+    if levied:
+        from Data.World.villagers import send_levies_home
+        send_levies_home(conn, levied)
     conn.execute(
         "UPDATE armies SET status = 'Disbanded', food = 0, weapons = 0, potions = 0, next_city_id = NULL, route = '[]' WHERE id = ?",
         (army_id,)

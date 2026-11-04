@@ -222,7 +222,7 @@ FEATURES = [
                 "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
                 "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
                 "apply_starvation_check(npc)", "advance_armies(", "advance_supply_lines(",
-                "run_harvest(", "feed_households(",
+                "run_harvest(", "feed_households(", "village_hardship(",
             ],
             "Data/Combat/combat.py": ["def resolve_kingdom_war(", "record_war(", "def resolve_civil_war(", "record_civil_war("],
             "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
@@ -306,6 +306,19 @@ FEATURES = [
             "Data/Database/repository.py": ["UPDATE cities SET household_store"],
             "Data/Economy/economy.py": ["households_daily"],
             "Data/Database/database.py": ['"household_store"', '"hungry_days"'],
+        },
+    },
+    {
+        "name": "Villagers enter the story: famine flight, banditry, and levies",
+        "functions": {
+            "Data/World/villagers.py": [
+                "make_individual", "famine_flight", "turn_bandit", "village_hardship", "levy_villagers", "send_levies_home",
+            ],
+        },
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["village_hardship(self.conn"],
+            "Data/Government/armies.py": ["levy_villagers(", "send_levies_home(", "levied"],
+            "Data/Database/database.py": ['"levied"'],
         },
     },
     {
@@ -943,8 +956,10 @@ def _smoke_body(r, holder):
 
         got_buyer = get_kingdom_favor(conn, buyer["id"], seller["id"])
         got_seller = get_kingdom_favor(conn, seller["id"], buyer["id"])
-        want_buyer = n * economy.TRADE_FAVOR_GAIN
-        want_seller = n * economy.TRADE_FAVOR_LOSS
+        # the seller may also have bought something from the buyer the same day
+        back = sum(1 for t in trades if t["buyer"] == seller["name"] and t["seller"] == buyer["name"])
+        want_buyer = n * economy.TRADE_FAVOR_GAIN + back * economy.TRADE_FAVOR_LOSS
+        want_seller = n * economy.TRADE_FAVOR_LOSS + back * economy.TRADE_FAVOR_GAIN
 
         assert abs(got_buyer - want_buyer) < 1e-6 and abs(got_seller - want_seller) < 1e-6, (
             f"after {n} trade(s), favor should be buyer->seller {want_buyer} and seller->buyer "
@@ -1093,6 +1108,81 @@ def _smoke_body(r, holder):
                 "trade does not count a village's households once their own food has run out"
 
         run_step(r, "harvests come in at Autumn: seed, grain tax, the year's food, and surplus for market", harvests_work)
+
+        starving_probe = {}    # a starving village set up below, checked after the month tick
+
+        def villagers_enter_story():
+            import Data.World.villagers as VL
+            from Data.Database.repository import get_npc, get_kingdom, get_city, save_city
+            from Data.Government import armies as A
+
+            village = dict(conn.execute(
+                """SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                   WHERE k.world_id = ? AND c.households >= 20 ORDER BY c.households DESC LIMIT 1""", (world_id,)
+            ).fetchone())
+
+            def free_houses():
+                return conn.execute(
+                    """SELECT COUNT(*) FROM buildings b JOIN cities c ON c.id = b.city_id
+                       WHERE c.kingdom_id = ? AND c.type != 'Village' AND b.type = 'House'
+                       AND (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) < b.capacity""",
+                    (village["kingdom_id"],)
+                ).fetchone()[0]
+
+            def townsfolk():
+                return conn.execute(
+                    "SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND c.type != 'Village'",
+                    (village["kingdom_id"],)
+                ).fetchone()[0]
+
+            camps = conn.execute(
+                "SELECT COUNT(*) FROM buildings b JOIN cities c ON c.id = b.city_id WHERE b.type = 'Bandit Camp' AND c.kingdom_id = ?",
+                (village["kingdom_id"],)
+            ).fetchone()[0]
+
+            room, people_before = free_houses(), townsfolk()
+            conn.execute("UPDATE cities SET hungry_days = ? WHERE id = ?", (VL.BANDITRY_AFTER_HUNGRY_DAYS + 5, village["id"]))
+            conn.commit()
+
+            chance = VL.BANDITRY_CHANCE_PER_MONTH
+            VL.BANDITRY_CHANCE_PER_MONTH = 1.0          # make banditry certain for this test
+            try:
+                report = VL.village_hardship(conn, world_id)
+            finally:
+                VL.BANDITRY_CHANCE_PER_MONTH = chance
+
+            fled, bandits = report["households_fled"], report["bandits"]
+            after = conn.execute("SELECT households FROM cities WHERE id = ?", (village["id"],)).fetchone()[0]
+
+            assert fled >= 1 or room == 0, "a starving village lost no households, though the towns had free houses"
+            assert townsfolk() - people_before >= 5 * fled, "fleeing households did not arrive in the towns as families of five"
+            assert bandits >= 1 or camps == 0, "a starving village lost no young men to banditry, though the kingdom has Bandit Camps"
+            lost = village["households"] - after
+            assert abs(lost - (fled + bandits / VL.FAMILY_SIZE)) < 1e-6, \
+                f"the village's households do not add up ({lost:.2f} lost for {fled} families and {bandits} bandits)"
+
+            if fled:
+                couple = conn.execute(
+                    """SELECT id, spouse_id FROM npcs WHERE spouse_id IS NOT NULL AND profession = 'Unemployed'
+                       ORDER BY id DESC LIMIT 1"""
+                ).fetchone()
+                partner = get_npc(conn, couple["spouse_id"])
+                assert partner["spouse"] == couple["id"], "a fleeing couple did not arrive married"
+
+            kingdom = get_kingdom(conn, village["kingdom_id"])
+            capital = get_city(conn, kingdom["capital"])
+            capital["resources"].update({"Food": 99999.0, "Weapons": 999.0})
+            save_city(conn, capital)
+            army = A.raise_army(conn, kingdom, get_city(conn, kingdom["capital"]), size=1, levies=4)
+            levied = [row[0] for row in conn.execute("SELECT npc_id FROM army_members WHERE army_id = ? AND levied = 1", (army["id"],))]
+            assert len(levied) == 4, f"an army raised with 4 levies has {len(levied)}"
+            assert all(get_npc(conn, i)["profession"] == "Soldier" for i in levied), "levied men are not serving as Soldiers"
+            assert A.disband_army(conn, army["id"]), "the army with levies could not disband at home"
+            assert all(get_npc(conn, i)["profession"] in ("Farmer", "Unemployed") for i in levied), \
+                "levies did not go back to the land when their army disbanded"
+
+
+        run_step(r, "hungry villages lose families to the towns and men to banditry; levies serve and go home", villagers_enter_story)
 
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
@@ -1328,7 +1418,38 @@ def _smoke_body(r, holder):
 
     run_step(r, "hour tick  (needs and schedules)", manager.on_hour)
     run_step(r, "day tick   (economy, wages, trade, caravans, travel)", manager.on_day)
+    def prepare_starving_village():
+        # set up right before the month tick, so no other step can feed it first
+        # leave a starving village for the game's own month tick to deal with (checked after that tick)
+        roomiest = conn.execute(
+            """SELECT c.kingdom_id, COUNT(*) n FROM buildings b JOIN cities c ON c.id = b.city_id
+               JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND c.type != 'Village' AND b.type = 'House'
+               AND (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) < b.capacity
+               GROUP BY c.kingdom_id ORDER BY n DESC LIMIT 1""", (world_id,)
+        ).fetchone()
+        if roomiest:
+            other = conn.execute(
+                "SELECT id, households FROM cities WHERE kingdom_id = ? AND households >= 20 AND id != ? ORDER BY households DESC LIMIT 1",
+                (roomiest["kingdom_id"], -1)
+            ).fetchone()
+            if other:
+                conn.execute("UPDATE cities SET hungry_days = 30, household_store = 0 WHERE id = ?", (other["id"],))
+                conn.execute("UPDATE city_resources SET amount = 0 WHERE city_id = ? AND resource_name = 'Food'", (other["id"],))
+                conn.commit()
+                starving_probe.update(id=other["id"], households=other["households"])
+
+    run_step(r, "(setup) a village starving just before the month tick", prepare_starving_village)
+
     run_step(r, "month tick (families, relationships, tourism, migration)", manager.on_month)
+
+    def month_tick_moves_the_starving():
+        if not starving_probe:
+            return
+        now = conn.execute("SELECT households FROM cities WHERE id = ?", (starving_probe["id"],)).fetchone()[0]
+        assert now < starving_probe["households"], "the monthly tick did not move households out of a starving village"
+
+    run_step(r, "the month tick moves families out of a starving village", month_tick_moves_the_starving)
 
     def rulers_saved():
         saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]

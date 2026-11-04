@@ -49,6 +49,9 @@ def init_database():
         "hungry_days": "INTEGER NOT NULL DEFAULT 0",
     })
 
+    # Who in an army was levied from the villages (they go home as Farmers).
+    _add_missing_columns(connection, "army_members", {"levied": "INTEGER NOT NULL DEFAULT 0"})
+
     _add_missing_columns(connection, "kingdoms", {
         "treasury": "REAL NOT NULL DEFAULT 1000",
         "tax_rate": "REAL NOT NULL DEFAULT 0.1",

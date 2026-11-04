@@ -351,6 +351,11 @@ class SimulationManager:
 
         from Data.Infrastructure.migration import consider_migration
         consider_migration(self.conn, self.world_id)
+
+        # Hungry villages lose households to the towns and young men to
+        # banditry (Data.World.villagers).
+        from Data.World.villagers import village_hardship
+        village_hardship(self.conn, self.world_id)
         
         self.conn.commit()
 
