@@ -198,7 +198,9 @@ def ensure_household_stores(conn, world_id):
     """
     A world that has never had a harvest (a new world, or one made before
     harvests existed) gives each village's households enough to eat until
-    the first harvest -- they were plainly living off last year's crop. Once
+    the first harvest -- they were plainly living off last year's crop --
+    and stocks every settlement's market with the same for its individual
+    people. Once
     a world has had a harvest this does nothing, so a village that has
     honestly eaten through its store is never refilled for free. Returns how
     many villages were stocked.
@@ -222,6 +224,17 @@ def ensure_household_stores(conn, world_id):
     for row in rows:
         conn.execute("UPDATE cities SET household_store = ? WHERE id = ?",
                      (row["households"] * FAMILY_SIZE * days, row["id"]))
+
+    # Last year's surplus is still in the markets too: every settlement holds
+    # enough Food for its individual people until the first harvest. Only when
+    # the villages were just stocked, so calling this twice before the first
+    # harvest can never stock the markets twice.
+    if rows:
+        for city in conn.execute(
+            "SELECT c.id, c.population FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?",
+            (world_id,)
+        ).fetchall():
+            _add_food(conn, city["id"], city["population"] * days)
 
     conn.commit()
     return len(rows)

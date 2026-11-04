@@ -222,7 +222,7 @@ FEATURES = [
                 "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
                 "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
                 "apply_starvation_check(npc)", "advance_armies(", "advance_supply_lines(",
-                "run_harvest(", "feed_households(", "village_hardship(",
+                "run_harvest(", "feed_households(", "village_hardship(", "buy_food(",
             ],
             "Data/Combat/combat.py": ["def resolve_kingdom_war(", "record_war(", "def resolve_civil_war(", "record_civil_war("],
             "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
@@ -319,6 +319,18 @@ FEATURES = [
             "Data/Simulation/simulation_manager.py": ["village_hardship(self.conn"],
             "Data/Government/armies.py": ["levy_villagers(", "send_levies_home(", "levied"],
             "Data/Database/database.py": ['"levied"'],
+        },
+    },
+    {
+        "name": "Buying food: households pay from pooled gold, labourers earn a little, temples give alms",
+        "functions": {
+            "Data/Economy/food_market.py": ["buy_food", "food_price", "give_starting_savings"],
+        },
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["buy_food(self.conn, city", "LABOUR_WAGE", 'npc.get("fed", 1.0)'],
+            "Data/Economy/economy.py": ['if resource == "Food":'],
+            "Data/World/world_generator.py": ["give_starting_savings("],
+            "Data/Database/database.py": ['"fed"'],
         },
     },
     {
@@ -979,9 +991,18 @@ def _smoke_body(r, holder):
                         "SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = ?", (city["id"], resource)
                     ).fetchone()
                     expected = round(city["population"] * amount, 2)
+                    if resource == "Food":     # plus last year's surplus, until the first harvest (Data.World.harvest)
+                        from Data.World.harvest import days_until_harvest
+                        clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
+                        expected = round(expected + city["population"] * days_until_harvest(clock["clock_month"], clock["clock_day"]), 2)
                     if row is None or abs(row["amount"] - expected) > 0.01:
                         wrong.append(f"{city['name']} {resource}: {row['amount'] if row else 'none'} (expected {expected})")
             assert not wrong, f"{len(wrong)} starting stocks are wrong, e.g. " + "; ".join(wrong[:3])
+
+            from Data.Economy.food_market import STARTING_SAVINGS_DAYS
+            savings = STARTING_SAVINGS_DAYS * load_json("Data/Economy/ResourceTypes.json")["Food"]["base_price"]
+            poorer = conn.execute("SELECT COUNT(*) FROM npcs WHERE profession != 'Child' AND gold != ?", (savings,)).fetchone()[0]
+            assert poorer == 0, f"{poorer} adults did not start with {savings} gold of savings"
 
         run_step(r, "every city starts with its storehouses stocked for its population", starting_stock)
 
@@ -1183,6 +1204,78 @@ def _smoke_body(r, holder):
 
 
         run_step(r, "hungry villages lose families to the towns and men to banditry; levies serve and go home", villagers_enter_story)
+
+        def food_is_bought():
+            import Data.Economy.food_market as FM
+            from Data.Database.repository import get_city, get_npc, save_npc
+            from Data.Simulation.simulation_manager import SimulationManager
+
+            town = get_city(conn, conn.execute(
+                """SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                   WHERE k.world_id = ? AND c.type != 'Village' ORDER BY c.population DESC LIMIT 1""", (world_id,)
+            ).fetchone()[0])
+            people = {row["id"]: dict(row) for row in conn.execute(
+                "SELECT id, gold, fed, needs_stress, needs_happiness FROM npcs WHERE city_id = ? AND alive = 1", (town["id"],))}
+            ids = ",".join(map(str, people))
+            wealth_before = conn.execute("SELECT wealth FROM cities WHERE id = ?", (town["id"],)).fetchone()[0]
+            food_before = town["resources"].get("Food", 0)
+
+            def setup(gold, food, wealth):
+                conn.execute(f"UPDATE npcs SET gold = ?, fed = 1 WHERE id IN ({ids})", (gold,))
+                conn.execute("UPDATE cities SET wealth = ? WHERE id = ?", (wealth, town["id"]))
+                conn.commit()
+                town["resources"]["Food"] = food
+
+            def everyone_ate(full=True):
+                fed = [row[0] for row in conn.execute(f"SELECT fed FROM npcs WHERE id IN ({ids})")]
+                return all(f >= 0.999 for f in fed) if full else all(f == 0 for f in fed)
+
+            try:
+                setup(1000, 10 ** 7, 0)
+                FM.buy_food(conn, town, has_temple=False)
+                assert everyone_ate(), "with money and food in the market, not everyone ate"
+
+                setup(0, 10 ** 7, 0)
+                FM.buy_food(conn, town, has_temple=True)
+                assert everyone_ate(False), "people with no money ate, though there was no charity to pay for it"
+
+                setup(0, 10 ** 7, 10 ** 9)
+                FM.buy_food(conn, town, has_temple=True)
+                assert everyone_ate(), "a temple with charity funds did not feed the penniless"
+
+                setup(0, 10 ** 7, 10 ** 9)
+                FM.buy_food(conn, town, has_temple=False)
+                assert everyone_ate(False), "without a working temple, the penniless were still given alms"
+
+                setup(1000, 0, 10 ** 9)
+                FM.buy_food(conn, town, has_temple=True)
+                assert everyone_ate(False), "people ate in a city with no Food at all"
+
+                # a meal restores hunger only as far as people ate
+                someone = next(iter(people))
+                hours = SimulationManager(conn, world_id)
+                hours.clock.hour = 18
+                results = []
+                for fed in (0.0, 1.0):
+                    npc = get_npc(conn, someone)
+                    npc["needs"]["hunger"] = 40
+                    save_npc(conn, npc)
+                    conn.execute(f"UPDATE npcs SET fed = ? WHERE id IN ({ids})", (fed,))
+                    conn.commit()
+                    hours.on_hour()
+                    results.append(get_npc(conn, someone)["needs"]["hunger"])
+                assert results[0] <= 40 < results[1] or results[0] < results[1], \
+                    f"a meal restored hunger regardless of whether they ate (unfed {results[0]}, fed {results[1]})"
+            finally:
+                conn.executemany(
+                    "UPDATE npcs SET gold = ?, fed = ?, needs_stress = ?, needs_happiness = ? WHERE id = ?",
+                    [(p["gold"], p["fed"], p["needs_stress"], p["needs_happiness"], p["id"]) for p in people.values()]
+                )
+                conn.execute("UPDATE cities SET wealth = ? WHERE id = ?", (wealth_before, town["id"]))
+                conn.commit()
+                town["resources"]["Food"] = food_before
+
+        run_step(r, "households buy food with pooled gold; temples give alms; no food means hunger", food_is_bought)
 
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
@@ -1417,7 +1510,23 @@ def _smoke_body(r, holder):
     manager.clock.minute = 0
 
     run_step(r, "hour tick  (needs and schedules)", manager.on_hour)
+    def mark_meals():
+        # a marker the day's food buying must overwrite (checked right after the day tick)
+        conn.execute("UPDATE npcs SET fed = 0.123 WHERE alive = 1")
+        conn.commit()
+
+    run_step(r, "(setup) mark everyone's meals before the day tick", mark_meals)
+
     run_step(r, "day tick   (economy, wages, trade, caravans, travel)", manager.on_day)
+
+    def day_tick_sells_food():
+        total, unchanged = conn.execute(
+            "SELECT COUNT(*), SUM(CASE WHEN fed = 0.123 THEN 1 ELSE 0 END) FROM npcs WHERE alive = 1"
+        ).fetchone()
+        # people away from home (travellers, armies) buy nothing, so a few may keep the marker
+        assert unchanged <= total * 0.1, f"the day tick did not sell people their food ({unchanged} of {total} untouched)"
+
+    run_step(r, "the day tick sells every household its food", day_tick_sells_food)
     def prepare_starving_village():
         # set up right before the month tick, so no other step can feed it first
         # leave a starving village for the game's own month tick to deal with (checked after that tick)
@@ -1684,6 +1793,14 @@ def _smoke_body(r, holder):
         def made_with(tools):
             city = get_city(conn, city_id)
             city["resources"] = {"Tools": tools}
+            # Leave out the city's tool-makers: a city with a Mine, a Smelter and a
+            # Blacksmith can dig Ore, smelt Steel and forge Tools in a single day,
+            # from nothing, and that output would hide the wear being tested.
+            rules = economy.load_json(economy.BUILDING_PRODUCTION)
+            city["buildings"] = [
+                b for b in city["buildings"]
+                if "Tools" not in (rules.get(b["type"], {}).get("resource"), rules.get(b["type"], {}).get("secondary_resource"))
+            ]
             economy.produce_resources(city)
             return sum(v for k, v in city["resources"].items() if k != "Tools"), city["resources"]["Tools"]
 

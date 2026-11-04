@@ -103,6 +103,10 @@ class SimulationManager:
                     npc["location"] = location_id
 
                     for need, delta in effect.items():
+                        # A meal restores hunger only as far as the household
+                        # could afford food today (Data.Economy.food_market).
+                        if need == "hunger" and delta > 0:
+                            delta = delta * npc.get("fed", 1.0)
                         npc["needs"][need] = max(0, min(100, npc["needs"][need] + delta))
 
                     save_npc(self.conn, npc)
@@ -127,6 +131,13 @@ class SimulationManager:
         # NPCs whose record grief changed today (a spouse starved); see the
         # per-NPC loop below for why they must be reloaded.
         grieving = set()
+
+        # Food is bought, not handed out (Data.Economy.food_market). People away
+        # from home -- travellers, soldiers in the field -- neither work here
+        # nor buy here.
+        from Data.Economy.food_market import buy_food, LABOUR_WAGE
+        from Data.Infrastructure.travel import get_traveling_npc_ids
+        away_ids = get_traveling_npc_ids(self.conn, self.world_id)
 
         # Soldiers away with an army are fed and armed from its wagons, not
         # from their capital's upkeep.
@@ -205,6 +216,10 @@ class SimulationManager:
                     if npc["profession"] != "Unemployed":
                         tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
                         changed = True
+                    elif npc["id"] not in away_ids:
+                        # no trade: a day's casual labour (Data.Economy.food_market)
+                        npc["gold"] = round(npc["gold"] + LABOUR_WAGE, 2)
+                        changed = True
 
                     if drink_potion(npc, city):
                         changed = True
@@ -217,6 +232,9 @@ class SimulationManager:
 
                     if changed:
                         save_npc(self.conn, npc)
+
+                # Every household buys its day's food from the city's stock.
+                buy_food(self.conn, city, has_temple, away_ids)
 
                 if living_count > 0:
 

@@ -43,6 +43,10 @@ def generate_world():
     from Data.World.harvest import ensure_household_stores
     ensure_household_stores(conn, world["id"])
 
+    # Adults start with a month's food money (Data.Economy.food_market).
+    from Data.Economy.food_market import give_starting_savings
+    give_starting_savings(conn, world["id"])
+
     conn.commit()
 
     conn.close()

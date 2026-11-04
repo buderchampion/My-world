@@ -210,6 +210,11 @@ def consume_resources(city):
 
     for resource, rate in consumption.items():
 
+        # People buy their own Food each day (Data.Economy.food_market);
+        # taking it here as well would feed them twice.
+        if resource == "Food":
+            continue
+
         demand = round(city["population"] * rate, 2)
 
         current = city["resources"].get(resource, 0)
