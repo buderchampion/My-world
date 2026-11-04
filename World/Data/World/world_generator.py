@@ -13,6 +13,10 @@ def generate_world():
 
     world = create_world(conn, "Generated World")
 
+    # The land comes first, so kingdoms can be placed where it can feed them.
+    from Data.World.regions import ensure_regions
+    ensure_regions(conn, world["id"])
+
     number_of_kingdoms = random.randint(3, 6)
 
     colors = random.sample(KINGDOM_COLORS, number_of_kingdoms)
@@ -26,9 +30,8 @@ def generate_world():
 
     generate_roads(conn, world["id"])
 
-    # The land itself: terrain, climate, rivers and farmland, and which
-    # region each settlement sits in -- see Data.World.regions.
-    from Data.World.regions import ensure_regions
+    # Put every settlement into the region it sits in (the regions themselves
+    # were made above) -- see Data.World.regions.
     ensure_regions(conn, world["id"])
 
     # Cities open with stocked storehouses, not empty ones -- see

@@ -26,14 +26,17 @@ def generate_city_name():
     return random.choice(prefixes) + random.choice(suffixes)
 
 
-def generate_city(conn, kingdom_id, city_type, map_x=0, map_y=0, biases=None):
+def generate_city(conn, kingdom_id, city_type, map_x=0, map_y=0, biases=None, population=None):
 
-    population_data = load_json(POPULATION)
-
-    population = random.randint(
-        population_data[city_type]["min"],
-        population_data[city_type]["max"]
-    )
+    # population = how many individual NPCs to create. Villages are given
+    # theirs (their named villagers -- see Data.World.countryside); everything
+    # else rolls it from Population.json.
+    if population is None:
+        population_data = load_json(POPULATION)
+        population = random.randint(
+            population_data[city_type]["min"],
+            population_data[city_type]["max"]
+        )
 
     city = create_city(conn, kingdom_id, generate_city_name(), city_type, population, map_x, map_y)
 

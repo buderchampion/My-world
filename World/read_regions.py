@@ -45,7 +45,7 @@ def main():
         return
 
     cities = [dict(c) for c in conn.execute(
-        """SELECT c.name, c.type, c.map_x, c.map_y, c.region_id, k.name kingdom
+        """SELECT c.name, c.type, c.map_x, c.map_y, c.region_id, c.population, c.households, k.name kingdom
            FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?""", (world["id"],))]
 
     # --- the map: each character shows the land of the nearest region
@@ -89,9 +89,23 @@ def main():
     print(f"{'REGION':16} {'TERRAIN':10} {'CLIMATE':10} {'RIVER':6} {'FARMLAND':9} SETTLEMENTS")
     for region in sorted(regions, key=lambda r: -r["farmland"]):
         here = by_region.get(region["id"], [])
-        names = ", ".join(f"{c['name']} ({c['type'][0]}, {c['kingdom']})" for c in here) or "-"
+        names = ", ".join(
+            f"{c['name']} ({c['type'][0]}, {c['kingdom']}" + (f", {c['households']} households" if c["households"] else "") + ")"
+            for c in here
+        ) or "-"
         print(f"{region['name']:16} {region['terrain']:10} {region['climate']:10} {'yes' if region['has_river'] else '':6} "
               f"{region['farmland']:<9} {names}")
+
+    # --- census: who lives where
+    from Data.World.countryside import FAMILY_SIZE
+    print()
+    print(f"{'KINGDOM':16} {'IN VILLAGES':>12} {'IN TOWNS':>10} {'RURAL':>6}   (individual NPCs in all)")
+    for kingdom in sorted({c["kingdom"] for c in cities}):
+        mine = [c for c in cities if c["kingdom"] == kingdom]
+        rural = sum(c["population"] + c["households"] * FAMILY_SIZE for c in mine if c["type"] == "Village")
+        urban = sum(c["population"] for c in mine if c["type"] != "Village")
+        individuals = sum(c["population"] for c in mine)
+        print(f"{kingdom:16} {rural:>12} {urban:>10} {rural / max(1, rural + urban):>6.0%}   ({individuals})")
 
     conn.close()
 

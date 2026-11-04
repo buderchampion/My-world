@@ -65,22 +65,59 @@ def generate_kingdom(conn, world_id, color="#808080"):
     from Data.Buildings.building_generator import CHAIN_CATEGORIES
     biases = {category: random.uniform(*BIAS_RANGE) for category in CHAIN_CATEGORIES}
 
-    center_x = random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN)
-    center_y = random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN)
+    # Where the land can feed them: with regions in place, the kingdom's
+    # heartland and every settlement are chosen from candidate sites favoring
+    # good farmland (and rivers, for the capital and towns). Without regions
+    # (old test scripts), everything is placed at random as before.
+    from Data.World.regions import get_regions
+    from Data.World import countryside
 
-    capital_x, capital_y = random_point_near(center_x, center_y, CAPITAL_JITTER)
+    regions = get_regions(conn, world_id)
+
+    def on_map(point):
+        return min(MAP_WIDTH - 1, max(0, point[0])), min(MAP_HEIGHT - 1, max(0, point[1]))
+
+    if regions:
+        center_x, center_y = countryside.choose_site(regions, [
+            (random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN), random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN))
+            for _ in range(countryside.KINGDOM_CANDIDATES)
+        ], best=True)
+
+        def site(radius, river=False, best=False):
+            candidates = [on_map(random_point_near(center_x, center_y, radius)) for _ in range(countryside.SITE_CANDIDATES)]
+            return countryside.choose_site(regions, candidates, prefer_river=river, best=best)
+    else:
+        center_x = random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN)
+        center_y = random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN)
+
+        def site(radius, river=False, best=False):
+            return random_point_near(center_x, center_y, radius)
+
+    capital_x, capital_y = site(CAPITAL_JITTER, river=True, best=True)
 
     capital = generate_city(conn, kingdom["id"], "Capital", capital_x, capital_y, biases)
 
     kingdom["capital"] = capital["id"]
+    town_dwellers = capital["population"]
 
     for _ in range(random.randint(2, 5)):
-        x, y = random_point_near(center_x, center_y, CITY_SPREAD_RADIUS)
-        generate_city(conn, kingdom["id"], "Town", x, y, biases)
+        x, y = site(CITY_SPREAD_RADIUS, river=True)
+        town_dwellers += generate_city(conn, kingdom["id"], "Town", x, y, biases)["population"]
 
-    for _ in range(random.randint(5, 10)):
-        x, y = random_point_near(center_x, center_y, CITY_SPREAD_RADIUS)
-        generate_city(conn, kingdom["id"], "Village", x, y, biases)
+    village_sites = [site(CITY_SPREAD_RADIUS) for _ in range(random.randint(5, 10))]
+
+    if regions:
+        # Villages hold most of the kingdom's people as households, bigger on
+        # better land, each with its named villagers as individual NPCs.
+        plan = countryside.plan_villages(
+            town_dwellers, [countryside.region_at(regions, x, y)["farmland"] for x, y in village_sites]
+        )
+        for (x, y), (households, named) in zip(village_sites, plan):
+            village = generate_city(conn, kingdom["id"], "Village", x, y, biases, population=named)
+            conn.execute("UPDATE cities SET households = ? WHERE id = ?", (households, village["id"]))
+    else:
+        for x, y in village_sites:
+            generate_city(conn, kingdom["id"], "Village", x, y, biases)
 
     save_kingdom(conn, kingdom)
 

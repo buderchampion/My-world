@@ -252,6 +252,7 @@ FEATURES = [
             "Data/Simulation/simulation_manager.py": ["advance_armies(self.conn", "deployed_ids=deployed_ids"],
             "Data/Infrastructure/travel.py": ["get_army_npc_ids(conn, world_id)"],
             "Data/Government/military.py": ["deployed_ids"],
+            "Data/Combat/combat.py": ['npc["id"] not in away'],
         },
     },
     {
@@ -273,6 +274,20 @@ FEATURES = [
             "Data/World/world_generator.py": ["ensure_regions("],
             "run_world.py": ["ensure_regions("],
             "Data/Database/database.py": ['"region_id"'],
+        },
+    },
+    {
+        "name": "Countryside: villages of peasant households, about 70% rural, settlements on good land",
+        "functions": {
+            "Data/World/countryside.py": [
+                "plan_villages", "named_villagers", "choose_site", "ensure_households", "total_people",
+            ],
+        },
+        "wired": {
+            "Data/Kingdoms/kingdom_generator.py": ["countryside.plan_villages(", "UPDATE cities SET households"],
+            "Data/Cities/city_generator.py": ["population=None"],
+            "run_world.py": ["ensure_households("],
+            "Data/Database/database.py": ['"households"'],
         },
     },
     {
@@ -963,6 +978,38 @@ def _smoke_body(r, holder):
 
         run_step(r, "the land has regions (terrain, climate, rivers) and every settlement sits in one", regions_made)
 
+        def countryside_made():
+            import statistics
+            from Data.World import countryside as C
+
+            cities = [dict(c) for c in conn.execute(
+                """SELECT c.*, r.farmland, r.terrain FROM cities c JOIN regions r ON r.id = c.region_id
+                   JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?""", (world_id,))]
+
+            for kingdom_id in {c["kingdom_id"] for c in cities}:
+                mine = [c for c in cities if c["kingdom_id"] == kingdom_id]
+                rural = sum(C.total_people(c) for c in mine if c["type"] == "Village")
+                share = rural / sum(C.total_people(c) for c in mine)
+                assert 0.66 <= share <= 0.74, f"a kingdom has {share:.0%} of its people in villages, not about {C.RURAL_SHARE:.0%}"
+
+            villages = [c for c in cities if c["type"] == "Village"]
+            assert villages and all(v["households"] >= C.MIN_HOUSEHOLDS for v in villages), "a village has too few households (or none)"
+            assert all(v["population"] == C.named_villagers(v["households"]) for v in villages), \
+                "a village's named villagers do not match its size"
+            living = {row["city_id"]: row["n"] for row in conn.execute("SELECT city_id, COUNT(*) n FROM npcs GROUP BY city_id")}
+            assert all(living.get(v["id"], 0) == v["population"] for v in villages), \
+                "a village does not have exactly as many individual NPCs as named villagers"
+            assert all(c["households"] == 0 for c in cities if c["type"] != "Village"), "a town or capital was given households"
+
+            land = conn.execute("SELECT AVG(farmland) FROM regions WHERE world_id = ?", (world_id,)).fetchone()[0]
+            settled = statistics.mean(c["farmland"] for c in cities)
+            assert settled > land + 0.15, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
+            assert all(c["terrain"] != "Mountains" for c in cities if c["type"] == "Capital"), "a capital was placed in the mountains"
+
+            assert C.ensure_households(conn, world_id) == 0, "running the household setup again changed the world"
+
+        run_step(r, "most people live in village households, on land that can feed them", countryside_made)
+
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
         r.warn("fewer than 2 kingdoms generated -- favor check skipped")
@@ -1486,7 +1533,10 @@ def _smoke_body(r, holder):
         capital["resources"].update({"Food": 5000.0, "Weapons": 500.0, "Potions": 50.0})
         save_city(conn, capital)
 
-        army = A.raise_army(conn, kingdom, capital, size=5)
+        # enough Food for any march this step allows (up to 400 days), so the
+        # army never runs out on the way -- a long route would otherwise empty
+        # its wagons and make the eating check below meaningless
+        army = A.raise_army(conn, kingdom, capital, size=5, food_days=400)
         assert army and len(army["members"]) == 5, "an army of 5 soldiers could not be raised"
         assert army["food"] > 0, "the army set out with no Food in its wagons"
         assert set(army["members"]) <= get_traveling_npc_ids(conn, kingdom["world_id"]), \
@@ -1506,16 +1556,27 @@ def _smoke_body(r, holder):
         hunger = [row[0] for row in conn.execute(f"SELECT needs_hunger FROM npcs WHERE id IN ({members}) AND alive = 1")]
         assert hunger and min(hunger) > 30, "the daily tick did not feed the army, or a later save erased the meal"
 
+        def eaters():
+            return conn.execute(f"SELECT COUNT(*) FROM npcs WHERE id IN ({members}) AND alive = 1").fetchone()[0]
+
+        eaten = eaters()          # the first day's meal was eaten after any deaths that day
         days = 1
         while A.get_army(conn, army["id"])["status"] == "Marching" and days < 400:
+            eaten += eaters()
             A.advance_armies(conn, kingdom["world_id"])
             days += 1
         arrived = A.get_army(conn, army["id"])
         assert arrived["status"] == "Encamped" and arrived["location_city_id"] == target["id"], "the army never reached its destination"
         assert days == road_days, f"the march took {days} days, but the roads add up to {road_days}"
-        assert abs(arrived["food"] - (army["food"] - 5 * days)) < 0.01, "the army did not eat 1 Food per soldier per day"
+        assert abs(arrived["food"] - (army["food"] - eaten)) < 0.01, \
+            f"the army did not eat 1 Food per living soldier per day ({army['food']} Food at the start, " \
+            f"{eaten} soldier-days eaten over {days} days, {arrived['food']} left)"
         assert not A.disband_army(conn, army["id"]), "an army was allowed to disband abroad"
 
+        # a full treasury first: earlier steps (a war) can drain it, and an unpaid
+        # army deserts -- which would try to save these four stand-in soldiers
+        conn.execute("UPDATE kingdoms SET treasury = 1000000 WHERE id = ?", (kingdom["id"],))
+        conn.commit()
         result = apply_military_upkeep(
             conn, kingdom, [{"id": i, "profession": "Soldier"} for i in range(1, 5)],
             {"resources": {"Food": 100, "Weapons": 100}}, deployed_ids={1, 2}

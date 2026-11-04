@@ -55,6 +55,12 @@ def get_or_create_world():
         if regions_created:
             print(f"  (gave this world {regions_created} regions -- it predates regions)")
 
+        # Households: a world made before them gets peasant households in its villages.
+        from Data.World.countryside import ensure_households
+        villages_given = ensure_households(connection, world["id"])
+        if villages_given:
+            print(f"  (gave {villages_given} villages peasant households -- this world predates them)")
+
         districts_created = 0
         mills_bakeries_created = 0
         for kingdom in get_world_kingdoms(connection, world["id"]):

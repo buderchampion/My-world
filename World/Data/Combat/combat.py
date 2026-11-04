@@ -148,9 +148,16 @@ def resolve_raid(conn, city, bandit_camp):
     attackers = [get_npc(conn, npc_id) for npc_id in bandit_camp["workers"]]
     attackers = [npc for npc in attackers if npc["alive"]]
 
+    # Soldiers away with an army are not here to defend the city.
+    from Data.Government.armies import get_army_npc_ids
+    world_id = conn.execute(
+        "SELECT k.world_id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE c.id = ?", (city["id"],)
+    ).fetchone()["world_id"]
+    away = get_army_npc_ids(conn, world_id)
+
     defenders = [
         npc for npc in get_city_npcs(conn, city["id"])
-        if npc["profession"] in DEFENDER_PROFESSIONS and npc["alive"]
+        if npc["profession"] in DEFENDER_PROFESSIONS and npc["alive"] and npc["id"] not in away
     ]
 
     attack_power = sum(get_combat_power(npc) for npc in attackers)

@@ -44,6 +44,7 @@ def init_database():
         "map_y": "INTEGER NOT NULL DEFAULT 0",
         "wealth": "REAL NOT NULL DEFAULT 0",
         "region_id": "INTEGER REFERENCES regions(id)",
+        "households": "INTEGER NOT NULL DEFAULT 0",
     })
 
     _add_missing_columns(connection, "kingdoms", {
