@@ -39,6 +39,10 @@ def generate_world():
     from Data.Economy.economy import stock_starting_supplies
     stock_starting_supplies(conn, world["id"])
 
+    # Village households start with enough to eat until their first harvest.
+    from Data.World.harvest import ensure_household_stores
+    ensure_household_stores(conn, world["id"])
+
     conn.commit()
 
     conn.close()

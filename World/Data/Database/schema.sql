@@ -214,6 +214,16 @@ CREATE TABLE IF NOT EXISTS regions (
     farmland    REAL NOT NULL      -- how well it grows food; 1.0 is good open farmland
 );
 
+-- Each region's harvest weather, year by year (the history famines are made of).
+CREATE TABLE IF NOT EXISTS harvests (
+    id          INTEGER PRIMARY KEY,
+    region_id   INTEGER NOT NULL REFERENCES regions(id),
+    year        INTEGER NOT NULL,
+    quality     TEXT NOT NULL,      -- Good, Normal or Bad
+    factor      REAL NOT NULL,      -- what it multiplied the harvest by
+    score       REAL NOT NULL       -- the weather score (carried into next year)
+);
+
 CREATE TABLE IF NOT EXISTS armies (
     id                  INTEGER PRIMARY KEY,
     kingdom_id          INTEGER NOT NULL REFERENCES kingdoms(id),

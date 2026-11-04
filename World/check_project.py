@@ -222,6 +222,7 @@ FEATURES = [
                 "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
                 "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
                 "apply_starvation_check(npc)", "advance_armies(", "advance_supply_lines(",
+                "run_harvest(", "feed_households(",
             ],
             "Data/Combat/combat.py": ["def resolve_kingdom_war(", "record_war(", "def resolve_civil_war(", "record_civil_war("],
             "check_project.py": ["def check_repo(", 'r.section("Git hygiene")'],
@@ -288,6 +289,23 @@ FEATURES = [
             "Data/Cities/city_generator.py": ["population=None"],
             "run_world.py": ["ensure_households("],
             "Data/Database/database.py": ['"households"'],
+        },
+    },
+    {
+        "name": "Harvests: households reap by land and weather, pay grain tax, eat, and sell the surplus",
+        "tables": ["harvests"],
+        "functions": {
+            "Data/World/harvest.py": [
+                "run_harvest", "roll_weather", "feed_households", "ensure_household_stores", "days_until_harvest",
+            ],
+        },
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["run_harvest(self.conn", "feed_households(city)"],
+            "Data/World/world_generator.py": ["ensure_household_stores("],
+            "run_world.py": ["ensure_household_stores("],
+            "Data/Database/repository.py": ["UPDATE cities SET household_store"],
+            "Data/Economy/economy.py": ["households_daily"],
+            "Data/Database/database.py": ['"household_store"', '"hungry_days"'],
         },
     },
     {
@@ -905,6 +923,15 @@ def _smoke_body(r, holder):
             city["resources"]["Food"] = 100000.0
             save_city(conn, city)
 
+        # every other kingdom neither short nor in surplus, so this buyer and
+        # seller are the only ones in the market (trade buys from whoever has
+        # the biggest surplus -- after a harvest that could be anyone)
+        for other in kingdoms[2:]:
+            for c in get_kingdom_cities(conn, other["id"]):
+                city = get_city(conn, c["id"])
+                city["resources"]["Food"] = economy.get_target_stock("Food", city)
+                save_city(conn, city)
+
         conn.commit()
 
         trades = economy.simulate_cross_kingdom_trade_day(conn, world_id)
@@ -1009,6 +1036,63 @@ def _smoke_body(r, holder):
             assert C.ensure_households(conn, world_id) == 0, "running the household setup again changed the world"
 
         run_step(r, "most people live in village households, on land that can feed them", countryside_made)
+
+        def harvests_work():
+            from Data.World import harvest as H
+            from Data.Economy.economy import get_target_stock
+
+            clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
+            days = H.days_until_harvest(clock["clock_month"], clock["clock_day"])
+            villages = [dict(v) for v in conn.execute(
+                """SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                   WHERE k.world_id = ? AND c.households > 0""", (world_id,))]
+            assert villages and all(abs(v["household_store"] - v["households"] * H.FAMILY_SIZE * days) < 0.01 for v in villages), \
+                f"a new world's villages should start with {days} days of food for their households"
+
+            def food(city_id):
+                return conn.execute(
+                    "SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE city_id = ? AND resource_name = 'Food'", (city_id,)
+                ).fetchone()[0]
+
+            capitals = {k["id"]: k["capital_city_id"] for k in conn.execute("SELECT id, capital_city_id FROM kingdoms WHERE world_id = ?", (world_id,))}
+            before = {k: food(c) for k, c in capitals.items()}
+
+            from Data.Simulation.simulation_manager import SimulationManager
+            seasons = SimulationManager(conn, world_id)     # this step runs before the shared manager exists
+            month = seasons.clock.month
+            seasons.clock.month = H.HARVEST_MONTH          # the first day of Autumn
+            try:
+                seasons.on_season()
+            finally:
+                seasons.clock.month = month
+
+            year = seasons.clock.year
+            weather = {row["region_id"]: row["factor"] for row in conn.execute(
+                "SELECT h.region_id, h.factor FROM harvests h JOIN regions r ON r.id = h.region_id WHERE r.world_id = ? AND h.year = ?",
+                (world_id, year))}
+            regions = conn.execute("SELECT id, farmland FROM regions WHERE world_id = ?", (world_id,)).fetchall()
+            assert len(weather) == len(regions), "the Autumn hook did not bring in a harvest with weather for every region"
+
+            farmland = {r["id"]: r["farmland"] for r in regions}
+            tax = {}
+            for v in villages:
+                reaped = v["households"] * H.HARVEST_PER_HOUSEHOLD * farmland[v["region_id"]] * weather[v["region_id"]]
+                tax[v["kingdom_id"]] = tax.get(v["kingdom_id"], 0) + reaped * H.GRAIN_TAX_SHARE
+            for kingdom_id, expected in tax.items():
+                got = food(capitals[kingdom_id]) - before[kingdom_id]
+                assert abs(got - expected) < 1, f"a capital received {got:.0f} Food in grain tax, not {expected:.0f} (10% of its villages' harvest)"
+
+            village = {"households": 10, "household_store": 0.0, "hungry_days": 0, "resources": {"Food": 20.0}}
+            assert H.feed_households(village) == 30 and village["hungry_days"] == 1, \
+                "households with no store and too little at market did not go hungry"
+
+            city = {"population": 20, "households": 10, "household_store": 0.0, "resources": {}}
+            hungry_target = get_target_stock("Food", city)
+            city["household_store"] = 10000.0
+            assert hungry_target > get_target_stock("Food", city), \
+                "trade does not count a village's households once their own food has run out"
+
+        run_step(r, "harvests come in at Autumn: seed, grain tax, the year's food, and surplus for market", harvests_work)
 
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
@@ -1485,7 +1569,14 @@ def _smoke_body(r, holder):
         made_without, _ = made_with(0)
         made_with_plenty, tools_left = made_with(100000)
         assert made_without < made_with_plenty * 0.75, "a city with no Tools produced nearly as much as one with plenty"
-        assert tools_left < 100000, "working did not wear out any Tools"
+        if not tools_left < 100000:
+            city = get_city(conn, city_id)
+            rules = economy.load_json(economy.BUILDING_PRODUCTION)
+            working = sum(len(b["workers"]) for b in city["buildings"] if rules.get(b["type"]))
+            raise AssertionError(
+                f"working did not wear out any Tools (city {city['name']} [{city['type']}], {working} producing workers, "
+                f"Tools {tools_left} after a day, made {made_with_plenty:.1f} goods)"
+            )
 
         # buildings wear without Wood and Stone, the wear is SAVED, and repairs restore it
         city = get_city(conn, city_id)

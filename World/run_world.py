@@ -61,6 +61,11 @@ def get_or_create_world():
         if villages_given:
             print(f"  (gave {villages_given} villages peasant households -- this world predates them)")
 
+        from Data.World.harvest import ensure_household_stores
+        stocked = ensure_household_stores(connection, world["id"])
+        if stocked:
+            print(f"  (stocked {stocked} villages with food until their first harvest)")
+
         districts_created = 0
         mills_bakeries_created = 0
         for kingdom in get_world_kingdoms(connection, world["id"]):

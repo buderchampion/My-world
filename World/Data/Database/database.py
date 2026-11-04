@@ -45,6 +45,8 @@ def init_database():
         "wealth": "REAL NOT NULL DEFAULT 0",
         "region_id": "INTEGER REFERENCES regions(id)",
         "households": "INTEGER NOT NULL DEFAULT 0",
+        "household_store": "REAL NOT NULL DEFAULT 0",
+        "hungry_days": "INTEGER NOT NULL DEFAULT 0",
     })
 
     _add_missing_columns(connection, "kingdoms", {

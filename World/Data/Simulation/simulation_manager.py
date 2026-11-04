@@ -164,6 +164,10 @@ class SimulationManager:
             for city in cities:
 
                 simulate_city_economy_day(city)
+
+                # Village households eat from their own store, then the market.
+                from Data.World.harvest import feed_households
+                feed_households(city)
                 
                 market_revenue = round(total_resource_value(city) * CITY_WEALTH_MARKET_FEE_RATE, 2)
                 if market_revenue > 0:
@@ -351,8 +355,10 @@ class SimulationManager:
         self.conn.commit()
 
     def on_season(self) -> None:
-        # Reserved.
-        pass
+        # Autumn: the year's harvest comes in (Data.World.harvest).
+        if self.clock.season == "Autumn":
+            from Data.World.harvest import run_harvest
+            run_harvest(self.conn, self.world_id, self.clock.year)
 
     def on_year(self) -> None:
         from Data.NPCS.aging import apply_aging

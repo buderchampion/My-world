@@ -39,6 +39,9 @@ WORN_OUTPUT = 0.5
 # this only keeps a long peace from piling them up forever.
 POTION_SPOILAGE_PER_DAY = 0.005
 
+# People in a peasant household (Data.World.countryside.FAMILY_SIZE).
+HOUSEHOLD_SIZE = 5
+
 # Price multiplier is clamped between these so a resource never goes
 # free (deep surplus) or absurdly expensive (deep shortage).
 MIN_PRICE_MULTIPLIER = 0.5
@@ -78,7 +81,18 @@ def get_target_stock(resource, city, resource_types=None, consumption_rates=None
     if not rate:
         return info["target_stock"]
 
-    return city["population"] * rate * CONSUMABLE_BUFFER_DAYS
+    eaters = city["population"]
+
+    # A village's peasant households eat from their own store (Data.World.harvest),
+    # which trade never sees. Once that store cannot cover the next few days,
+    # they are buying from the market too -- count them, so trade brings food
+    # to a village whose own harvest has run out.
+    if resource == "Food" and city.get("households"):
+        households_daily = city["households"] * HOUSEHOLD_SIZE
+        if (city.get("household_store") or 0) < households_daily * CONSUMABLE_BUFFER_DAYS:
+            eaters += households_daily
+
+    return eaters * rate * CONSUMABLE_BUFFER_DAYS
 
 
 def produce_resources(city):

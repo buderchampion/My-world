@@ -263,6 +263,14 @@ def save_city(conn, city):
             (city["id"], resource, amount)
         )
 
+    # A village's households keep their own food store, separate from the
+    # market (Data.World.harvest). Only written when the dict carries it.
+    if "household_store" in city:
+        conn.execute(
+            "UPDATE cities SET household_store = ?, hungry_days = ? WHERE id = ?",
+            (city["household_store"], city.get("hungry_days", 0), city["id"])
+        )
+
     # Buildings wear down and get repaired (Data.Economy.economy.maintain_buildings),
     # so their condition is saved with the city -- before this, nothing about a
     # building was ever saved after the world was created.
