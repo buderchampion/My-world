@@ -271,6 +271,15 @@ def save_city(conn, city):
             (city["household_store"], city.get("hungry_days", 0), city["id"])
         )
 
+    # Famine deaths are applied as a change and then cleared, so a stale copy
+    # cannot undo them and a second save cannot repeat them (Data.World.harvest).
+    lost = city.pop("_famine_deaths", 0)
+    if lost:
+        conn.execute(
+            "UPDATE cities SET households = MAX(0, households - ?), famine_dead = famine_dead + ? WHERE id = ?",
+            (lost, lost * 5, city["id"])
+        )
+
     # Buildings wear down and get repaired (Data.Economy.economy.maintain_buildings),
     # so their condition is saved with the city -- before this, nothing about a
     # building was ever saved after the world was created.

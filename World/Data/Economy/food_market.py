@@ -23,12 +23,56 @@ STARTING_SAVINGS_DAYS = 30
 HUNGER_STRESS = 4
 HUNGER_UNHAPPINESS = 3
 
+# Inflation. Each kingdom has a price level (1.0 = normal) that multiplies
+# what Food costs, on top of each city's scarcity price. A bad harvest raises
+# it -- by more each year in a row: the first by BAD_YEAR_RISE, the second by
+# twice that, the third by three times (three bad years running take bread to
+# about 2.7x). A good harvest takes it GOOD_YEAR_EASE of the way back toward
+# normal; an ordinary year holds it. Wages do not rise with it, so families
+# are squeezed. A revolt that topples the crown resets it (reset_price_level).
+BAD_YEAR_RISE = 0.20
+GOOD_YEAR_EASE = 0.25
 
-def food_price(city):
+
+def price_level(conn, kingdom_id):
+    row = conn.execute("SELECT price_level FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
+    return row["price_level"] if row and row["price_level"] else 1.0
+
+
+def food_price(city, conn=None):
     """What a day's meal (1 Food) costs in this city today: dearer when the
-    city's stock is low (see economy.get_price)."""
+    city's stock is low (economy.get_price), times its kingdom's price level
+    when a database connection is given."""
     from Data.Economy.economy import get_price
-    return max(0.01, get_price("Food", city))
+    level = price_level(conn, city["kingdom"]) if conn is not None and city.get("kingdom") else 1.0
+    return max(0.01, get_price("Food", city) * level)
+
+
+def update_price_level(conn, kingdom_id, verdict):
+    """
+    After a kingdom's harvest: "bad" raises its price level (more for each bad
+    year in a row), "good" eases it back toward normal, anything else holds it.
+    Returns (old level, new level).
+    """
+
+    row = conn.execute("SELECT price_level, bad_harvest_years FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
+    old, years = row["price_level"], row["bad_harvest_years"]
+
+    if verdict == "bad":
+        years += 1
+        new = old * (1 + BAD_YEAR_RISE * years)
+    else:
+        years = 0
+        new = 1 + (old - 1) * (1 - GOOD_YEAR_EASE) if verdict == "good" else old
+
+    conn.execute("UPDATE kingdoms SET price_level = ?, bad_harvest_years = ? WHERE id = ?",
+                 (round(new, 4), years, kingdom_id))
+    return old, round(new, 4)
+
+
+def reset_price_level(conn, kingdom_id):
+    """A revolt that topples the crown wipes the slate clean: prices back to normal."""
+    conn.execute("UPDATE kingdoms SET price_level = 1.0, bad_harvest_years = 0 WHERE id = ?", (kingdom_id,))
 
 
 def give_starting_savings(conn, world_id):
@@ -74,7 +118,7 @@ def buy_food(conn, city, has_temple, away_ids=frozenset()):
         key = ("home", person["home_id"]) if person["home_id"] is not None else ("alone", person["id"])
         households.setdefault(key, []).append(person)
 
-    price = food_price(city)
+    price = food_price(city, conn)
     stock = city.setdefault("resources", {}).get("Food", 0)
     wealth = conn.execute("SELECT wealth FROM cities WHERE id = ?", (city["id"],)).fetchone()["wealth"]
 

@@ -334,6 +334,19 @@ FEATURES = [
         },
     },
     {
+        "name": "Hard times: harvest-driven food prices, revolt resets them, villages die in famine",
+        "functions": {
+            "Data/Economy/food_market.py": ["price_level", "update_price_level", "reset_price_level"],
+        },
+        "wired": {
+            "Data/World/harvest.py": ["update_price_level(", "_famine_deaths"],
+            "Data/Combat/combat.py": ["reset_price_level("],
+            "Data/Database/repository.py": ['city.pop("_famine_deaths"'],
+            "Data/World/villagers.py": ["famine_dead"],
+            "Data/Database/database.py": ['"price_level"', '"famine_dead"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1109,6 +1122,12 @@ def _smoke_body(r, holder):
             regions = conn.execute("SELECT id, farmland FROM regions WHERE world_id = ?", (world_id,)).fetchall()
             assert len(weather) == len(regions), "the Autumn hook did not bring in a harvest with weather for every region"
 
+            # each kingdom's food prices follow its own harvest: up 20% after a bad one, unchanged otherwise
+            for row in conn.execute("SELECT kingdom_id, description FROM events WHERE type = 'Harvest'"):
+                level = conn.execute("SELECT price_level FROM kingdoms WHERE id = ?", (row["kingdom_id"],)).fetchone()[0]
+                expected = 1.2 if " a bad harvest" in row["description"] else 1.0
+                assert abs(level - expected) < 1e-6, f"after its harvest a kingdom's food prices are {level}x, not {expected}x"
+
             farmland = {r["id"]: r["farmland"] for r in regions}
             tax = {}
             for v in villages:
@@ -1276,6 +1295,87 @@ def _smoke_body(r, holder):
                 town["resources"]["Food"] = food_before
 
         run_step(r, "households buy food with pooled gold; temples give alms; no food means hunger", food_is_bought)
+
+        def hard_times():
+            import Data.Economy.food_market as FM
+            import Data.World.harvest as H
+            import Data.World.villagers as VL
+            from Data.Database.repository import get_city, get_kingdom, save_city
+
+            kingdom_id = kingdoms[0]["id"]
+
+            def level():
+                return round(FM.price_level(conn, kingdom_id), 4)
+
+            try:
+                # start from normal: the harvest step before this one brought in a real
+                # harvest, and a bad one may already have raised this kingdom's prices
+                FM.reset_price_level(conn, kingdom_id)
+                seen = []
+                for verdict in ("bad", "bad", "bad", "fair", "good"):
+                    FM.update_price_level(conn, kingdom_id, verdict)
+                    seen.append(level())
+                assert seen[:3] == [1.2, 1.68, 2.688], f"bad years in a row should raise prices to 1.2, 1.68, 2.688x, not {seen[:3]}"
+                assert seen[3] == seen[2], "an ordinary harvest changed food prices"
+                assert abs(seen[4] - (1 + (seen[3] - 1) * (1 - FM.GOOD_YEAR_EASE))) < 1e-3, "a good harvest did not ease prices back toward normal"
+
+                capital = get_city(conn, get_kingdom(conn, kingdom_id)["capital"])
+                FM.reset_price_level(conn, kingdom_id)
+                normal = FM.food_price(capital, conn)
+                conn.execute("UPDATE kingdoms SET price_level = 3.0 WHERE id = ?", (kingdom_id,))
+                assert abs(FM.food_price(capital, conn) - 3 * normal) < 0.01, "a kingdom's price level does not change what food costs"
+            finally:
+                FM.reset_price_level(conn, kingdom_id)
+                conn.commit()
+
+            # a harvest really moves prices: one with bad weather everywhere must raise every
+            # kingdom's price level by exactly one more bad year, from wherever it stood
+            before = {row["id"]: (row["price_level"], row["bad_harvest_years"]) for row in conn.execute(
+                "SELECT id, price_level, bad_harvest_years FROM kingdoms WHERE world_id = ?", (world_id,))}
+            real_weather = H.roll_weather
+            H.roll_weather = lambda regions, neighbors, last: {g["id"]: ("Bad", H.WEATHER_FACTOR["Bad"], -3.0) for g in regions}
+            try:
+                summary = H.run_harvest(conn, world_id, 9999)
+            finally:
+                H.roll_weather = real_weather
+            for kingdom_id in summary:
+                old, years = before[kingdom_id]
+                now = conn.execute("SELECT price_level FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()[0]
+                want = round(old * (1 + FM.BAD_YEAR_RISE * (years + 1)), 4)
+                assert abs(now - want) < 1e-3, f"a bad harvest left a kingdom's food prices at {now}x, not {want}x"
+            conn.executemany("UPDATE kingdoms SET price_level = ?, bad_harvest_years = ? WHERE id = ?",
+                             [(lvl, yrs, kid) for kid, (lvl, yrs) in before.items()])
+            conn.commit()
+
+            # a starving village loses households, saved exactly once, safe from older copies
+            village_id = conn.execute(
+                """SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                   WHERE k.world_id = ? AND c.households >= 20 ORDER BY c.households DESC LIMIT 1""", (world_id,)
+            ).fetchone()[0]
+            conn.execute("UPDATE cities SET household_store = 0, hungry_days = ?, famine_dead = 0 WHERE id = ?",
+                         (H.FAMINE_AFTER_HUNGRY_DAYS + 5, village_id))
+            conn.execute("UPDATE city_resources SET amount = 0 WHERE city_id = ? AND resource_name = 'Food'", (village_id,))
+            conn.commit()
+            older = get_city(conn, village_id)
+            village = get_city(conn, village_id)
+            before = village["households"]
+            H.feed_households(village)
+            save_city(conn, village)
+            save_city(conn, village)
+            save_city(conn, older)
+            conn.commit()
+            after = conn.execute("SELECT households, famine_dead FROM cities WHERE id = ?", (village_id,)).fetchone()
+            expected = before * (1 - H.FAMINE_DEATH_RATE)
+            assert abs(after["households"] - expected) < 1e-6, \
+                f"a starving village should lose {H.FAMINE_DEATH_RATE:.1%} of its households once (had {before}, now {after['households']}, expected {expected:.3f})"
+            assert after["famine_dead"] > 0, "famine deaths were not counted"
+
+            VL.village_hardship(conn, world_id)
+            logged = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Famine'").fetchone()[0]
+            cleared = conn.execute("SELECT famine_dead FROM cities WHERE id = ?", (village_id,)).fetchone()[0]
+            assert (logged > 0 or after["famine_dead"] < 1) and cleared < 1, "the month's famine deaths were not logged and cleared"
+
+        run_step(r, "bad harvests raise food prices, good ones ease them; long hunger kills villagers", hard_times)
 
         run_step(r, "a trade moves kingdom favor and dispatches a caravan", favor_wiring)
     else:
@@ -1745,12 +1845,17 @@ def _smoke_body(r, holder):
             return dead
 
         combat.apply_casualties = casualties_with_the_monarch
+        conn.execute("UPDATE kingdoms SET price_level = 2.0 WHERE id = ?", (kingdom["id"],))
+        conn.commit()
         try:
             result = combat.resolve_civil_war(conn, kingdom, cities, current_year=1)
         finally:
             combat.apply_casualties = real_casualties
         conn.commit()
         assert result["outcome"] != "no_battle", "(setup) the uprising never came to battle"
+        level = conn.execute("SELECT price_level FROM kingdoms WHERE id = ?", (kingdom["id"],)).fetchone()[0]
+        expected = 1.0 if result["outcome"] == "rebels_win" else 2.0
+        assert level == expected, f"after a civil war ({result['outcome']}) food prices should be {expected}x, but are {level}x"
 
         written = [e for e in get_chronicle(conn, kingdom["id"]) if e["id"] > last_id]
         uprising = [e for e in written if e["event_type"] == "Civil War"]

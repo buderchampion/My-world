@@ -47,6 +47,7 @@ def init_database():
         "households": "INTEGER NOT NULL DEFAULT 0",
         "household_store": "REAL NOT NULL DEFAULT 0",
         "hungry_days": "INTEGER NOT NULL DEFAULT 0",
+        "famine_dead": "REAL NOT NULL DEFAULT 0",
     })
 
     # Who in an army was levied from the villages (they go home as Farmers).
@@ -60,6 +61,8 @@ def init_database():
         "treasury": "REAL NOT NULL DEFAULT 1000",
         "tax_rate": "REAL NOT NULL DEFAULT 0.1",
         "last_civil_war_year": "INTEGER",
+        "price_level": "REAL NOT NULL DEFAULT 1",
+        "bad_harvest_years": "INTEGER NOT NULL DEFAULT 0",
     })
     
     _add_missing_columns(connection, "buildings", {

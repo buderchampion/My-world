@@ -500,6 +500,12 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
     # the deaths below, a ruler's included, follow it.
     civil_war_entries = record_civil_war(conn, kingdom, rebels_win, sovereign)
 
+    # A revolt that topples the crown wipes the slate clean: food prices
+    # return to normal (Data.Economy.food_market).
+    if rebels_win:
+        from Data.Economy.food_market import reset_price_level
+        reset_price_level(conn, kingdom["id"])
+
     from Data.Events.events import death_event
     from Data.Relationships.relationships import apply_grief
     for npc in loyalist_deaths + rebel_deaths:

@@ -163,7 +163,18 @@ def village_hardship(conn, world_id):
 
     from Data.Database.repository import create_event
 
-    report = {"households_fled": 0, "bandits": 0}
+    report = {"households_fled": 0, "bandits": 0, "famine_dead": 0}
+
+    # This month's famine deaths in each village (Data.World.harvest), logged and cleared.
+    for row in conn.execute(
+        """SELECT c.id, c.name, c.kingdom_id, c.famine_dead FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+           WHERE k.world_id = ? AND c.famine_dead >= 1""", (world_id,)
+    ).fetchall():
+        dead = round(row["famine_dead"])
+        report["famine_dead"] += dead
+        create_event(conn, "Famine", f"Famine claimed about {dead} lives in {row['name']} this month.",
+                     city_id=row["id"], kingdom_id=row["kingdom_id"])
+        conn.execute("UPDATE cities SET famine_dead = 0 WHERE id = ?", (row["id"],))
 
     villages = [dict(v) for v in conn.execute(
         """

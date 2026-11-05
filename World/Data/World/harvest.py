@@ -37,6 +37,13 @@ WEATHER_FACTOR = {"Good": 1.2, "Normal": 1.0, "Bad": 0.55}
 
 FAMILY_SIZE = 5     # people per household (matches Data.World.countryside)
 
+# Famine. Once a village has gone hungry this many days in a row, its
+# households start dying: up to FAMINE_DEATH_RATE of them a day when they
+# have nothing at all, less when they get some (about 9% a month at worst --
+# the Great Famine of 1315-17 killed 10-25% in a year).
+FAMINE_AFTER_HUNGRY_DAYS = 20
+FAMINE_DEATH_RATE = 0.003
+
 
 def days_until_harvest(month, day):
     """Days from (month, day) until the first day of the next harvest month."""
@@ -151,12 +158,18 @@ def run_harvest(conn, world_id, year):
         s["bad"] += quality == "Bad"
         s["good"] += quality == "Good"
 
+    from Data.Economy.food_market import update_price_level
+
     for kingdom_id, s in summary.items():
         verdict = "bad" if s["bad"] > s["villages"] / 2 else ("good" if s["good"] > s["villages"] / 2 else "middling" if s["bad"] else "fair")
+        old, new = update_price_level(conn, kingdom_id, verdict)
+        s["verdict"], s["price_level"] = verdict, new
+        prices = (f" Bread now costs {new:.2f} times its old price (it was {old:.2f})." if abs(new - old) > 0.005
+                  else f" Bread holds at {new:.2f} times its old price." if new > 1.005 else "")
         create_event(
             conn, "Harvest",
             f"{s['kingdom']} brought in a {verdict} harvest: {s['reaped']:.0f} Food reaped in {s['villages']} villages "
-            f"({s['bad']} bad, {s['good']} good), {s['tax']:.0f} paid as grain tax, {s['surplus']:.0f} sent to market.",
+            f"({s['bad']} bad, {s['good']} good), {s['tax']:.0f} paid as grain tax, {s['surplus']:.0f} sent to market.{prices}",
             kingdom_id=kingdom_id
         )
 
@@ -190,6 +203,15 @@ def feed_households(city):
     need -= from_market
 
     city["hungry_days"] = (city.get("hungry_days") or 0) + 1 if need > 0.5 else 0
+
+    # Famine: a long hunger starts killing. The loss is saved as a change, not
+    # a value (save_city applies and clears _famine_deaths), so an older copy
+    # of this village can never overwrite it and saving twice cannot count it twice.
+    if city["hungry_days"] >= FAMINE_AFTER_HUNGRY_DAYS and need > 0.5:
+        short_share = need / (households * FAMILY_SIZE)
+        lost = households * FAMINE_DEATH_RATE * short_share
+        city["households"] = households - lost
+        city["_famine_deaths"] = city.get("_famine_deaths", 0) + lost
 
     return round(need, 2)
 
