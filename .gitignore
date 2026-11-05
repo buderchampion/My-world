@@ -14,3 +14,7 @@ Logs/
 
 # Visual Studio
 .vs/
+
+# Fast-forward test world and its reports (World/fast_forward.py) -- never version them
+fast_forward.db
+fast_forward_report.txt

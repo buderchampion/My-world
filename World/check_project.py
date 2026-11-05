@@ -347,6 +347,10 @@ FEATURES = [
         },
     },
     {
+        "name": "Fast-forward: run a world for years without waiting, with yearly reports",
+        "functions": {"fast_forward.py": ["main", "year_report"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },

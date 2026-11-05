@@ -18,12 +18,9 @@ def create_npc(conn, city_id, name, gender, age, npc_class, profession):
     return get_npc(conn, cursor.lastrowid)
 
 
-def get_npc(conn, npc_id):
-
-    row = conn.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone()
-
-    if row is None:
-        return None
+def _npc_from_row(row, city_type):
+    """An NPC dict from its npcs row (skills and relationships still empty).
+    Shared by get_npc and get_city_npcs, so both build exactly the same thing."""
 
     npc = dict(row)
 
@@ -46,15 +43,25 @@ def get_npc(conn, npc_id):
     schedule_json = npc.pop("schedule_json")
     npc["schedule"] = json.loads(schedule_json) if schedule_json else {}
 
-    city_row = conn.execute("SELECT type FROM cities WHERE id = ?", (npc["city_id"],)).fetchone()
-    npc["city_type"] = city_row["type"] if city_row else None
-
+    npc["city_type"] = city_type
     npc["skills"] = {}
+    npc["relationships"] = {}
+
+    return npc
+
+
+def get_npc(conn, npc_id):
+
+    row = conn.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone()
+
+    if row is None:
+        return None
+
+    city_row = conn.execute("SELECT type FROM cities WHERE id = ?", (row["city_id"],)).fetchone()
+    npc = _npc_from_row(row, city_row["type"] if city_row else None)
 
     for skill_row in conn.execute("SELECT * FROM npc_skills WHERE npc_id = ?", (npc_id,)):
         npc["skills"][skill_row["skill_name"]] = {"level": skill_row["level"], "xp": skill_row["xp"]}
-
-    npc["relationships"] = {}
 
     for rel_row in conn.execute(
         "SELECT * FROM relationships WHERE npc_a_id = ? OR npc_b_id = ?", (npc_id, npc_id)
@@ -65,7 +72,6 @@ def get_npc(conn, npc_id):
         }
 
     return npc
-
 
 def save_npc(conn, npc):
 
@@ -101,10 +107,40 @@ def save_npc(conn, npc):
 
 
 def get_city_npcs(conn, city_id):
+    """
+    Everyone in a city, each exactly as get_npc would build them -- but in
+    four queries for the whole city rather than four per person.
+    """
 
-    rows = conn.execute("SELECT id FROM npcs WHERE city_id = ?", (city_id,)).fetchall()
+    rows = conn.execute("SELECT * FROM npcs WHERE city_id = ?", (city_id,)).fetchall()
 
-    return [get_npc(conn, row["id"]) for row in rows]
+    if not rows:
+        return []
+
+    city_row = conn.execute("SELECT type FROM cities WHERE id = ?", (city_id,)).fetchone()
+    city_type = city_row["type"] if city_row else None
+
+    npcs = [_npc_from_row(row, city_type) for row in rows]
+    by_id = {npc["id"]: npc for npc in npcs}
+
+    for skill_row in conn.execute(
+        "SELECT * FROM npc_skills WHERE npc_id IN (SELECT id FROM npcs WHERE city_id = ?)", (city_id,)
+    ):
+        by_id[skill_row["npc_id"]]["skills"][skill_row["skill_name"]] = {"level": skill_row["level"], "xp": skill_row["xp"]}
+
+    for rel_row in conn.execute(
+        """SELECT * FROM relationships
+           WHERE npc_a_id IN (SELECT id FROM npcs WHERE city_id = ?) OR npc_b_id IN (SELECT id FROM npcs WHERE city_id = ?)""",
+        (city_id, city_id)
+    ):
+        a, b = rel_row["npc_a_id"], rel_row["npc_b_id"]
+        details = {"type": rel_row["type"], "reputation": rel_row["reputation"], "origin": rel_row["origin"]}
+        if a in by_id:
+            by_id[a]["relationships"][str(b)] = dict(details)
+        if b in by_id:
+            by_id[b]["relationships"][str(a)] = dict(details)
+
+    return npcs
 
 
 def set_npc_parents(conn, child_id, parent_a_id, parent_b_id):
@@ -166,10 +202,32 @@ def get_building(conn, building_id):
 
 
 def get_city_buildings(conn, city_id):
+    """
+    Every building in a city, each exactly as get_building would build it --
+    but in two queries for the whole city rather than three per building.
+    """
 
-    rows = conn.execute("SELECT id FROM buildings WHERE city_id = ?", (city_id,)).fetchall()
+    buildings, by_id = [], {}
 
-    return [get_building(conn, row["id"]) for row in rows]
+    for row in conn.execute("SELECT * FROM buildings WHERE city_id = ?", (city_id,)):
+        building = dict(row)
+        building["owner"] = building.pop("owner_id")
+        building["workers"], building["residents"] = [], []
+        buildings.append(building)
+        by_id[building["id"]] = building
+
+    for npc in conn.execute(
+        """SELECT id, workplace_id, home_id FROM npcs WHERE alive = 1 AND (
+               workplace_id IN (SELECT id FROM buildings WHERE city_id = ?)
+               OR home_id IN (SELECT id FROM buildings WHERE city_id = ?))
+           ORDER BY id""", (city_id, city_id)
+    ):
+        if npc["workplace_id"] in by_id:
+            by_id[npc["workplace_id"]]["workers"].append(npc["id"])
+        if npc["home_id"] in by_id:
+            by_id[npc["home_id"]]["residents"].append(npc["id"])
+
+    return buildings
 
 
 def count_occupants(conn, building_id, occupancy_column):
@@ -233,12 +291,17 @@ def get_city(conn, city_id):
 
     city["buildings"] = get_city_buildings(conn, city_id)
 
+    # A short summary of who lives here, read in one query. (Loading every
+    # person in full -- relationships, skills and all -- just for these six
+    # fields made every city load cost thousands of queries.)
     city["npcs"] = [
         {
-            "id": npc["id"], "name": npc["name"], "profession": npc["profession"],
-            "class": npc["class"], "workplace": npc["workplace"], "home": npc["home"]
+            "id": row["id"], "name": row["name"], "profession": row["profession"],
+            "class": row["class"], "workplace": row["workplace_id"], "home": row["home_id"]
         }
-        for npc in get_city_npcs(conn, city_id)
+        for row in conn.execute(
+            "SELECT id, name, profession, class, workplace_id, home_id FROM npcs WHERE city_id = ?", (city_id,)
+        )
     ]
 
     city["quests"] = get_city_quests(conn, city_id)
