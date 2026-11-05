@@ -34,6 +34,12 @@ def generate_world():
     # were made above) -- see Data.World.regions.
     ensure_regions(conn, world["id"])
 
+    # Each kingdom's towns become counties, and its villages fall under the
+    # nearest seat or the crown (Data.Government.provinces). Their lords are
+    # installed with the first rulers, in the first month.
+    from Data.Government.provinces import ensure_provinces
+    ensure_provinces(conn, world["id"])
+
     # Cities open with stocked storehouses, not empty ones -- see
     # Data.Economy.economy.stock_starting_supplies.
     from Data.Economy.economy import stock_starting_supplies

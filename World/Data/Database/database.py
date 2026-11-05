@@ -48,6 +48,7 @@ def init_database():
         "household_store": "REAL NOT NULL DEFAULT 0",
         "hungry_days": "INTEGER NOT NULL DEFAULT 0",
         "famine_dead": "REAL NOT NULL DEFAULT 0",
+        "province_id": "INTEGER REFERENCES provinces(id)",
     })
 
     # Who in an army was levied from the villages (they go home as Farmers).

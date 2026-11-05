@@ -61,6 +61,11 @@ def get_or_create_world():
         if villages_given:
             print(f"  (gave {villages_given} villages peasant households -- this world predates them)")
 
+        from Data.Government.provinces import ensure_provinces
+        provinces_made = ensure_provinces(connection, world["id"])
+        if provinces_made:
+            print(f"  (divided this world into {provinces_made} counties -- it predates provinces)")
+
         from Data.World.harvest import ensure_household_stores
         stocked = ensure_household_stores(connection, world["id"])
         if stocked:

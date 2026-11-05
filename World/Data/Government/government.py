@@ -10,10 +10,27 @@ NON_RULER_PROFESSIONS = ("Unemployed", "Child")
 
 def assign_city_ruler(conn, city):
     """
-    Picks one NPC to rule this city -- King/Queen for a Capital, Mayor
-    everywhere else. Sets city["ruler"] and saves the chosen NPC with
-    their new title. Not called automatically.
+    Picks one NPC to rule this city -- King/Queen for a Capital, a Count or
+    Countess for a province seat, Mayor everywhere else. Sets city["ruler"]
+    and saves the chosen NPC with their new title.
+
+    A province seat is hereditary (Data.Government.provinces): when its lord
+    has died, their heir inherits first; only if there is none does the
+    crown appoint a new lord from the town's notables.
     """
+
+    from Data.Government.provinces import seat_province, choose_heir, install_lord
+    from Data.Database.repository import get_npc
+
+    province = seat_province(conn, city["id"]) if city["type"] != "Capital" else None
+
+    if province and city.get("ruler"):
+        previous = get_npc(conn, city["ruler"])
+        heir = choose_heir(conn, previous["id"]) if previous else None
+        if heir:
+            lord = install_lord(conn, province, city, heir, inherited_from=previous)
+            city["ruler"] = lord["id"]
+            return lord
 
     npcs = get_city_npcs(conn, city["id"])
 
@@ -33,6 +50,11 @@ def assign_city_ruler(conn, city):
         return None
 
     ruler = random.choice(candidates)
+
+    if province:
+        lord = install_lord(conn, province, city, ruler)        # appointed: a new house
+        city["ruler"] = lord["id"]
+        return lord
 
     if city["type"] == "Capital":
         ruler["title"] = "King" if ruler["gender"] == "Male" else "Queen"

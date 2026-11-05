@@ -351,6 +351,20 @@ FEATURES = [
         "functions": {"fast_forward.py": ["main", "year_report"]},
     },
     {
+        "name": "Provinces: counties held by hereditary lords, villages under the nearest seat or the crown",
+        "tables": ["provinces"],
+        "functions": {
+            "Data/Government/provinces.py": ["ensure_provinces", "choose_heir", "install_lord", "seat_province"],
+        },
+        "wired": {
+            "Data/Government/government.py": ["choose_heir(", "install_lord("],
+            "Data/World/world_generator.py": ["ensure_provinces("],
+            "run_world.py": ["ensure_provinces("],
+            "Data/Infrastructure/migration.py": ['"Countess"'],
+            "Data/Database/database.py": ['"province_id"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1090,6 +1104,21 @@ def _smoke_body(r, holder):
 
         run_step(r, "most people live in village households, on land that can feed them", countryside_made)
 
+        def counties_made():
+            for kingdom in conn.execute("SELECT id, capital_city_id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+                cities = [dict(c) for c in conn.execute("SELECT * FROM cities WHERE kingdom_id = ?", (kingdom["id"],))]
+                seats = {row["seat_city_id"]: row["id"] for row in conn.execute(
+                    "SELECT id, seat_city_id FROM provinces WHERE kingdom_id = ?", (kingdom["id"],))}
+                towns = [c for c in cities if c["type"] != "Village" and c["id"] != kingdom["capital_city_id"]]
+                assert sorted(seats) == sorted(c["id"] for c in towns), "not every town besides the capital is a county seat"
+                centers = [c for c in cities if c["id"] in seats or c["id"] == kingdom["capital_city_id"]]
+                for village in (c for c in cities if c["type"] == "Village"):
+                    nearest = min(centers, key=lambda c: (c["map_x"] - village["map_x"]) ** 2 + (c["map_y"] - village["map_y"]) ** 2)
+                    assert village["province_id"] == seats.get(nearest["id"]), \
+                        f"{village['name']} is not under its nearest seat (or the crown, if the capital is nearest)"
+
+        run_step(r, "every town besides the capital is a county; villages fall under the nearest seat or the crown", counties_made)
+
         def harvests_work():
             from Data.World import harvest as H
             from Data.Economy.economy import get_target_stock
@@ -1684,6 +1713,41 @@ def _smoke_body(r, holder):
         assert entries_after == entries_before, "a quiet month added chronicle entries (the founding coronation is being written again)"
 
     run_step(r, "rulers are saved, each realm's founding monarch is chronicled once", rulers_saved)
+
+    def lords_inherit():
+        import Data.Government.provinces as P
+        from Data.Government.government import assign_city_ruler
+        from Data.Database.repository import get_npc, get_city
+
+        provinces = [dict(p) for p in conn.execute(
+            """SELECT p.* FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ?""", (world_id,))]
+        if not provinces:
+            return
+        for province in provinces:
+            lord = get_npc(conn, province["lord_id"]) if province["lord_id"] else None
+            assert lord and lord["alive"] and lord["title"] in P.LORD_TITLES, f"the {province['name']} has no living Count or Countess"
+            ruler = conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (province["seat_city_id"],)).fetchone()[0]
+            assert ruler == lord["id"], f"the lord of the {province['name']} does not rule its seat"
+
+        # stage an inheritance: the lord dies, leaving a grown child and a young one
+        province = provinces[0]
+        lord = province["lord_id"]
+        def untitled_adult(age):
+            row = conn.execute(
+                "SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND profession != 'Child' ORDER BY id DESC LIMIT 1 OFFSET ?",
+                (age,)).fetchone()
+            conn.execute("UPDATE npcs SET age = ?, parent_a_id = ? WHERE id = ?", (age, lord, row[0]))
+            return row[0]
+        elder, young = untitled_adult(30), untitled_adult(12)
+        conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (lord,))
+        conn.commit()
+        heir = assign_city_ruler(conn, get_city(conn, province["seat_city_id"]))
+        after = conn.execute("SELECT lord_id, house FROM provinces WHERE id = ?", (province["id"],)).fetchone()
+        assert heir and heir["id"] == elder, "the dead lord's eldest grown child did not inherit"
+        assert after["lord_id"] == elder and after["house"] == province["house"], "the inheritance did not keep the house"
+        assert get_npc(conn, elder)["city_id"] == province["seat_city_id"], "the heir did not move to the seat"
+
+    run_step(r, "every county has its lord; a lord's eldest grown child inherits and the house goes on", lords_inherit)
 
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor

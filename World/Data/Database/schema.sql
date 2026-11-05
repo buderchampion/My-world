@@ -215,6 +215,18 @@ CREATE TABLE IF NOT EXISTS regions (
 );
 
 -- Each region's harvest weather, year by year (the history famines are made of).
+-- Provinces: every town other than a kingdom's capital is the seat of a
+-- County held by a hereditary lord, with the villages nearest it as its lands
+-- (Data.Government.provinces). Villages nearest the capital are the crown's own.
+CREATE TABLE IF NOT EXISTS provinces (
+    id            INTEGER PRIMARY KEY,
+    kingdom_id    INTEGER NOT NULL REFERENCES kingdoms(id),
+    name          TEXT NOT NULL,                        -- "County of Blackbridge"
+    seat_city_id  INTEGER NOT NULL REFERENCES cities(id),
+    lord_id       INTEGER REFERENCES npcs(id),          -- the Count or Countess (NULL until one is installed)
+    house         TEXT                                  -- the ruling family: "House of Aldric"
+);
+
 CREATE TABLE IF NOT EXISTS harvests (
     id          INTEGER PRIMARY KEY,
     region_id   INTEGER NOT NULL REFERENCES regions(id),
