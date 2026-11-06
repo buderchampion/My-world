@@ -389,6 +389,14 @@ FEATURES = [
         },
     },
     {
+        "name": "Rebellion: restless lords rise together, hire mercenaries, and are crushed or break away",
+        "functions": {"Data/Government/rebellion.py": ["consider_rebellions", "rise", "crush", "break_away", "sides"]},
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["consider_rebellions(self.conn"],
+            "Data/Government/feudal.py": ["LORD_SPENDING"],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1844,6 +1852,59 @@ def _smoke_body(r, holder):
             conn.commit()
 
     run_step(r, "lords' loyalty follows how the crown treats them, and the restless are logged", lords_loyalty)
+
+    def lords_rebel():
+        import Data.Government.rebellion as R
+        import random as random_module
+        from Data.Simulation.simulation_manager import SimulationManager
+
+        class Scripted:                       # rolls in order, then 0.5
+            def __init__(self, rolls): self.rolls = list(rolls)
+            def random(self): return self.rolls.pop(0) if self.rolls else 0.5
+            def __getattr__(self, name): return getattr(random_module, name)
+
+        provinces = [dict(p) for p in conn.execute(
+            "SELECT p.* FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ? ORDER BY p.id", (world_id,))]
+        if not provinces:
+            return
+
+        # 1. through the real monthly tick: one restless lord rises and is crushed
+        rebel = provinces[0]
+        conn.execute("UPDATE provinces SET loyalty = 70 WHERE kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?)", (world_id,))
+        conn.execute("UPDATE provinces SET loyalty = 0 WHERE id = ?", (rebel["id"],))
+        conn.commit()
+        real_random, real_ratio = R.random, R.MIN_STRENGTH_RATIO
+        R.random, R.MIN_STRENGTH_RATIO = Scripted([0.0, 0.999999]), 0       # rise, then lose the battle
+        try:
+            SimulationManager(conn, world_id).on_month()
+        finally:
+            R.random, R.MIN_STRENGTH_RATIO = real_random, real_ratio
+        lord = conn.execute("SELECT alive FROM npcs WHERE id = ?", (rebel["lord_id"],)).fetchone()[0]
+        now = conn.execute("SELECT lord_id, house FROM provinces WHERE id = ?", (rebel["id"],)).fetchone()
+        assert not lord and now["lord_id"] != rebel["lord_id"] and now["house"] != rebel["house"], \
+            "a restless lord did not rise through the monthly tick (or, crushed, kept their county)"
+
+        # 2. a coalition breaks away together
+        pair = conn.execute(
+            """SELECT p.kingdom_id FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ?
+               GROUP BY p.kingdom_id HAVING COUNT(*) >= 2 ORDER BY p.kingdom_id DESC LIMIT 1""", (world_id,)).fetchone()
+        if not pair:
+            return
+        leader, ally = [dict(p) for p in conn.execute("SELECT * FROM provinces WHERE kingdom_id = ? ORDER BY id LIMIT 2", (pair[0],))]
+        R.random = Scripted([0.0])
+        try:
+            result = R.rise(conn, leader, [ally])
+        finally:
+            R.random = real_random
+        new = conn.execute("SELECT * FROM kingdoms WHERE name = ?", (result.get("new_kingdom"),)).fetchone()
+        assert result["rebels_win"] and new and new["capital_city_id"] == leader["seat_city_id"] and new["ruler_id"] == leader["lord_id"], \
+            "a victorious coalition did not found a kingdom ruled from its leader's seat"
+        assert conn.execute("SELECT kingdom_id FROM provinces WHERE id = ?", (ally["id"],)).fetchone()[0] == new["id"], \
+            "the ally's county did not join the new kingdom"
+        assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Breakaway'").fetchone()[0] >= 2, \
+            "the breakaway was not chronicled by both kingdoms"
+
+    run_step(r, "a restless lord rises through the month tick and is crushed; a coalition breaks away as a new kingdom", lords_rebel)
 
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor

@@ -21,6 +21,8 @@
 LORD_SHARE = 0.30            # of their county's taxes, the lord keeps this much
 STANDARD_LORD_SHARE = 0.30   # the share lords expect; keeping less angers them
 LOYALTY_START = 70           # a new lord's loyalty
+LORD_SPENDING = 0.10         # each month a lord spends this share of their purse on household, castle and retinue
+                             # (so savings settle at about ten months' income -- enough for mercenaries, not an empire)
 LOYALTY_DRIFT = 0.10         # each month, this share of the way toward the target
 RESTLESS_BELOW = 30
 
@@ -82,8 +84,9 @@ def loyalty_target(conn, province, kingdom, year):
 
 def update_loyalty(conn, world_id):
     """
-    Monthly: every lord's loyalty drifts toward its target; a lord who turns
-    restless, or recovers, is logged. Returns {province id: new loyalty}.
+    Monthly: every lord spends a share of their purse, and their loyalty
+    drifts toward its target; a lord who turns restless, or recovers, is
+    logged. Returns {province id: new loyalty}.
     """
 
     from Data.Database.repository import create_event
@@ -91,6 +94,11 @@ def update_loyalty(conn, world_id):
 
     year, _ = current_date(conn, world_id)
     result = {}
+
+    # lords live on their income: a share of each purse is spent every month
+    conn.execute(
+        "UPDATE provinces SET treasury = treasury * ? WHERE kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?)",
+        (1 - LORD_SPENDING, world_id))
 
     for province in conn.execute(
         """SELECT p.*, n.name lord_name FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id

@@ -388,6 +388,11 @@ class SimulationManager:
         from Data.Government.feudal import update_loyalty
         update_loyalty(self.conn, self.world_id)
 
+        # Restless lords may rise against the crown -- and win their county
+        # its freedom (Data.Government.rebellion).
+        from Data.Government.rebellion import consider_rebellions
+        consider_rebellions(self.conn, self.world_id)
+
         from Data.Infrastructure.travel import consider_tourism
         consider_tourism(self.conn, self.world_id)
 

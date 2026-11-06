@@ -108,5 +108,20 @@
         "{When}, {ruler} came of age, and the regency of {regent} was ended; thereafter the {title} ruled {kingdom} in their own right.",
         "{When}, {kingdom}'s young {title} {ruler} came of age and took up the rule of the realm from {regent}, who had governed as regent.",
         "{When}, the regency of {regent} drew to its close, for {ruler} was grown, and ruled {kingdom} as {title} in their own name."
+    ],
+    "Rebellion Crushed": [
+        "{When}, {ruler}, lord of the {county}, rose in arms against {sovereign} of {kingdom}; but the rising was broken, and {ruler} went to the block, and the {county} was given to another house.",
+        "{When}, the {county} rebelled under {ruler}. The crown of {kingdom} crushed the rising, and {ruler} paid for it with their life.",
+        "{When}, {ruler} of the {county} defied {sovereign} and took up arms. The rebellion failed; {ruler} was put to death as a traitor, and the {county} passed from their house."
+    ],
+    "Breakaway (lost)": [
+        "{When}, {ruler}, lord of the {county}, rose against the crown of {kingdom} and prevailed; and the {county} was lost to the realm, becoming the kingdom of {other}.",
+        "{When}, the {county} threw off the rule of {kingdom}. Its lord, {ruler}, defeated the crown's men and named themselves sovereign of a new realm, {other}.",
+        "{When}, {kingdom} was diminished: {ruler} of the {county} won their rebellion, and the county broke away as {other}."
+    ],
+    "Breakaway (founded)": [
+        "{When}, {ruler}, lord of the {county}, rose against {other} and won; and so was born the kingdom of {kingdom}, free of its old masters.",
+        "{When}, the {county} cast off the crown of {other}, and under {ruler} became a kingdom in its own right: {kingdom}.",
+        "{When}, {kingdom} was founded in rebellion, when {ruler} of the {county} defeated the armies of {other} and claimed a crown."
     ]
 }
