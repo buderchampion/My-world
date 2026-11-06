@@ -436,6 +436,14 @@ FEATURES = [
         },
     },
     {
+        "name": "Republics' economy: customs duties paid by foreigners; a grain office that buys reserves abroad",
+        "functions": {"Data/Government/republic.py": ["duties", "duty_rate", "run_grain_offices"]},
+        "wired": {
+            "Data/Economy/economy.py": ["duties(seller_kingdom, buyer_kingdom"],
+            "Data/Simulation/simulation_manager.py": ["run_grain_offices(self.conn"],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1229,7 +1237,7 @@ def _smoke_body(r, holder):
                 assert sorted(seats) == sorted(c["id"] for c in towns), "not every town besides the capital is a county seat"
                 centers = [c for c in cities if c["id"] in seats or c["id"] == kingdom["capital_city_id"]]
                 for village in (c for c in cities if c["type"] == "Village"):
-                    nearest = min(centers, key=lambda c: (c["map_x"] - village["map_x"]) ** 2 + (c["map_y"] - village["map_y"]) ** 2)
+                    nearest = min(centers, key=lambda c: ((c["map_x"] - village["map_x"]) ** 2 + (c["map_y"] - village["map_y"]) ** 2, c["id"]))
                     assert village["province_id"] == seats.get(nearest["id"]), \
                         f"{village['name']} is not under its nearest seat (or the crown, if the capital is nearest)"
 
@@ -1810,6 +1818,19 @@ def _smoke_body(r, holder):
 
     run_step(r, "(setup) a village starving just before the month tick", prepare_starving_village)
 
+    def prepare_grain_office():
+        # right before the month tick: a republic's reserve empty, a crown with grain to sell
+        from Data.Database.repository import get_city, save_city
+        rep = conn.execute("SELECT id, capital_city_id FROM kingdoms WHERE world_id = ? AND type = 'Republic' ORDER BY id LIMIT 1", (world_id,)).fetchone()
+        seller = conn.execute("SELECT capital_city_id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id LIMIT 1", (world_id,)).fetchone()
+        conn.execute("UPDATE kingdoms SET treasury = 1000000, export_ban_until = NULL WHERE world_id = ?", (world_id,))
+        capital = get_city(conn, rep["capital_city_id"]); capital["resources"]["Food"] = 0.0; save_city(conn, capital)
+        seat = get_city(conn, seller["capital_city_id"]); seat["resources"]["Food"] = 10.0 ** 6; save_city(conn, seat)
+        conn.execute("DELETE FROM events WHERE type = 'Grain Office'")
+        conn.commit()
+
+    run_step(r, "(setup) a republic's grain reserve empty just before the month tick", prepare_grain_office)
+
     run_step(r, "month tick (families, relationships, tourism, migration)", manager.on_month)
 
     def month_tick_moves_the_starving():
@@ -1828,6 +1849,12 @@ def _smoke_body(r, holder):
 
     run_step(r, "the month tick works out each kingdom's Loyalty, Unrest and Stability", month_tick_weighs_health)
 
+    def month_tick_runs_grain_office():
+        assert conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Grain Office'").fetchone()[0], \
+            "the month tick did not send any grain office to buy"
+
+    run_step(r, "the month tick sends republics' grain offices to buy", month_tick_runs_grain_office)
+
     def rulers_saved():
         saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]
         total = conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
@@ -1841,11 +1868,16 @@ def _smoke_body(r, holder):
         assert len(founding) == len(kingdoms) and all(row["n"] == 1 for row in founding), \
             "every kingdom's chronicle should open with exactly one coronation or election, its founding ruler"
 
-        before = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
+        # every city whose ruler is alive must keep that same ruler through a quiet month.
+        # (A city that had nobody fit to rule may gain its first ruler as people arrive --
+        # famine refugees, bandits, levies sent home -- and that is no failure.)
+        ruled = {row["id"]: row["ruler_id"] for row in conn.execute(
+            "SELECT c.id, c.ruler_id FROM cities c JOIN npcs n ON n.id = c.ruler_id WHERE n.alive = 1")}
         entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
         manager.on_month()
-        after = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
-        assert after == before, f"a second month with every ruler alive crowned {after - before} more rulers (rulers are not being saved)"
+        replaced = [cid for cid, rid in ruled.items()
+                    if conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (cid,)).fetchone()[0] != rid]
+        assert not replaced, f"a quiet month replaced {len(replaced)} living rulers (rulers are not being saved)"
         entries_after = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
         assert entries_after == entries_before, "a quiet month added chronicle entries (the founding coronation is being written again)"
 
@@ -2075,6 +2107,48 @@ def _smoke_body(r, holder):
             conn.commit()
 
     run_step(r, "rulers choose edicts by their nature; the seasons bring reviews; an export ban keeps Food home", rulers_issue_edicts)
+
+    def republics_trade():
+        import Data.Government.republic as RP
+        from Data.Economy.economy import simulate_cross_kingdom_trade_day, get_target_stock
+        from Data.Database.repository import get_city, save_city, get_kingdom_cities
+
+        crown, republic = {"type": "Crown"}, {"type": "Republic"}
+        assert RP.duties(republic, crown, 100) == (110, 110) and RP.duties(crown, republic, 100) == (95, 95), \
+            "customs duties are not 10% on a republic's sales and 5% on its purchases"
+
+        rep = dict(conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND type = 'Republic' ORDER BY id LIMIT 1", (world_id,)).fetchone())
+        buyer = dict(conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id LIMIT 1", (world_id,)).fetchone())
+
+        # a real sale: the republic has Food to spare, the crown has none, everyone else is neutral
+        conn.execute("UPDATE kingdoms SET export_ban_until = NULL, treasury = 10000000 WHERE world_id = ?", (world_id,))
+        for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+            for c in get_kingdom_cities(conn, k["id"]):
+                city = get_city(conn, c["id"])
+                city["resources"]["Food"] = 10.0 ** 6 if k["id"] == rep["id"] else 0.0 if k["id"] == buyer["id"] else get_target_stock("Food", city)
+                save_city(conn, city)
+        conn.commit()
+        sales = [t for t in simulate_cross_kingdom_trade_day(conn, world_id)
+                 if t["resource"] == "Food" and t["seller"] == rep["name"] and t["buyer"] == buyer["name"]]
+        assert sales and all(abs(t["paid"] - round(t["cost"] * 1.10, 2)) < 0.02 for t in sales), \
+            "a crown buying from a republic did not pay the 10% export duty"
+
+        # the grain office: an empty reserve, a seller with grain, a small purse
+        capital = get_city(conn, rep["capital_city_id"])
+        capital["resources"]["Food"] = 0.0
+        save_city(conn, capital)
+        seller_seat = get_city(conn, buyer["capital_city_id"])
+        seller_seat["resources"]["Food"] = 10.0 ** 6
+        save_city(conn, seller_seat)
+        conn.execute("UPDATE kingdoms SET treasury = 1000 WHERE id = ?", (rep["id"],))
+        conn.commit()
+        bought = [b for b in RP.run_grain_offices(conn, world_id) if b[0] == rep["name"]]
+        assert bought, "an empty grain reserve bought nothing abroad"
+        assert sum(b[3] for b in bought) <= 1000 * RP.GRAIN_BUDGET_SHARE + 0.01, "the grain office spent more than its budget"
+        assert conn.execute("SELECT COUNT(*) FROM caravans WHERE buyer_kingdom_id = ? AND destination_city_id = ? AND resource = 'Food'",
+                            (rep["id"], rep["capital_city_id"])).fetchone()[0], "the grain office's purchase never set out by caravan"
+
+    run_step(r, "republics charge customs duties, and their grain offices buy reserves abroad", republics_trade)
 
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor

@@ -585,18 +585,22 @@ def simulate_cross_kingdom_trade_day(
                     "SELECT treasury FROM kingdoms WHERE id = ?", (buyer_kingdom["id"],)
                 ).fetchone()["treasury"]
 
-                affordable_amount = round(current_treasury / price_per_unit, 2)
+                # republics' customs duties change what the buyer pays and the
+                # seller receives (Data.Government.republic)
+                from Data.Government.republic import duties, duty_rate
+                affordable_amount = int(current_treasury / (price_per_unit * duty_rate(seller_kingdom, buyer_kingdom)) * 100) / 100
                 amount = min(amount, affordable_amount)
 
                 if amount <= 0:
                     continue
 
                 cost = round(amount * price_per_unit, 2)
+                paid, received = duties(seller_kingdom, buyer_kingdom, cost)
 
-                if cost <= 0 or not spend_treasury(conn, buyer_kingdom["id"], cost):
+                if cost <= 0 or not spend_treasury(conn, buyer_kingdom["id"], paid):
                     continue
 
-                add_treasury(conn, seller_kingdom["id"], cost)
+                add_treasury(conn, seller_kingdom["id"], received)
 
                 adjust_kingdom_favor(conn, buyer_kingdom["id"], seller_kingdom["id"], TRADE_FAVOR_GAIN)
                 adjust_kingdom_favor(conn, seller_kingdom["id"], buyer_kingdom["id"], TRADE_FAVOR_LOSS)
@@ -618,6 +622,8 @@ def simulate_cross_kingdom_trade_day(
                         "resource": resource,
                         "amount": amount,
                         "cost": cost,
+                        "paid": paid,
+                        "received": received,
                         "buyer": buyer_kingdom["name"],
                         "seller": seller_kingdom["name"],
                     }

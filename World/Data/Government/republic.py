@@ -12,7 +12,15 @@ import random
 #     popular unrest and civil war remain.
 #   * it is poorer in land and richer in trade: half its people live in the
 #     countryside rather than RURAL_SHARE (Data.World.countryside), and its
-#     economy runs on tariffs and a grain office (part 2).
+#     economy runs on tariffs and a grain office:
+#       - tariffs, paid by foreigners: a kingdom buying from a republic pays a
+#         10% export duty on top; a republic buying abroad keeps a 5% import
+#         duty from the price (the foreign seller receives 95%);
+#       - the grain office: each month it tops up the capital's grain reserve
+#         toward 60 days of food for the republic's townsfolk, buying from the
+#         foreign kingdoms with the biggest surplus (never one that has banned
+#         food exports), spending at most a quarter of the treasury a month.
+#         The grain comes by caravan -- and can be raided on the way.
 #
 # About a quarter of a new world's kingdoms are republics.
 
@@ -26,6 +34,11 @@ ADULT_AGE = 16
 # how a councillor weighs a candidate: their wealth (as a share of the richest
 # candidate's), the councillor's feeling toward them where there is one, and chance
 WEALTH_WEIGHT, FEELING_WEIGHT, CHANCE_WEIGHT = 0.5, 1.0, 0.4
+
+EXPORT_DUTY = 0.10           # a foreign buyer pays this much on top when buying from a republic
+IMPORT_DUTY = 0.05           # a republic keeps this much of the price when buying abroad
+GRAIN_RESERVE_DAYS = 60      # the grain office keeps this many days of food for the townsfolk
+GRAIN_BUDGET_SHARE = 0.25    # and spends at most this share of the treasury in a month
 
 
 def republic_count(number_of_kingdoms):
@@ -91,3 +104,94 @@ def elect_doge(conn, capital_city):
                  city_id=capital_city["id"], kingdom_id=capital_city["kingdom"])
     conn.commit()
     return doge
+
+
+def duty_rate(seller_kingdom, buyer_kingdom):
+    """What a buyer pays per gold of the seller's price, after republics'
+    customs duties -- unrounded, for working out quantities."""
+    rate = 1.0
+    if seller_kingdom.get("type") == "Republic":
+        rate *= 1 + EXPORT_DUTY                  # the export duty, on top, to the republic
+    if buyer_kingdom.get("type") == "Republic":
+        rate *= 1 - IMPORT_DUTY                  # the import duty, kept back by the republic
+    return rate
+
+
+def duties(seller_kingdom, buyer_kingdom, cost):
+    """
+    (what the buyer pays, what the seller receives) for a cross-kingdom sale
+    of `cost` at the seller's price, after republics' customs duties. (The
+    duties go to the republic involved, so the two are always equal.)
+    """
+    paid = round(cost * duty_rate(seller_kingdom, buyer_kingdom), 2)
+    return paid, paid
+
+
+def run_grain_offices(conn, world_id):
+    """
+    Monthly: each republic's grain office tops up the capital's reserve
+    toward GRAIN_RESERVE_DAYS of food for its townsfolk, buying abroad from
+    the kingdoms with the biggest Food surplus. Returns [(republic, seller, amount, cost)].
+    """
+
+    from Data.Database.repository import (get_city, save_city, get_kingdom_cities, spend_treasury, add_treasury,
+                                          adjust_kingdom_favor, create_event)
+    from Data.Economy.economy import get_price, get_target_stock, TRADE_FAVOR_GAIN, TRADE_FAVOR_LOSS
+    from Data.Government.edicts import exports_banned, today
+    from Data.Infrastructure.caravans import dispatch_caravan
+
+    day = today(conn, world_id)
+    kingdoms = [dict(k) for k in conn.execute("SELECT * FROM kingdoms WHERE world_id = ?", (world_id,))]
+    bought = []
+
+    for republic in (k for k in kingdoms if k["type"] == "Republic"):
+        if not republic["capital_city_id"]:
+            continue
+        townsfolk = conn.execute(
+            "SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1",
+            (republic["id"],)).fetchone()[0]
+        capital = get_city(conn, republic["capital_city_id"])
+        wanted = townsfolk * GRAIN_RESERVE_DAYS - capital["resources"].get("Food", 0)
+        budget = republic["treasury"] * GRAIN_BUDGET_SHARE
+        if wanted <= 0 or budget <= 0:
+            continue
+
+        # who can sell: foreign capitals holding more Food than their own needs, biggest first
+        sellers = []
+        for other in kingdoms:
+            if other["id"] == republic["id"] or not other["capital_city_id"] or exports_banned(other, day):
+                continue
+            seat = get_city(conn, other["capital_city_id"])
+            spare = seat["resources"].get("Food", 0) - get_target_stock("Food", seat)
+            if spare > 0:
+                sellers.append((spare, other, seat))
+        sellers.sort(key=lambda entry: -entry[0])
+
+        for spare, seller, seat in sellers:
+            if wanted <= 0 or budget <= 0:
+                break
+            price = get_price("Food", seat)
+            if price <= 0:
+                continue
+            amount = int(min(wanted, spare, budget / (price * duty_rate(seller, republic))) * 100) / 100   # never over budget
+            if amount <= 0:
+                continue
+            paid, received = duties(seller, republic, amount * price)
+            if not spend_treasury(conn, republic["id"], paid):
+                break
+            add_treasury(conn, seller["id"], received)
+            seat["resources"]["Food"] = round(seat["resources"]["Food"] - amount, 2)
+            save_city(conn, seat)
+            adjust_kingdom_favor(conn, republic["id"], seller["id"], TRADE_FAVOR_GAIN)
+            adjust_kingdom_favor(conn, seller["id"], republic["id"], TRADE_FAVOR_LOSS)
+            dispatch_caravan(conn, seat["id"], republic["capital_city_id"], "Food", amount, republic["id"], seller["id"])
+            create_event(conn, "Grain Office",
+                         f"The grain office of {republic['name']} bought {amount:.0f} Food from {seller['name']} "
+                         f"for {paid:.0f} gold, to fill the republic's granaries.",
+                         kingdom_id=republic["id"])
+            bought.append((republic["name"], seller["name"], amount, paid))
+            wanted -= amount
+            budget -= paid
+
+    conn.commit()
+    return bought

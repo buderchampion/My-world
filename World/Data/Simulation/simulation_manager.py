@@ -393,6 +393,11 @@ class SimulationManager:
         from Data.Government.rebellion import consider_rebellions
         consider_rebellions(self.conn, self.world_id)
 
+        # Republics' grain offices top up their reserves from abroad
+        # (Data.Government.republic).
+        from Data.Government.republic import run_grain_offices
+        run_grain_offices(self.conn, self.world_id)
+
         # Each kingdom's Loyalty, Unrest and Stability, from all of the above
         # (Data.Government.health).
         from Data.Government.health import update_health

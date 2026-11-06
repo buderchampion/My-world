@@ -68,7 +68,8 @@ def ensure_provinces(conn, world_id):
         for village in (c for c in cities if c["type"] == "Village"):
             if not centers:
                 break
-            nearest = min(centers, key=lambda c: (c["map_x"] - village["map_x"]) ** 2 + (c["map_y"] - village["map_y"]) ** 2)
+            # nearest, and on an exact tie the lowest city id -- the same rule everywhere
+            nearest = min(centers, key=lambda c: ((c["map_x"] - village["map_x"]) ** 2 + (c["map_y"] - village["map_y"]) ** 2, c["id"]))
             conn.execute("UPDATE cities SET province_id = ? WHERE id = ?", (province_of_seat.get(nearest["id"]), village["id"]))
 
     conn.commit()
