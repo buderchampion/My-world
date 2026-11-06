@@ -8,6 +8,8 @@ TEMPLATES_FILE = Path(__file__).resolve().parent / "ChronicleTemplates.json"
 # ChronicleTemplates.json has at least one template for each of these, so
 # deleting or renaming one by accident is caught before it can crash a run.
 REQUIRED_TEMPLATE_KEYS = (
+    "Regency Began",
+    "Came of Age",
     "Alliance Formed",
     "Alliance Ended (cooled)",
     "Alliance Ended (spurned)",
@@ -41,7 +43,7 @@ REQUIRED_TEMPLATE_KEYS = (
 TEMPLATE_FIELDS = (
     "When", "when", "kingdom", "other",
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
-    "city", "sovereign",
+    "city", "sovereign", "regent",
 )
 
 # Which wording a monarch's death gets, by the cause death_event was given.

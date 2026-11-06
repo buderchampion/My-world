@@ -354,14 +354,38 @@ FEATURES = [
         "name": "Provinces: counties held by hereditary lords, villages under the nearest seat or the crown",
         "tables": ["provinces"],
         "functions": {
-            "Data/Government/provinces.py": ["ensure_provinces", "choose_heir", "install_lord", "seat_province"],
+            "Data/Government/provinces.py": ["ensure_provinces", "install_lord", "seat_province"],
         },
         "wired": {
-            "Data/Government/government.py": ["choose_heir(", "install_lord("],
+            "Data/Government/government.py": ["inherit_county(", "install_lord("],
             "Data/World/world_generator.py": ["ensure_provinces("],
             "run_world.py": ["ensure_provinces("],
             "Data/Infrastructure/migration.py": ['"Countess"'],
             "Data/Database/database.py": ['"province_id"'],
+        },
+    },
+    {
+        "name": "Succession: crowns and counties stay in the family; child rulers get regents",
+        "functions": {
+            "Data/Government/succession.py": [
+                "line_of_succession", "choose_heir", "choose_regent", "inherit_crown", "inherit_county",
+                "vacate_seats", "check_regencies",
+            ],
+        },
+        "wired": {
+            "Data/Government/government.py": ["inherit_crown("],
+            "Data/Simulation/simulation_manager.py": ["check_regencies(self.conn"],
+            "Data/Database/database.py": ['"regent_id"'],
+        },
+    },
+    {
+        "name": "Feudal duties: lords keep a share of their county's taxes; their loyalty drifts with how they are treated",
+        "functions": {"Data/Government/feudal.py": ["lord_cut", "pay_lords", "loyalty_target", "update_loyalty"]},
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["pay_lords(self.conn", "update_loyalty(self.conn"],
+            "Data/World/harvest.py": ["lords_grain"],
+            "Data/Combat/combat.py": ["last_war_won"],
+            "Data/Database/database.py": ['"loyalty"', '"last_war_won"'],
         },
     },
     {
@@ -1162,13 +1186,15 @@ def _smoke_body(r, holder):
                 assert abs(level - expected) < 1e-6, f"after its harvest a kingdom's food prices are {level}x, not {expected}x"
 
             farmland = {r["id"]: r["farmland"] for r in regions}
+            from Data.Government.feudal import LORD_SHARE
             tax = {}
             for v in villages:
                 reaped = v["households"] * H.HARVEST_PER_HOUSEHOLD * farmland[v["region_id"]] * weather[v["region_id"]]
-                tax[v["kingdom_id"]] = tax.get(v["kingdom_id"], 0) + reaped * H.GRAIN_TAX_SHARE
+                crowns_share = 1.0 if v["province_id"] is None else 1.0 - LORD_SHARE   # counties' lords keep theirs
+                tax[v["kingdom_id"]] = tax.get(v["kingdom_id"], 0) + reaped * H.GRAIN_TAX_SHARE * crowns_share
             for kingdom_id, expected in tax.items():
                 got = food(capitals[kingdom_id]) - before[kingdom_id]
-                assert abs(got - expected) < 1, f"a capital received {got:.0f} Food in grain tax, not {expected:.0f} (10% of its villages' harvest)"
+                assert abs(got - expected) < 1, f"a capital received {got:.0f} Food in grain tax, not {expected:.0f} (the crown's share of its villages' 10% grain tax)"
 
             village = {"households": 10, "household_store": 0.0, "hungry_days": 0, "resources": {"Food": 20.0}}
             assert H.feed_households(village) == 30 and village["hungry_days"] == 1, \
@@ -1660,6 +1686,15 @@ def _smoke_body(r, holder):
         assert unchanged <= total * 0.1, f"the day tick did not sell people their food ({unchanged} of {total} untouched)"
 
     run_step(r, "the day tick sells every household its food", day_tick_sells_food)
+
+    def day_tick_pays_lords():
+        counties = conn.execute(
+            "SELECT COUNT(*), COALESCE(SUM(p.treasury), 0) FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ?",
+            (world_id,)).fetchone()
+        if counties[0]:
+            assert counties[1] > 0, "the day tick paid the lords nothing of their counties' taxes"
+
+    run_step(r, "the day tick pays each lord their share of the county's taxes", day_tick_pays_lords)
     def prepare_starving_village():
         # set up right before the month tick, so no other step can feed it first
         # leave a starving village for the game's own month tick to deal with (checked after that tick)
@@ -1748,6 +1783,67 @@ def _smoke_body(r, holder):
         assert get_npc(conn, elder)["city_id"] == province["seat_city_id"], "the heir did not move to the seat"
 
     run_step(r, "every county has its lord; a lord's eldest grown child inherits and the house goes on", lords_inherit)
+
+    def crown_stays_in_family():
+        import Data.Government.succession as S
+        from Data.Government.government import assign_city_ruler
+        from Data.Database.repository import get_city, get_kingdom
+
+        kingdom = get_kingdom(conn, kingdoms[-1]["id"])
+        monarch = conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (kingdom["capital"],)).fetchone()[0]
+        child = conn.execute(
+            "SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND id != ? ORDER BY id LIMIT 1 OFFSET 7", (monarch,)
+        ).fetchone()[0]
+        conn.execute("UPDATE npcs SET age = 9, parent_a_id = ? WHERE id = ?", (monarch, child))
+        conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (monarch,))
+        conn.commit()
+
+        crowned = assign_city_ruler(conn, get_city(conn, kingdom["capital"]))
+        row = conn.execute("SELECT ruler_id, regent_id FROM kingdoms WHERE id = ?", (kingdom["id"],)).fetchone()
+        assert crowned and crowned["id"] == child, "the dead monarch's only child did not inherit the crown"
+        assert row["ruler_id"] == child, "the kingdom's record does not name its new monarch"
+        assert row["regent_id"] is not None, "a 9-year-old monarch was given no regent"
+        assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Regency'").fetchone()[0] > 0, \
+            "the regency was not chronicled"
+
+        conn.execute("UPDATE npcs SET age = ? WHERE id = ?", (S.ADULT_AGE, child))
+        conn.commit()
+        S.check_regencies(conn, world_id)
+        assert conn.execute("SELECT regent_id FROM kingdoms WHERE id = ?", (kingdom["id"],)).fetchone()[0] is None, \
+            "the regency did not end when the young monarch came of age"
+
+    run_step(r, "a dead monarch's child inherits the crown, with a regent until they come of age", crown_stays_in_family)
+
+    def lords_loyalty():
+        import Data.Government.feudal as F
+        moved = conn.execute(
+            "SELECT COUNT(*) FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ? AND p.loyalty != ?",
+            (world_id, F.LOYALTY_START)).fetchone()[0]
+        has_counties = conn.execute(
+            "SELECT COUNT(*) FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ?", (world_id,)).fetchone()[0]
+        assert moved or not has_counties, "the month ticks never moved any lord's loyalty"
+
+        province = dict(conn.execute(
+            "SELECT p.* FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ? LIMIT 1", (world_id,)).fetchone())
+        kingdom = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (province["kingdom_id"],)).fetchone())
+        calm = dict(kingdom, price_level=1.0, last_war_year=None)
+        base, _ = F.loyalty_target(conn, province, calm, 1)
+        worse, _ = F.loyalty_target(conn, province, dict(calm, price_level=3.0, last_war_year=1, last_war_won=0), 1)
+        assert abs((base - worse) - (2 * F.BREAD_PER_STEP - F.WAR_LOST)) < 0.01, \
+            f"dear bread and a lost war should cost a lord {2 * F.BREAD_PER_STEP - F.WAR_LOST} loyalty, not {base - worse}"
+
+        conn.execute("UPDATE kingdoms SET price_level = 9.0 WHERE id = ?", (kingdom["id"],))
+        conn.execute("UPDATE provinces SET loyalty = ? WHERE id = ?", (F.RESTLESS_BELOW + 0.1, province["id"]))
+        conn.commit()
+        try:
+            F.update_loyalty(conn, world_id)
+            assert conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Restless Lord'").fetchone()[0] > 0, \
+                "a lord pushed below the restless line was not logged"
+        finally:
+            conn.execute("UPDATE kingdoms SET price_level = ? WHERE id = ?", (kingdom["price_level"], kingdom["id"]))
+            conn.commit()
+
+    run_step(r, "lords' loyalty follows how the crown treats them, and the restless are logged", lords_loyalty)
 
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor

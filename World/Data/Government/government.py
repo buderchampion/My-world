@@ -19,18 +19,23 @@ def assign_city_ruler(conn, city):
     crown appoint a new lord from the town's notables.
     """
 
-    from Data.Government.provinces import seat_province, choose_heir, install_lord
+    from Data.Government.provinces import seat_province, install_lord
+    from Data.Government.succession import inherit_crown, inherit_county
     from Data.Database.repository import get_npc
 
-    province = seat_province(conn, city["id"]) if city["type"] != "Capital" else None
+    is_capital = city["type"] == "Capital"
+    province = None if is_capital else seat_province(conn, city["id"])
 
-    if province and city.get("ruler"):
+    # A crown or county whose holder has died stays in the family if it can
+    # (Data.Government.succession). A throne emptied by revolt has no previous
+    # holder recorded here, so the people choose.
+    if (is_capital or province) and city.get("ruler"):
         previous = get_npc(conn, city["ruler"])
-        heir = choose_heir(conn, previous["id"]) if previous else None
-        if heir:
-            lord = install_lord(conn, province, city, heir, inherited_from=previous)
-            city["ruler"] = lord["id"]
-            return lord
+        if previous and not previous["alive"]:
+            heir = inherit_crown(conn, city, previous) if is_capital else inherit_county(conn, province, city, previous)
+            if heir:
+                city["ruler"] = heir["id"]
+                return heir
 
     npcs = get_city_npcs(conn, city["id"])
 
@@ -58,6 +63,8 @@ def assign_city_ruler(conn, city):
 
     if city["type"] == "Capital":
         ruler["title"] = "King" if ruler["gender"] == "Male" else "Queen"
+        # a new dynasty: no regency carries over from the old one
+        conn.execute("UPDATE kingdoms SET regent_id = NULL WHERE id = ?", (city["kingdom"],))
     else:
         ruler["title"] = "Mayor"
 

@@ -171,8 +171,11 @@ class SimulationManager:
             cities = get_kingdom_cities(self.conn, kingdom["id"])
             tax_collected = 0.0
             military_npcs = []
+            lords_takings = {}         # province id -> the lord's cut of today's taxes
 
             for city in cities:
+
+                city_taxes_before = tax_collected
 
                 simulate_city_economy_day(city)
 
@@ -247,6 +250,14 @@ class SimulationManager:
                         )
                         tax_collected += visitor_revenue
 
+                # A county's lord keeps their share of what its towns and villages
+                # paid today; the rest goes up to the crown (Data.Government.feudal).
+                if city.get("province_id"):
+                    from Data.Government.feudal import lord_cut
+                    cut = lord_cut(tax_collected - city_taxes_before)
+                    tax_collected -= cut
+                    lords_takings[city["province_id"]] = lords_takings.get(city["province_id"], 0.0) + cut
+
                 for building in city.get("buildings", []):
                     if building["type"] == "Bandit Camp" and building["workers"]:
                         if random.random() < RAID_CHANCE_PER_DAY:
@@ -254,6 +265,9 @@ class SimulationManager:
 
             if tax_collected > 0:
                 add_treasury(self.conn, kingdom["id"], round(tax_collected, 2))
+            if lords_takings:
+                from Data.Government.feudal import pay_lords
+                pay_lords(self.conn, lords_takings)
 
             capital_city = next((c for c in cities if c["id"] == kingdom.get("capital")), None)
             if capital_city is not None:
@@ -363,6 +377,16 @@ class SimulationManager:
                                 self.conn, self.world_id, kingdom,
                                 get_npc(self.conn, kingdom["ruler"]), kind, predecessor=previous
                             )
+
+        # Child rulers who come of age rule in their own right; dead regents
+        # are replaced (Data.Government.succession).
+        from Data.Government.succession import check_regencies
+        check_regencies(self.conn, self.world_id)
+
+        # Each lord's loyalty to the crown drifts with how they are treated
+        # (Data.Government.feudal).
+        from Data.Government.feudal import update_loyalty
+        update_loyalty(self.conn, self.world_id)
 
         from Data.Infrastructure.travel import consider_tourism
         consider_tourism(self.conn, self.world_id)

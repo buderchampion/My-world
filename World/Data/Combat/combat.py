@@ -277,6 +277,13 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
     attacker_wins = random.random() < (attack_power / total_power)
 
+    # each side remembers its last war (lords judge the crown by it: Data.Government.feudal)
+    from Data.History.chronicle import current_date
+    war_year, _ = current_date(conn, attacker_kingdom["world_id"])
+    conn.executemany("UPDATE kingdoms SET last_war_year = ?, last_war_won = ? WHERE id = ?",
+                     [(war_year, int(attacker_wins), attacker_kingdom["id"]),
+                      (war_year, int(not attacker_wins), defender_kingdom["id"])])
+
     attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins)
     defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins)
 

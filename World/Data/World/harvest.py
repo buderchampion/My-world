@@ -128,7 +128,8 @@ def run_harvest(conn, world_id, year):
     summary = {}
     villages = conn.execute(
         """
-        SELECT c.id, c.kingdom_id, c.region_id, c.households, c.household_store, k.capital_city_id, k.name kingdom
+        SELECT c.id, c.kingdom_id, c.region_id, c.households, c.household_store, k.capital_city_id, k.name kingdom,
+               (SELECT p.seat_city_id FROM provinces p WHERE p.id = c.province_id) seat_id
         FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
         WHERE k.world_id = ? AND c.households > 0 AND c.region_id IS NOT NULL
         """, (world_id,)
@@ -147,7 +148,12 @@ def run_harvest(conn, world_id, year):
         surplus = left - kept
 
         conn.execute("UPDATE cities SET household_store = household_store + ? WHERE id = ?", (round(kept, 2), v["id"]))
-        _add_food(conn, v["capital_city_id"], tax)
+        # a county's lord keeps their share of its grain tax at the seat; the
+        # rest -- and all of the crown lands' -- goes to the capital
+        from Data.Government.feudal import lord_cut
+        lords_grain = lord_cut(tax) if v["seat_id"] else 0.0
+        _add_food(conn, v["seat_id"], lords_grain)
+        _add_food(conn, v["capital_city_id"], tax - lords_grain)
         _add_food(conn, v["id"], surplus)
 
         s = summary.setdefault(v["kingdom_id"], {"kingdom": v["kingdom"], "reaped": 0.0, "tax": 0.0, "surplus": 0.0,

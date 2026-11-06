@@ -224,7 +224,10 @@ CREATE TABLE IF NOT EXISTS provinces (
     name          TEXT NOT NULL,                        -- "County of Blackbridge"
     seat_city_id  INTEGER NOT NULL REFERENCES cities(id),
     lord_id       INTEGER REFERENCES npcs(id),          -- the Count or Countess (NULL until one is installed)
-    house         TEXT                                  -- the ruling family: "House of Aldric"
+    house         TEXT,                                 -- the ruling family: "House of Aldric"
+    regent_id     INTEGER REFERENCES npcs(id),          -- who rules for a lord under 16 (Data.Government.succession)
+    loyalty       REAL NOT NULL DEFAULT 70,             -- to the crown, 0-100 (Data.Government.feudal)
+    treasury      REAL NOT NULL DEFAULT 0               -- the lord's own purse: their share of the county's taxes
 );
 
 CREATE TABLE IF NOT EXISTS harvests (

@@ -64,6 +64,16 @@ def init_database():
         "last_civil_war_year": "INTEGER",
         "price_level": "REAL NOT NULL DEFAULT 1",
         "bad_harvest_years": "INTEGER NOT NULL DEFAULT 0",
+        "regent_id": "INTEGER REFERENCES npcs(id)",
+        "last_war_year": "INTEGER",
+        "last_war_won": "INTEGER",
+    })
+
+    # who rules for a child lord (Data.Government.succession)
+    _add_missing_columns(connection, "provinces", {
+        "regent_id": "INTEGER REFERENCES npcs(id)",
+        "loyalty": "REAL NOT NULL DEFAULT 70",
+        "treasury": "REAL NOT NULL DEFAULT 0",
     })
     
     _add_missing_columns(connection, "buildings", {

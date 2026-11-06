@@ -3,13 +3,9 @@ import random
 # Provinces. A kingdom is not ruled from its capital alone: every town other
 # than the capital is the seat of a County, held by a hereditary lord -- a
 # Count or Countess -- with the villages nearest it as its lands. The villages
-# nearest the capital are the crown's own lands (province_id is NULL). When a
-# lord dies their heir inherits: the eldest living child old enough to rule,
-# else the surviving spouse; failing both, the crown appoints a new lord from
-# the town's notables, and a new house begins.
-
-# An heir must be at least this old to inherit.
-HEIR_MIN_AGE = 16
+# nearest the capital are the crown's own lands (province_id is NULL). Who
+# inherits when a lord dies, and regencies for child lords, are
+# Data.Government.succession.
 
 LORD_TITLES = ("Count", "Countess")
 
@@ -76,44 +72,20 @@ def ensure_provinces(conn, world_id):
     return made
 
 
-def choose_heir(conn, lord_id):
+def install_lord(conn, province, seat_city, lord, inherited_from=None, regent=None):
     """
-    Who inherits from a lord: their eldest living child old enough to rule
-    who holds no title already, else their living spouse (if untitled), else
-    None. Returns the heir as an NPC dict.
-    """
-
-    from Data.Database.repository import get_npc
-
-    child = conn.execute(
-        """
-        SELECT id FROM npcs WHERE alive = 1 AND age >= ? AND title IS NULL
-        AND (parent_a_id = ? OR parent_b_id = ?)
-        ORDER BY age DESC, id LIMIT 1
-        """, (HEIR_MIN_AGE, lord_id, lord_id)
-    ).fetchone()
-    if child:
-        return get_npc(conn, child["id"])
-
-    lord = get_npc(conn, lord_id)
-    if lord and lord["spouse"]:
-        spouse = get_npc(conn, lord["spouse"])
-        if spouse and spouse["alive"] and spouse["title"] is None:
-            return spouse
-
-    return None
-
-
-def install_lord(conn, province, seat_city, lord, inherited_from=None):
-    """
-    Makes `lord` the Count or Countess of a province: titled, living at the
-    seat (moved there if they lived elsewhere), recorded as the province's
-    lord and the seat's ruler, and logged. A lord who did not inherit founds
-    a new house. Returns the lord.
+    Makes `lord` the Count or Countess of a province: any city they ruled
+    before is given up (Data.Government.succession.vacate_seats), they move
+    to the seat, take the title, and are recorded as its lord and the seat's
+    ruler. A child lord gets a regent. An heir carries on the house; anyone
+    else founds a new one. Logged. Returns the lord.
     """
 
     from Data.Database.repository import save_npc, create_event, get_npc
     from Data.Infrastructure.migration import relocate_npc
+    from Data.Government.succession import vacate_seats, relation_word
+
+    vacate_seats(conn, lord, seat_city["id"])
 
     if lord["city_id"] != seat_city["id"]:
         relocate_npc(conn, lord["id"], seat_city["id"])
@@ -123,19 +95,27 @@ def install_lord(conn, province, seat_city, lord, inherited_from=None):
     save_npc(conn, lord)
 
     house = province["house"] if inherited_from and province["house"] else f"House of {lord['name']}"
-    conn.execute("UPDATE provinces SET lord_id = ?, house = ? WHERE id = ?", (lord["id"], house, province["id"]))
+    conn.execute("UPDATE provinces SET lord_id = ?, house = ?, regent_id = ? WHERE id = ?",
+                 (lord["id"], house, regent["id"] if regent else None, province["id"]))
+    if not inherited_from:          # a new house starts afresh with the crown; an heir inherits the family's standing
+        from Data.Government.feudal import LOYALTY_START
+        conn.execute("UPDATE provinces SET loyalty = ? WHERE id = ?", (LOYALTY_START, province["id"]))
     conn.execute("UPDATE cities SET ruler_id = ? WHERE id = ?", (lord["id"], seat_city["id"]))
 
     if inherited_from:
-        relation = "child" if lord["id"] in [r[0] for r in conn.execute(
-            "SELECT id FROM npcs WHERE parent_a_id = ? OR parent_b_id = ?", (inherited_from["id"], inherited_from["id"]))] else "spouse"
+        how = (f"on the death of {inherited_from['name']}, their {relation_word(conn, lord['id'], inherited_from['id'])}"
+               if not inherited_from["alive"] else f"when {inherited_from['name']}, their {relation_word(conn, lord['id'], inherited_from['id'])}, took the throne")
         create_event(conn, "Inheritance",
-                     f"{lord['name']} inherited the {province['name']} on the death of {inherited_from['name']}, "
-                     f"their {'parent' if relation == 'child' else 'spouse'}, and now rules as {lord['title']} ({house}).",
+                     f"{lord['name']} inherited the {province['name']} {how}, and now rules as {lord['title']} ({house}).",
                      city_id=seat_city["id"], kingdom_id=province["kingdom_id"])
     else:
         create_event(conn, "Investiture",
                      f"The crown granted the {province['name']} to {lord['name']}, who rules as {lord['title']} and founds the {house}.",
+                     city_id=seat_city["id"], kingdom_id=province["kingdom_id"])
+
+    if regent:
+        create_event(conn, "Regency",
+                     f"{lord['name']} is only {lord['age']}, so {regent['name']} rules the {province['name']} as regent until they come of age.",
                      city_id=seat_city["id"], kingdom_id=province["kingdom_id"])
 
     conn.commit()
