@@ -21,8 +21,12 @@ def generate_world():
 
     colors = random.sample(KINGDOM_COLORS, number_of_kingdoms)
 
-    for color in colors:
-        generate_kingdom(conn, world["id"], color)
+    # about a quarter of the kingdoms are merchant republics (Data.Government.republic)
+    from Data.Government.republic import republic_count
+    republics = set(random.sample(range(number_of_kingdoms), republic_count(number_of_kingdoms)))
+
+    for index, color in enumerate(colors):
+        generate_kingdom(conn, world["id"], color, "Republic" if index in republics else "Crown")
 
     world["kingdoms"] = [
         {"id": k["id"], "name": k["name"]} for k in get_world_kingdoms(conn, world["id"])

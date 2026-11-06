@@ -8,6 +8,9 @@ TEMPLATES_FILE = Path(__file__).resolve().parent / "ChronicleTemplates.json"
 # ChronicleTemplates.json has at least one template for each of these, so
 # deleting or renaming one by accident is caught before it can crash a run.
 REQUIRED_TEMPLATE_KEYS = (
+    "Election (founding)",
+    "Election (succession)",
+    "Election (after overthrow)",
     "Edict (lower taxes)",
     "Edict (raise taxes)",
     "Edict (open the granary)",
@@ -67,6 +70,13 @@ CORONATION_TEMPLATES = {
     "founding": "Coronation (founding)",
     "succession": "Coronation (succession)",
     "overthrow": "Coronation (after overthrow)",
+}
+
+# A republic elects its Doge rather than crowning a monarch (Data.Government.republic).
+ELECTION_TEMPLATES = {
+    "founding": "Election (founding)",
+    "succession": "Election (succession)",
+    "overthrow": "Election (after overthrow)",
 }
 
 
@@ -269,8 +279,14 @@ def record_coronation(conn, world_id, kingdom, ruler, kind, predecessor=None):
         "possessive": _possessive(ruler),
     }
 
+    republic = kingdom.get("type") == "Republic"
+    if republic:
+        source = conn.execute(
+            "SELECT id FROM events WHERE type = 'Election' AND kingdom_id = ? ORDER BY id DESC LIMIT 1", (kingdom["id"],)
+        ).fetchone()
     return write_entry(
-        conn, kingdom["id"], "Coronation", CORONATION_TEMPLATES[kind], year, season, fields,
+        conn, kingdom["id"], "Election" if republic else "Coronation",
+        (ELECTION_TEMPLATES if republic else CORONATION_TEMPLATES)[kind], year, season, fields,
         source["id"] if source else None, seed_parts=(ruler["id"],)
     )
 

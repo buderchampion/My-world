@@ -143,5 +143,20 @@
         "{When}, the {nature} {title} {ruler} of {kingdom} put the realm under martial law, and soldiers kept every street.",
         "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, proclaimed martial law to hold the restless realm.",
         "{When}, {kingdom}'s {nature} {title}, {ruler}, set soldiers over the towns and ruled by the sword for a season."
+    ],
+    "Election (founding)": [
+        "{When}, the Great Council of {kingdom} gathered for the first time and elected {ruler} as Doge, to rule the republic for life.",
+        "{When}, the merchants and magnates of {kingdom} chose {ruler} as their first Doge.",
+        "{When}, {kingdom} named its first Doge: {ruler}, elected by the Great Council."
+    ],
+    "Election (succession)": [
+        "{When}, after the death of {predecessor}, the Great Council of {kingdom} elected {ruler} as Doge.",
+        "{When}, {kingdom}'s Great Council chose {ruler} to succeed {predecessor} as Doge, for life.",
+        "{When}, the Great Council of {kingdom} met to replace the late {predecessor}, and raised {ruler} to the Dogeship."
+    ],
+    "Election (after overthrow)": [
+        "{When}, with {predecessor} cast down, the Great Council of {kingdom} elected {ruler} as Doge.",
+        "{When}, after the fall of {predecessor}, {kingdom}'s Great Council gave the Dogeship to {ruler}.",
+        "{When}, the Great Council of {kingdom}, freed of {predecessor}, chose {ruler} as Doge."
     ]
 }

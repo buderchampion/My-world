@@ -76,7 +76,7 @@ def choose_site(regions, candidates, prefer_river=False, best=False):
     return random.choices([point for _, point in scored], weights=weights, k=1)[0]
 
 
-def plan_villages(urban_people, village_farmland):
+def plan_villages(urban_people, village_farmland, rural_share=RURAL_SHARE):
     """
     Given the kingdom's town-dwellers and the farmland at each village's site,
     returns [(households, named villagers)] per village, sized so about
@@ -84,7 +84,7 @@ def plan_villages(urban_people, village_farmland):
     holds bigger villages.
     """
 
-    rural_target = urban_people * RURAL_SHARE / (1 - RURAL_SHARE)
+    rural_target = urban_people * rural_share / (1 - rural_share)
     weights = [max(0.05, f) ** VILLAGE_LAND_POWER for f in village_farmland]
     total_weight = sum(weights)
 

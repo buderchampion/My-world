@@ -58,9 +58,14 @@ def random_point_near(center_x, center_y, max_radius):
 BIAS_RANGE = (0.5, 2.0)
 
 
-def generate_kingdom(conn, world_id, color="#808080"):
+def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
 
     kingdom = create_kingdom(conn, world_id, generate_kingdom_name(), color)
+
+    # a Crown or a merchant Republic (Data.Government.republic)
+    conn.execute("UPDATE kingdoms SET type = ? WHERE id = ?", (kingdom_type, kingdom["id"]))
+    from Data.Government.republic import REPUBLIC_RURAL_SHARE
+    rural_share = REPUBLIC_RURAL_SHARE if kingdom_type == "Republic" else None
 
     from Data.Buildings.building_generator import CHAIN_CATEGORIES
     biases = {category: random.uniform(*BIAS_RANGE) for category in CHAIN_CATEGORIES}
@@ -110,7 +115,8 @@ def generate_kingdom(conn, world_id, color="#808080"):
         # Villages hold most of the kingdom's people as households, bigger on
         # better land, each with its named villagers as individual NPCs.
         plan = countryside.plan_villages(
-            town_dwellers, [countryside.region_at(regions, x, y)["farmland"] for x, y in village_sites]
+            town_dwellers, [countryside.region_at(regions, x, y)["farmland"] for x, y in village_sites],
+            **({"rural_share": rural_share} if rural_share else {})
         )
         for (x, y), (households, named) in zip(village_sites, plan):
             village = generate_city(conn, kingdom["id"], "Village", x, y, biases, population=named)

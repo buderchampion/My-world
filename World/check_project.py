@@ -424,6 +424,18 @@ FEATURES = [
         },
     },
     {
+        "name": "Merchant republics: a quarter of new kingdoms; Doges elected for life; no counties; a smaller countryside",
+        "functions": {"Data/Government/republic.py": ["elect_doge", "republic_count", "is_republic"]},
+        "wired": {
+            "Data/Government/government.py": ["elect_doge("],
+            "Data/World/world_generator.py": ["republic_count("],
+            "Data/Kingdoms/kingdom_generator.py": ["REPUBLIC_RURAL_SHARE"],
+            "Data/Government/provinces.py": ['kingdom["type"] == "Republic"'],
+            "Data/History/chronicle.py": ["ELECTION_TEMPLATES"],
+            "Data/Database/database.py": ['"type"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1117,7 +1129,28 @@ def _smoke_body(r, holder):
             neighbors = R.region_neighbors(regs)
             by_id = {g["id"]: g for g in regs}
             gap = statistics.mean(abs(by_id[a]["elevation"] - by_id[b]["elevation"]) for a in neighbors for b in neighbors[a])
-            assert gap < 0.26, f"neighboring regions do not resemble each other (height gap {gap:.2f}; random land is about 0.33)"
+            # the world's own land: a loose sanity limit (real land almost never passes 0.27,
+            # random land is about 0.34) -- random worlds have long tails, so this cannot be strict
+            assert gap < 0.30, f"neighboring regions do not resemble each other (height gap {gap:.2f}; random land is about 0.34)"
+
+            # the smoothing itself, strictly: land made from a fixed seed always comes out the same
+            # (0.18 smoothed, 0.28 with one pass, 0.35 with none), so this can never fail by chance
+            import random as random_module, sqlite3 as sqlite_module
+            state = random_module.getstate()
+            try:
+                scratch = sqlite_module.connect(':memory:')
+                scratch.row_factory = sqlite_module.Row
+                scratch.executescript(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data', 'Database', 'schema.sql')).read())
+                scratch.execute("INSERT INTO worlds (id, name) VALUES (1, 'w')")
+                random_module.seed(2024)
+                R.generate_regions(scratch, 1, 2000, 2000)
+                fixed = R.get_regions(scratch, 1)
+                fixed_neighbors = R.region_neighbors(fixed)
+                fixed_by = {g['id']: g for g in fixed}
+                fixed_gap = statistics.mean(abs(fixed_by[a]['elevation'] - fixed_by[b]['elevation']) for a in fixed_neighbors for b in fixed_neighbors[a])
+            finally:
+                random_module.setstate(state)
+            assert fixed_gap < 0.23, f"the land is not smoothed as it should be (fixed-seed height gap {fixed_gap:.3f}, should be about 0.18)"
 
             rivers = [g for g in regs if g["has_river"]]
             stranded = [g["name"] for g in rivers if not any(by_id[n]["has_river"] for n in neighbors[g["id"]])]
@@ -1139,11 +1172,14 @@ def _smoke_body(r, holder):
                 """SELECT c.*, r.farmland, r.terrain FROM cities c JOIN regions r ON r.id = c.region_id
                    JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?""", (world_id,))]
 
+            from Data.Government.republic import REPUBLIC_RURAL_SHARE
+            types = {row["id"]: row["type"] for row in conn.execute("SELECT id, type FROM kingdoms WHERE world_id = ?", (world_id,))}
             for kingdom_id in {c["kingdom_id"] for c in cities}:
                 mine = [c for c in cities if c["kingdom_id"] == kingdom_id]
                 rural = sum(C.total_people(c) for c in mine if c["type"] == "Village")
                 share = rural / sum(C.total_people(c) for c in mine)
-                assert 0.66 <= share <= 0.74, f"a kingdom has {share:.0%} of its people in villages, not about {C.RURAL_SHARE:.0%}"
+                want = REPUBLIC_RURAL_SHARE if types[kingdom_id] == "Republic" else C.RURAL_SHARE
+                assert abs(share - want) <= 0.04, f"a {types[kingdom_id]} has {share:.0%} of its people in villages, not about {want:.0%}"
 
             villages = [c for c in cities if c["type"] == "Village"]
             assert villages and all(v["households"] >= C.MIN_HOUSEHOLDS for v in villages), "a village has too few households (or none)"
@@ -1181,7 +1217,11 @@ def _smoke_body(r, holder):
         run_step(r, "every NPC has a personality, and children take after their parents", everyone_has_a_personality)
 
         def counties_made():
-            for kingdom in conn.execute("SELECT id, capital_city_id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+            for kingdom in conn.execute("SELECT id, capital_city_id, type FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+                if kingdom["type"] == "Republic":
+                    assert not conn.execute("SELECT 1 FROM provinces WHERE kingdom_id = ?", (kingdom["id"],)).fetchone(), \
+                        "a republic was given counties"
+                    continue
                 cities = [dict(c) for c in conn.execute("SELECT * FROM cities WHERE kingdom_id = ?", (kingdom["id"],))]
                 seats = {row["seat_city_id"]: row["id"] for row in conn.execute(
                     "SELECT id, seat_city_id FROM provinces WHERE kingdom_id = ?", (kingdom["id"],))}
@@ -1793,11 +1833,13 @@ def _smoke_body(r, holder):
         total = conn.execute("SELECT COUNT(*) FROM cities").fetchone()[0]
         assert saved >= total * 0.9, f"only {saved} of {total} cities have a saved ruler after the monthly tick"
 
+        # a crown's first ruler is crowned; a republic's first Doge is elected
         founding = conn.execute(
-            "SELECT kingdom_id, COUNT(*) n FROM chronicle_entries WHERE event_type = 'Coronation' GROUP BY kingdom_id"
+            """SELECT kingdom_id, COUNT(*) n FROM chronicle_entries
+               WHERE event_type IN ('Coronation', 'Election') GROUP BY kingdom_id"""
         ).fetchall()
         assert len(founding) == len(kingdoms) and all(row["n"] == 1 for row in founding), \
-            "every kingdom's chronicle should open with exactly one coronation, its founding monarch"
+            "every kingdom's chronicle should open with exactly one coronation or election, its founding ruler"
 
         before = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Coronation'").fetchone()[0]
         entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
@@ -1808,6 +1850,19 @@ def _smoke_body(r, holder):
         assert entries_after == entries_before, "a quiet month added chronicle entries (the founding coronation is being written again)"
 
     run_step(r, "rulers are saved, each realm's founding monarch is chronicled once", rulers_saved)
+
+    def republics_elect():
+        from Data.Government.republic import republic_count
+        kingdoms = conn.execute("SELECT id, type, ruler_id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall()
+        republics = [k for k in kingdoms if k["type"] == "Republic"]
+        assert len(republics) == republic_count(len(kingdoms)), f"{len(republics)} republics among {len(kingdoms)} kingdoms"
+        for k in republics:
+            title = conn.execute("SELECT title FROM npcs WHERE id = ?", (k["ruler_id"],)).fetchone() if k["ruler_id"] else None
+            assert title and title[0] == "Doge", "a republic's head is not an elected Doge"
+            assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE kingdom_id = ? AND event_type = 'Election'",
+                                (k["id"],)).fetchone()[0] >= 1, "a republic's election was not chronicled"
+
+    run_step(r, "a quarter of the kingdoms are republics whose Great Councils elect Doges", republics_elect)
 
     def lords_inherit():
         import Data.Government.provinces as P
@@ -1849,7 +1904,9 @@ def _smoke_body(r, holder):
         from Data.Government.government import assign_city_ruler
         from Data.Database.repository import get_city, get_kingdom
 
-        kingdom = get_kingdom(conn, kingdoms[-1]["id"])
+        crown_id = conn.execute(           # a crown: a republic's Doge has no heirs
+            "SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id DESC LIMIT 1", (world_id,)).fetchone()[0]
+        kingdom = get_kingdom(conn, crown_id)
         monarch = conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (kingdom["capital"],)).fetchone()[0]
         child = conn.execute(
             "SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND id != ? ORDER BY id LIMIT 1 OFFSET 7", (monarch,)
@@ -1969,11 +2026,16 @@ def _smoke_body(r, holder):
         saved_kingdom = dict(kingdom)
         saved_traits = tuple(conn.execute("SELECT generosity, mercy, boldness FROM npcs WHERE id = ?", (ruler,)).fetchone())
         saved_lords = conn.execute("SELECT id, loyalty FROM provinces WHERE kingdom_id = ?", (kingdom["id"],)).fetchall()
+        # a calm realm is a fed one: its villages' hunger and its people's meals are staged too, and restored after
+        saved_hunger = conn.execute("SELECT id, hungry_days FROM cities WHERE kingdom_id = ?", (kingdom["id"],)).fetchall()
+        saved_meals = conn.execute("SELECT n.id, n.fed FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ?", (kingdom["id"],)).fetchall()
         try:
             conn.execute("""UPDATE kingdoms SET health_unrest = 5, health_stability = 95, health_loyalty = 65, treasury = 1000000,
                             price_level = 1, tax_rate = 0.10, regent_id = NULL, export_ban_until = NULL, martial_law_until = NULL
                             WHERE id = ?""", (kingdom["id"],))
             conn.execute("UPDATE provinces SET loyalty = 65 WHERE kingdom_id = ?", (kingdom["id"],))
+            conn.execute("UPDATE cities SET hungry_days = 0 WHERE kingdom_id = ?", (kingdom["id"],))
+            conn.execute("UPDATE npcs SET fed = 1 WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],))
             conn.execute("DELETE FROM kingdom_edicts WHERE kingdom_id = ?", (kingdom["id"],))
             conn.commit()
             day = E.today(conn, world_id)
@@ -2008,6 +2070,8 @@ def _smoke_body(r, holder):
                           saved_kingdom["export_ban_until"], saved_kingdom["martial_law_until"], kingdom["id"]))
             conn.execute("UPDATE npcs SET generosity = ?, mercy = ?, boldness = ? WHERE id = ?", (*saved_traits, ruler))
             conn.executemany("UPDATE provinces SET loyalty = ? WHERE id = ?", [(row["loyalty"], row["id"]) for row in saved_lords])
+            conn.executemany("UPDATE cities SET hungry_days = ? WHERE id = ?", [(row["hungry_days"], row["id"]) for row in saved_hunger])
+            conn.executemany("UPDATE npcs SET fed = ? WHERE id = ?", [(row["fed"], row["id"]) for row in saved_meals])
             conn.commit()
 
     run_step(r, "rulers choose edicts by their nature; the seasons bring reviews; an export ban keeps Food home", rulers_issue_edicts)
@@ -2015,8 +2079,11 @@ def _smoke_body(r, holder):
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor
 
-        kingdom = kingdoms[0]
-        others = kingdoms[1:]
+        # a crown: a republic's successor is elected, not crowned (Data.Government.republic)
+        crown_id = conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id LIMIT 1",
+                                (world_id,)).fetchone()[0]
+        kingdom = next(k for k in kingdoms if k["id"] == crown_id)
+        others = [k for k in kingdoms if k["id"] != crown_id]
 
         monarch = get_kingdom(conn, kingdom["id"])["ruler"]
         assert monarch is not None, "no monarch was crowned by the monthly tick"

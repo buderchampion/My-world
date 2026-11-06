@@ -34,7 +34,10 @@ def ensure_provinces(conn, world_id):
 
     made = 0
 
-    for kingdom in conn.execute("SELECT id, capital_city_id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+    for kingdom in conn.execute("SELECT id, capital_city_id, type FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+
+        if kingdom["type"] == "Republic":
+            continue                     # a republic has no hereditary lords (Data.Government.republic)
 
         if conn.execute("SELECT 1 FROM provinces WHERE kingdom_id = ? LIMIT 1", (kingdom["id"],)).fetchone():
             continue

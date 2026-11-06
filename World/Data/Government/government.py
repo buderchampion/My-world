@@ -24,6 +24,16 @@ def assign_city_ruler(conn, city):
     from Data.Database.repository import get_npc
 
     is_capital = city["type"] == "Capital"
+
+    # A republic's capital is never inherited: the Great Council elects a Doge
+    # for life (Data.Government.republic).
+    if is_capital:
+        from Data.Government.republic import is_republic, elect_doge
+        if is_republic(conn, city["kingdom"]):
+            doge = elect_doge(conn, city)
+            city["ruler"] = doge["id"] if doge else None
+            return doge
+
     province = None if is_capital else seat_province(conn, city["id"])
 
     # A crown or county whose holder has died stays in the family if it can

@@ -22,7 +22,7 @@ MIGRATION_GOLD_PER_ADDITIONAL_MEMBER = 75
 # ruler's desperate spouse, who brings the whole household along) could
 # emigrate and leave a throne occupied by someone living in another kingdom,
 # which is never noticed as empty and never passed on.
-RULING_TITLES = ("King", "Queen", "Mayor", "Count", "Countess")
+RULING_TITLES = ("King", "Queen", "Mayor", "Count", "Countess", "Doge")
 
 # Chance, per month, that an eligible NPC actually decides to go.
 # Deliberately much rarer than Tourism -- this is the biggest

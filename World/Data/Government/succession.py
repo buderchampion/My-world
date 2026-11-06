@@ -19,7 +19,7 @@
 
 ADULT_AGE = 16
 
-MONARCH_TITLES = ("King", "Queen")
+MONARCH_TITLES = ("King", "Queen", "Doge")   # no one heads two realms
 LORD_TITLES = ("Count", "Countess")
 
 
