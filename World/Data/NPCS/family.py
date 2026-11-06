@@ -33,7 +33,9 @@ def create_child(conn, parent_a, parent_b, city_type):
     names = load_json(MALE_NAMES if gender == "Male" else FEMALE_NAMES)
     name = random.choice(names)
 
-    child = create_npc(conn, parent_a["city_id"], name, gender, 0, "None", "Child")
+    from Data.NPCS.personality import inherited_traits
+    child = create_npc(conn, parent_a["city_id"], name, gender, 0, "None", "Child",
+                       traits=inherited_traits(parent_a, parent_b))      # takes after both parents
 
     set_npc_parents(conn, child["id"], parent_a["id"], parent_b["id"])
 

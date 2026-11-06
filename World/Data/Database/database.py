@@ -58,6 +58,13 @@ def init_database():
     # only this share of their hunger.
     _add_missing_columns(connection, "npcs", {"fed": "REAL NOT NULL DEFAULT 1"})
 
+    # Personality, -100 to +100 each (Data.NPCS.personality). NULL until set.
+    _add_missing_columns(connection, "npcs", {
+        "generosity": "INTEGER",
+        "mercy": "INTEGER",
+        "boldness": "INTEGER",
+    })
+
     _add_missing_columns(connection, "kingdoms", {
         "treasury": "REAL NOT NULL DEFAULT 1000",
         "tax_rate": "REAL NOT NULL DEFAULT 0.1",
@@ -67,6 +74,9 @@ def init_database():
         "regent_id": "INTEGER REFERENCES npcs(id)",
         "last_war_year": "INTEGER",
         "last_war_won": "INTEGER",
+        "health_loyalty": "REAL NOT NULL DEFAULT 70",
+        "health_unrest": "REAL NOT NULL DEFAULT 0",
+        "health_stability": "REAL NOT NULL DEFAULT 100",
     })
 
     # who rules for a child lord (Data.Government.succession)

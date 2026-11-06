@@ -5,14 +5,20 @@ from Data.Database.database import get_connection
 # NPCs
 # ---------------------------------------------------------------------------
 
-def create_npc(conn, city_id, name, gender, age, npc_class, profession):
+def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=None):
+    """Creates an NPC. Everyone gets a personality (Data.NPCS.personality):
+    `traits` if given -- a child's, inherited -- otherwise their own."""
+
+    from Data.NPCS.personality import random_traits
+    traits = traits or random_traits()
 
     cursor = conn.execute(
         """
-        INSERT INTO npcs (city_id, name, gender, age, class, profession)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO npcs (city_id, name, gender, age, class, profession, generosity, mercy, boldness)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
-        (city_id, name, gender, age, npc_class, profession)
+        (city_id, name, gender, age, npc_class, profession,
+         traits["generosity"], traits["mercy"], traits["boldness"])
     )
 
     return get_npc(conn, cursor.lastrowid)

@@ -66,6 +66,11 @@ def get_or_create_world():
         if provinces_made:
             print(f"  (divided this world into {provinces_made} counties -- it predates provinces)")
 
+        from Data.NPCS.personality import ensure_personalities
+        given = ensure_personalities(connection, world["id"])
+        if given:
+            print(f"  (gave {given} people a personality -- this world predates them)")
+
         from Data.World.harvest import ensure_household_stores
         stocked = ensure_household_stores(connection, world["id"])
         if stocked:

@@ -397,6 +397,20 @@ FEATURES = [
         },
     },
     {
+        "name": "Personality and kingdom health: three traits for everyone, inherited; Loyalty, Unrest, Stability",
+        "functions": {
+            "Data/NPCS/personality.py": ["random_traits", "inherited_traits", "describe", "ensure_personalities"],
+            "Data/Government/health.py": ["kingdom_health", "update_health"],
+        },
+        "wired": {
+            "Data/Database/repository.py": ["random_traits()"],
+            "Data/NPCS/family.py": ["inherited_traits(parent_a, parent_b)"],
+            "Data/Simulation/simulation_manager.py": ["update_health(self.conn"],
+            "run_world.py": ["ensure_personalities("],
+            "Data/Database/database.py": ['"generosity"', '"health_stability"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1136,6 +1150,23 @@ def _smoke_body(r, holder):
 
         run_step(r, "most people live in village households, on land that can feed them", countryside_made)
 
+        def everyone_has_a_personality():
+            import statistics
+            from Data.NPCS.family import create_child
+            from Data.Database.repository import get_npc
+            missing = conn.execute("SELECT COUNT(*) FROM npcs WHERE generosity IS NULL OR mercy IS NULL OR boldness IS NULL").fetchone()[0]
+            assert missing == 0, f"{missing} NPCs have no personality"
+            a, b = [row[0] for row in conn.execute("SELECT id FROM npcs WHERE profession != 'Child' ORDER BY id LIMIT 2")]
+            conn.execute("UPDATE npcs SET generosity = -90, mercy = 90, boldness = 0 WHERE id IN (?, ?)", (a, b))
+            conn.commit()
+            kids = [create_child(conn, get_npc(conn, a), get_npc(conn, b), "Town") for _ in range(30)]
+            assert abs(statistics.mean(k["generosity"] for k in kids) + 90) < 15 and abs(statistics.mean(k["mercy"] for k in kids) - 90) < 15, \
+                "children do not take after their parents' personalities"
+            conn.execute(f"DELETE FROM npcs WHERE id IN ({','.join(str(k['id']) for k in kids)})")
+            conn.commit()
+
+        run_step(r, "every NPC has a personality, and children take after their parents", everyone_has_a_personality)
+
         def counties_made():
             for kingdom in conn.execute("SELECT id, capital_city_id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
                 cities = [dict(c) for c in conn.execute("SELECT * FROM cities WHERE kingdom_id = ?", (kingdom["id"],))]
@@ -1735,6 +1766,14 @@ def _smoke_body(r, holder):
         assert now < starving_probe["households"], "the monthly tick did not move households out of a starving village"
 
     run_step(r, "the month tick moves families out of a starving village", month_tick_moves_the_starving)
+
+    def month_tick_weighs_health():
+        changed = conn.execute(
+            "SELECT COUNT(*) FROM kingdoms WHERE world_id = ? AND (health_stability != 100 OR health_unrest != 0 OR health_loyalty != 70)",
+            (world_id,)).fetchone()[0]
+        assert changed, "the month tick did not work out any kingdom's health"
+
+    run_step(r, "the month tick works out each kingdom's Loyalty, Unrest and Stability", month_tick_weighs_health)
 
     def rulers_saved():
         saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]

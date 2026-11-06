@@ -393,6 +393,11 @@ class SimulationManager:
         from Data.Government.rebellion import consider_rebellions
         consider_rebellions(self.conn, self.world_id)
 
+        # Each kingdom's Loyalty, Unrest and Stability, from all of the above
+        # (Data.Government.health).
+        from Data.Government.health import update_health
+        update_health(self.conn, self.world_id)
+
         from Data.Infrastructure.travel import consider_tourism
         consider_tourism(self.conn, self.world_id)
 

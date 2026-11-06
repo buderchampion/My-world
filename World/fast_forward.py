@@ -74,7 +74,8 @@ def year_report(conn, world_id, year, first_day, last_day, report):
         say(f"Village famine deaths: about {dead:,} people", report)
 
     say("", report)
-    say(f"{'KINGDOM':14} {'RULER':22} {'BREAD':>6} {'TREASURY':>9} {'HAPPY':>6} {'STRESS':>7} {'ATE':>5} {'HUNGRY VILLAGES':>16}", report)
+    say(f"{'KINGDOM':14} {'RULER':22} {'BREAD':>6} {'TREASURY':>9} {'HAPPY':>6} {'STRESS':>7} {'ATE':>5} {'HUNGRY VILLAGES':>16} "
+        f"{'LOYAL':>6} {'UNREST':>7} {'STABLE':>7}", report)
     for k in conn.execute("SELECT * FROM kingdoms WHERE world_id = ? ORDER BY id", (world_id,)).fetchall():
         ruler = conn.execute("SELECT name, title, alive FROM npcs WHERE id = ?", (k["ruler_id"],)).fetchone() if k["ruler_id"] else None
         ruler_text = f"{ruler['title'] or ''} {ruler['name']}".strip() + ("" if ruler["alive"] else " (dead)") if ruler else "-"
@@ -87,7 +88,8 @@ def year_report(conn, world_id, year, first_day, last_day, report):
         ).fetchone()[0]
         villages = conn.execute("SELECT COUNT(*) FROM cities WHERE kingdom_id = ? AND households > 0", (k["id"],)).fetchone()[0]
         say(f"{k['name'][:14]:14} {ruler_text[:22]:22} {k['price_level']:>5.2f}x {k['treasury']:>9,.0f} "
-            f"{(mood['h'] or 0):>6.1f} {(mood['s'] or 0):>7.1f} {(mood['f'] or 0):>5.0%} {hungry:>8} of {villages}", report)
+            f"{(mood['h'] or 0):>6.1f} {(mood['s'] or 0):>7.1f} {(mood['f'] or 0):>5.0%} {hungry:>8} of {villages} "
+            f"{k['health_loyalty']:>6.0f} {k['health_unrest']:>7.0f} {k['health_stability']:>7.0f}", report)
 
     entries = conn.execute(
         """SELECT k.name, e.text FROM chronicle_entries e JOIN kingdoms k ON k.id = e.kingdom_id
