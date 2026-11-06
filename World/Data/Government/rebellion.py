@@ -80,7 +80,10 @@ def consider_rebellions(conn, world_id):
             """SELECT p.* FROM provinces p JOIN npcs n ON n.id = p.lord_id
                WHERE p.kingdom_id = ? AND n.alive = 1 AND p.loyalty < ? ORDER BY p.loyalty, p.id""",
             (kingdom["id"], RESTLESS_BELOW))]
-        leader = next((p for p in restless if random.random() < rising_chance(p["loyalty"])), None)
+        from Data.Government.edicts import martial_law_active, today, MARTIAL_LAW_FACTOR
+        k_row = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (kingdom["id"],)).fetchone())
+        damper = MARTIAL_LAW_FACTOR if martial_law_active(k_row, today(conn, world_id)) else 1   # martial law
+        leader = next((p for p in restless if random.random() < damper * rising_chance(p["loyalty"])), None)
         if leader is None:
             continue
         coalition = [leader] + [p for p in restless if p["id"] != leader["id"]]

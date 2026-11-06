@@ -512,6 +512,10 @@ def simulate_cross_kingdom_trade_day(
     kingdoms = get_world_kingdoms(conn, world_id)
     cities_by_kingdom = {k["id"]: get_kingdom_cities(conn, k["id"]) for k in kingdoms}
 
+    # a kingdom that has banned food exports sells no Food abroad (Data.Government.edicts)
+    from Data.Government.edicts import exports_banned, today as edict_day
+    trade_day = edict_day(conn, world_id)
+
     trade_log = []
 
     for resource in resource_types:
@@ -535,6 +539,8 @@ def simulate_cross_kingdom_trade_day(
                 continue
 
             if total_stock >= total_target * SURPLUS_THRESHOLD:
+                if resource == "Food" and exports_banned(kingdom, trade_day):
+                    continue
                 surplus_entries.append([kingdom, total_stock - total_target])
             elif total_stock <= total_target * SHORTAGE_THRESHOLD:
                 shortage_entries.append([kingdom, total_target - total_stock])

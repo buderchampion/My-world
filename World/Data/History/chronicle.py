@@ -8,6 +8,10 @@ TEMPLATES_FILE = Path(__file__).resolve().parent / "ChronicleTemplates.json"
 # ChronicleTemplates.json has at least one template for each of these, so
 # deleting or renaming one by accident is caught before it can crash a run.
 REQUIRED_TEMPLATE_KEYS = (
+    "Edict (lower taxes)",
+    "Edict (raise taxes)",
+    "Edict (open the granary)",
+    "Edict (martial law)",
     "Rebellion Crushed",
     "Breakaway (lost)",
     "Breakaway (founded)",
@@ -46,7 +50,7 @@ REQUIRED_TEMPLATE_KEYS = (
 TEMPLATE_FIELDS = (
     "When", "when", "kingdom", "other",
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
-    "city", "sovereign", "regent", "county",
+    "city", "sovereign", "regent", "county", "nature",
 )
 
 # Which wording a monarch's death gets, by the cause death_event was given.

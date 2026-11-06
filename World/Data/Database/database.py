@@ -77,6 +77,8 @@ def init_database():
         "health_loyalty": "REAL NOT NULL DEFAULT 70",
         "health_unrest": "REAL NOT NULL DEFAULT 0",
         "health_stability": "REAL NOT NULL DEFAULT 100",
+        "export_ban_until": "INTEGER",
+        "martial_law_until": "INTEGER",
     })
 
     # who rules for a child lord (Data.Government.succession)

@@ -417,6 +417,10 @@ class SimulationManager:
             from Data.World.harvest import run_harvest
             run_harvest(self.conn, self.world_id, self.clock.year)
 
+        # Every ruler reviews the realm and may issue an edict (Data.Government.edicts).
+        from Data.Government.edicts import review
+        review(self.conn, self.world_id)
+
     def on_year(self) -> None:
         from Data.NPCS.aging import apply_aging
         from Data.Events.events import death_event
@@ -505,7 +509,11 @@ class SimulationManager:
             if not eligibility["eligible"]:
                 continue
 
-            if random.random() >= CIVIL_WAR_CHANCE_IF_ELIGIBLE:
+            # martial law makes a rising far less likely (Data.Government.edicts)
+            from Data.Government.edicts import martial_law_active, today as edict_day, MARTIAL_LAW_FACTOR
+            civil_war_chance = CIVIL_WAR_CHANCE_IF_ELIGIBLE * (
+                MARTIAL_LAW_FACTOR if martial_law_active(kingdom, edict_day(self.conn, self.world_id)) else 1)
+            if random.random() >= civil_war_chance:
                 continue
 
             resolve_civil_war(self.conn, kingdom, cities, self.clock.year)

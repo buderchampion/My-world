@@ -32,6 +32,8 @@ WAR_WON, WAR_LOST, WAR_MEMORY_YEARS = 5, -10, 2
 FAMINE_MAX = 20
 BREAD_PER_STEP = 10
 TAX_PER_SHARE = 100          # each 1% of share kept below the standard costs 1 point
+STANDARD_TAX_RATE = 0.10     # the crown's usual tax on the people; lords like it lower
+TAX_RATE_PER_POINT = 100     # each 1% the crown taxes above (or below) the usual costs (or earns) 1 point
 
 
 def lord_cut(amount):
@@ -75,6 +77,10 @@ def loyalty_target(conn, province, kingdom, year):
 
     if kingdom["price_level"] > 1.0:
         reasons["bread prices"] = -round(BREAD_PER_STEP * (kingdom["price_level"] - 1.0), 1)
+
+    rate = kingdom["tax_rate"] if kingdom["tax_rate"] is not None else STANDARD_TAX_RATE
+    if abs(rate - STANDARD_TAX_RATE) > 1e-9:
+        reasons["the crown's taxes"] = round((STANDARD_TAX_RATE - rate) * TAX_RATE_PER_POINT, 1)
 
     if LORD_SHARE != STANDARD_LORD_SHARE:
         reasons["taxes"] = round((LORD_SHARE - STANDARD_LORD_SHARE) * TAX_PER_SHARE, 1)

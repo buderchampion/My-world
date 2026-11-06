@@ -230,6 +230,16 @@ CREATE TABLE IF NOT EXISTS provinces (
     treasury      REAL NOT NULL DEFAULT 0               -- the lord's own purse: their share of the county's taxes
 );
 
+-- Every edict a ruler has issued (Data.Government.edicts): the realm's
+-- policy history, and how a ruler avoids repeating themselves.
+CREATE TABLE IF NOT EXISTS kingdom_edicts (
+    id          INTEGER PRIMARY KEY,
+    kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    edict       TEXT NOT NULL,
+    day         INTEGER NOT NULL,     -- elapsed day it was issued
+    ruler_id    INTEGER REFERENCES npcs(id)
+);
+
 CREATE TABLE IF NOT EXISTS harvests (
     id          INTEGER PRIMARY KEY,
     region_id   INTEGER NOT NULL REFERENCES regions(id),

@@ -411,6 +411,19 @@ FEATURES = [
         },
     },
     {
+        "name": "Edicts: each season (and in a crisis) rulers choose by the realm's health and their own nature",
+        "tables": ["kingdom_edicts"],
+        "functions": {"Data/Government/edicts.py": ["review", "choose", "needs", "apply_edict", "situation", "lean"]},
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["review(self.conn, self.world_id)", "martial_law_active("],
+            "Data/Government/health.py": ["crisis=True"],
+            "Data/Economy/economy.py": ["exports_banned("],
+            "Data/Government/rebellion.py": ["MARTIAL_LAW_FACTOR"],
+            "Data/Government/feudal.py": ["STANDARD_TAX_RATE"],
+            "Data/Database/database.py": ['"martial_law_until"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1944,6 +1957,60 @@ def _smoke_body(r, holder):
             "the breakaway was not chronicled by both kingdoms"
 
     run_step(r, "a restless lord rises through the month tick and is crushed; a coalition breaks away as a new kingdom", lords_rebel)
+
+    def rulers_issue_edicts():
+        import Data.Government.edicts as E
+        from Data.Simulation.simulation_manager import SimulationManager
+        from Data.Economy.economy import simulate_cross_kingdom_trade_day
+        from Data.Database.repository import get_npc, get_kingdom_cities, get_city, save_city
+
+        kingdom = dict(conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND ruler_id IS NOT NULL ORDER BY id LIMIT 1", (world_id,)).fetchone())
+        ruler = kingdom["ruler_id"]
+        saved_kingdom = dict(kingdom)
+        saved_traits = tuple(conn.execute("SELECT generosity, mercy, boldness FROM npcs WHERE id = ?", (ruler,)).fetchone())
+        saved_lords = conn.execute("SELECT id, loyalty FROM provinces WHERE kingdom_id = ?", (kingdom["id"],)).fetchall()
+        try:
+            conn.execute("""UPDATE kingdoms SET health_unrest = 5, health_stability = 95, health_loyalty = 65, treasury = 1000000,
+                            price_level = 1, tax_rate = 0.10, regent_id = NULL, export_ban_until = NULL, martial_law_until = NULL
+                            WHERE id = ?""", (kingdom["id"],))
+            conn.execute("UPDATE provinces SET loyalty = 65 WHERE kingdom_id = ?", (kingdom["id"],))
+            conn.execute("DELETE FROM kingdom_edicts WHERE kingdom_id = ?", (kingdom["id"],))
+            conn.commit()
+            day = E.today(conn, world_id)
+            staged = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (kingdom["id"],)).fetchone())
+
+            conn.execute("UPDATE npcs SET generosity = 0, mercy = 0, boldness = 0 WHERE id = ?", (ruler,))
+            conn.commit()
+            assert E.choose(conn, staged, get_npc(conn, ruler), day)[0] is None, "an even-tempered ruler meddled with a calm realm"
+            conn.execute("UPDATE npcs SET generosity = -90 WHERE id = ?", (ruler,))
+            conn.commit()
+            assert E.choose(conn, staged, get_npc(conn, ruler), day)[0] == "raise taxes", "a greedy ruler did not raise taxes in a calm, rich realm"
+
+            seasons = SimulationManager(conn, world_id)
+            seasons.clock.month = 4                         # Summer: a review, no harvest
+            seasons.on_season()
+            assert conn.execute("SELECT COUNT(*) FROM kingdom_edicts WHERE kingdom_id = ?", (kingdom["id"],)).fetchone()[0] >= 1, \
+                "the seasonal review issued no edict"
+
+            conn.execute("UPDATE kingdoms SET export_ban_until = ? WHERE id = ?", (day + 90, kingdom["id"]))
+            for other in conn.execute("SELECT id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+                for c in get_kingdom_cities(conn, other["id"]):
+                    city = get_city(conn, c["id"])
+                    city["resources"]["Food"] = 10.0 ** 6 if other["id"] == kingdom["id"] else 0.0
+                    save_city(conn, city)
+            conn.commit()
+            sold = [t for t in simulate_cross_kingdom_trade_day(conn, world_id) if t["resource"] == "Food" and t["seller"] == kingdom["name"]]
+            assert not sold, "a kingdom that banned food exports still sold Food abroad"
+        finally:
+            conn.execute("""UPDATE kingdoms SET tax_rate = ?, treasury = ?, price_level = ?, regent_id = ?, export_ban_until = ?,
+                            martial_law_until = ? WHERE id = ?""",
+                         (saved_kingdom["tax_rate"], saved_kingdom["treasury"], saved_kingdom["price_level"], saved_kingdom["regent_id"],
+                          saved_kingdom["export_ban_until"], saved_kingdom["martial_law_until"], kingdom["id"]))
+            conn.execute("UPDATE npcs SET generosity = ?, mercy = ?, boldness = ? WHERE id = ?", (*saved_traits, ruler))
+            conn.executemany("UPDATE provinces SET loyalty = ? WHERE id = ?", [(row["loyalty"], row["id"]) for row in saved_lords])
+            conn.commit()
+
+    run_step(r, "rulers choose edicts by their nature; the seasons bring reviews; an export ban keeps Food home", rulers_issue_edicts)
 
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor

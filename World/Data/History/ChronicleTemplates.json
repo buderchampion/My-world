@@ -123,5 +123,25 @@
         "{When}, {ruler}, lord of the {county}, rose against {other} and won; and so was born the kingdom of {kingdom}, free of its old masters.",
         "{When}, the {county} cast off the crown of {other}, and under {ruler} became a kingdom in its own right: {kingdom}.",
         "{When}, {kingdom} was founded in rebellion, when {ruler} of the {county} defeated the armies of {other} and claimed a crown."
+    ],
+    "Edict (lower taxes)": [
+        "{When}, the {nature} {title} {ruler} of {kingdom} lightened the people's taxes, and there was gladness in the markets.",
+        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, lowered the taxes of the realm.",
+        "{When}, {kingdom}'s {nature} {title}, {ruler}, eased the burden of taxes upon the people."
+    ],
+    "Edict (raise taxes)": [
+        "{When}, the {nature} {title} {ruler} of {kingdom} laid heavier taxes upon the realm, and the people murmured.",
+        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, raised the taxes of the realm.",
+        "{When}, {kingdom}'s {nature} {title}, {ruler}, demanded more of every purse in the land."
+    ],
+    "Edict (open the granary)": [
+        "{When}, with hunger in the land, the {nature} {title} {ruler} of {kingdom} threw open the royal granaries to feed the starving.",
+        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, sent the crown's grain to the hungry villages.",
+        "{When}, {kingdom}'s {nature} {title}, {ruler}, opened the granaries of the crown against the famine."
+    ],
+    "Edict (martial law)": [
+        "{When}, the {nature} {title} {ruler} of {kingdom} put the realm under martial law, and soldiers kept every street.",
+        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, proclaimed martial law to hold the restless realm.",
+        "{When}, {kingdom}'s {nature} {title}, {ruler}, set soldiers over the towns and ruled by the sword for a season."
     ]
 }

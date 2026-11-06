@@ -99,6 +99,9 @@ def update_health(conn, world_id):
                          f"{kingdom['name']} has fallen into crisis: stability {health['stability']:.0f}, "
                          f"unrest {health['unrest']:.0f}, the lords' loyalty {health['loyalty']:.0f}.",
                          kingdom_id=kingdom["id"])
+            # the ruler acts at once, not at the turn of the season
+            from Data.Government.edicts import review
+            review(conn, world_id, kingdom_ids=[kingdom["id"]], crisis=True)
         result[kingdom["id"]] = health
 
     conn.commit()
