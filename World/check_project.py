@@ -220,7 +220,7 @@ FEATURES = [
                 "def on_hour(", "def on_day(", "def on_month(", "def on_year(",
                 "form_families(", "consider_tourism(", "consider_migration(", "record_coronation(",
                 "apply_succession_shock(", "apply_aging(", "apply_peace_dividend(", "end_failed_alliances(",
-                "check_alliances(", "choose_war_target(", "resolve_kingdom_war(self.conn", "resolve_civil_war(self.conn",
+                "check_alliances(", "choose_war_target(", "start_campaign(self.conn", "advance_campaigns(self.conn", "resolve_civil_war(self.conn",
                 "apply_starvation_check(npc)", "advance_armies(", "advance_supply_lines(",
                 "run_harvest(", "feed_households(", "village_hardship(", "buy_food(",
             ],
@@ -441,6 +441,16 @@ FEATURES = [
         "wired": {
             "Data/Economy/economy.py": ["duties(seller_kingdom, buyer_kingdom"],
             "Data/Simulation/simulation_manager.py": ["run_grain_offices(self.conn"],
+        },
+    },
+    {
+        "name": "Campaigns: armies march on a real town and fight there; soldiers away do not defend home",
+        "tables": ["campaigns"],
+        "functions": {"Data/Government/campaigns.py": ["start_campaign", "advance_campaigns", "fight", "rally", "choose_target", "raise_levies"]},
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["start_campaign(self.conn", "advance_campaigns(self.conn"],
+            "Data/Combat/combat.py": ["transfer_conquest(", "target_city=None"],
+            "Data/Government/armies.py": ["recruits=()"],
         },
     },
     {
@@ -2150,6 +2160,59 @@ def _smoke_body(r, holder):
 
     run_step(r, "republics charge customs duties, and their grain offices buy reserves abroad", republics_trade)
 
+    def campaign_marches_and_fights():
+        import Data.Government.campaigns as CP
+        import Data.Government.armies as A
+        from Data.Government.edicts import today
+        from Data.Government.military import MILITARY_PROFESSIONS
+        from Data.Infrastructure.travel import get_traveling_npc_ids
+        from Data.Database.repository import get_kingdom, get_city, save_city
+
+        pair = None
+        for a in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id", (world_id,)).fetchall():
+            for d in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND id != ? ORDER BY id", (world_id, a["id"])).fetchall():
+                if CP.choose_target(conn, get_kingdom(conn, a["id"]), get_kingdom(conn, d["id"])):
+                    pair = (a["id"], d["id"])
+                    break
+            if pair:
+                break
+        assert pair, "(setup) no kingdom can reach an enemy town by road"
+        conn.execute("UPDATE campaigns SET status = 'Over'")
+        attacker, defender = get_kingdom(conn, pair[0]), get_kingdom(conn, pair[1])       # the game's own kingdom records
+        capital = get_city(conn, attacker["capital"])
+        capital["resources"].update({"Food": 10.0 ** 6, "Weapons": 10.0 ** 4, "Potions": 1000.0})
+        save_city(conn, capital)
+        conn.commit()
+
+        away = get_traveling_npc_ids(conn, world_id)
+        marks = ",".join("?" * len(MILITARY_PROFESSIONS))
+        free = sum(1 for row in conn.execute(
+            f"""SELECT n.id FROM npcs n JOIN cities c ON c.id = n.city_id
+                WHERE c.kingdom_id = ? AND n.alive = 1 AND n.profession IN ({marks})""", (attacker["id"], *MILITARY_PROFESSIONS))
+            if row[0] not in away)
+        campaign = CP.start_campaign(conn, attacker, defender, today(conn, world_id))
+        assert campaign, "a kingdom at war raised no campaign"
+        army = A.get_army(conn, campaign["army_id"])
+        marching = conn.execute("SELECT COUNT(*) FROM army_members WHERE army_id = ? AND levied = 0", (army["id"],)).fetchone()[0]
+        assert marching == round(free * CP.MARCH_SHARE), f"{marching} of {free} free soldiers marched, not two thirds"
+        assert army["status"] == "Marching" and campaign["target_city_id"] == CP.choose_target(conn, attacker, defender)["id"], \
+            "the army is not marching on the enemy's richest reachable town"
+
+        for _ in range(200):
+            if A.get_army(conn, army["id"])["status"] == "Encamped":
+                break
+            A.advance_armies(conn, world_id)
+        manager.on_day()                                   # the battle, through the real day tick
+        after = conn.execute("SELECT status, outcome FROM campaigns WHERE id = ?", (campaign["id"],)).fetchone()
+        assert after["status"] == "Returning" and after["outcome"] in ("attacker_wins", "defender_wins", "no_battle"), \
+            f"the day tick did not fight the battle at the town (campaign is {after['status']}, {after['outcome']})"
+
+        A.disband_army(conn, army["id"])                  # peace again, for the steps that follow
+        conn.execute("UPDATE campaigns SET status = 'Over' WHERE id = ?", (campaign["id"],))
+        conn.commit()
+
+    run_step(r, "a campaign musters two thirds of the army, marches on a town, and the day tick fights there", campaign_marches_and_fights)
+
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor
 
@@ -2600,7 +2663,35 @@ def _smoke_body(r, holder):
         assert widow["spouse"] is None, "a widow is still married to the dead after the yearly tick (grief erased by a stale save)"
         assert widow["needs"]["stress"] > 10, "a widow felt no grief after the yearly tick (grief erased by a stale save)"
 
+    forced_war = {}
+
+    def force_a_war():
+        # right before the year tick: the first crown's diplomacy picks a war with a reachable enemy
+        import Data.Government.diplomacy as D
+        import Data.Government.campaigns as CP
+        from Data.Database.repository import get_kingdom
+        conn.execute("UPDATE campaigns SET status = 'Over'")
+        conn.commit()
+        for a in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id", (world_id,)).fetchall():
+            for d in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND id != ? ORDER BY id", (world_id, a["id"])).fetchall():
+                if CP.choose_target(conn, get_kingdom(conn, a["id"]), get_kingdom(conn, d["id"])):
+                    forced_war.update(attacker=a["id"], defender=d["id"], real=D.choose_war_target)
+                    D.choose_war_target = lambda conn_, kid, cands: (None, forced_war["defender"]) if kid == forced_war["attacker"] else None
+                    return
+
+    run_step(r, "(setup) the first crown's diplomacy chooses a war just before the year tick", force_a_war)
+
     run_step(r, "year tick  (aging, wars, civil war check) -- and a widow's grief survives it", year_tick_and_grief)
+
+    def year_tick_sends_campaign():
+        import Data.Government.diplomacy as D
+        if "real" in forced_war:
+            D.choose_war_target = forced_war["real"]
+        if forced_war:
+            assert conn.execute("SELECT COUNT(*) FROM campaigns WHERE attacker_kingdom_id = ? AND status = 'Marching'",
+                                (forced_war["attacker"],)).fetchone()[0], "a war declared in the year tick did not become a campaign"
+
+    run_step(r, "a war declared in the year tick becomes a campaign on the march", year_tick_sends_campaign)
 
     # --- invariants that should hold after any amount of simulation ----------
 

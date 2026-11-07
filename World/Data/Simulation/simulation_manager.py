@@ -317,6 +317,11 @@ class SimulationManager:
         from Data.Government.supply import advance_supply_lines
         advance_supply_lines(self.conn, self.world_id)
 
+        # Campaigns: an army at its target fights; one home again disbands.
+        from Data.Government.campaigns import advance_campaigns
+        from Data.Government.edicts import today as campaign_day
+        advance_campaigns(self.conn, self.world_id, campaign_day(self.conn, self.world_id))
+
         self.conn.commit()
 
     def on_month(self) -> None:
@@ -493,10 +498,11 @@ class SimulationManager:
 
             defender_kingdom = get_kingdom(self.conn, defender_kingdom_id)
 
-            attacker_cities = get_kingdom_cities(self.conn, kingdom["id"])
-            defender_cities = get_kingdom_cities(self.conn, defender_kingdom["id"])
-
-            resolve_kingdom_war(self.conn, kingdom, defender_kingdom, attacker_cities, defender_cities)
+            # The war is a campaign: an army marches on a real town and fights
+            # there when it arrives (Data.Government.campaigns).
+            from Data.Government.campaigns import start_campaign
+            from Data.Government.edicts import today as campaign_day
+            start_campaign(self.conn, kingdom, defender_kingdom, campaign_day(self.conn, self.world_id))
 
         self.conn.commit()
 

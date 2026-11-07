@@ -238,7 +238,41 @@ def resolve_raid(conn, city, bandit_camp):
     return result
 
 
-def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities):
+# A conquered lord's loyalty to their new crown.
+CONQUERED_LOYALTY = 40
+
+
+def transfer_conquest(conn, city, attacker_kingdom, defender_kingdom):
+    """
+    A captured town changes hands. A county seat brings its whole county --
+    villages, lord and all -- to the conqueror (the lord now owes a new crown,
+    and starts with little love for it); a republic has no counties, so a
+    county it takes is dissolved into its own lands. Any other town simply
+    leaves the county it was part of.
+    """
+    from Data.Government.provinces import seat_province
+    from Data.Database.repository import get_npc, save_npc
+
+    province = seat_province(conn, city["id"])
+    if province:
+        if attacker_kingdom.get("type") == "Republic":
+            if province["lord_id"]:
+                lord = get_npc(conn, province["lord_id"])
+                lord["title"] = None
+                save_npc(conn, lord)
+            conn.execute("UPDATE cities SET kingdom_id = ?, province_id = NULL WHERE province_id = ?",
+                         (attacker_kingdom["id"], province["id"]))
+            conn.execute("DELETE FROM provinces WHERE id = ?", (province["id"],))
+        else:
+            conn.execute("UPDATE cities SET kingdom_id = ? WHERE province_id = ?", (attacker_kingdom["id"], province["id"]))
+            conn.execute("UPDATE provinces SET kingdom_id = ?, loyalty = ? WHERE id = ?",
+                         (attacker_kingdom["id"], CONQUERED_LOYALTY, province["id"]))
+    else:
+        conn.execute("UPDATE cities SET kingdom_id = ?, province_id = NULL WHERE id = ?", (attacker_kingdom["id"], city["id"]))
+
+
+def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities,
+                        attacker_military=None, defender_military=None, target_city=None):
     """
     Gathers every Guard/Soldier/Captian/Knight across all of each
     kingdom's cities, resolves one battle between the two militaries,
@@ -251,6 +285,13 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     Returns a result dict. Not called automatically.
     """
 
+    # A campaign (Data.Government.campaigns) brings its own sides -- the army,
+    # and the defenders who rallied to the town -- and names the town fought
+    # over. Otherwise each side is every soldier at home: soldiers away with
+    # an army are not there to fight.
+    from Data.Government.armies import get_army_npc_ids
+    away = get_army_npc_ids(conn, attacker_kingdom["world_id"])
+
     def gather_military(cities):
 
         military = []
@@ -259,13 +300,15 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
             for npc in get_city_npcs(conn, city["id"]):
 
-                if npc["profession"] in DEFENDER_PROFESSIONS and npc["alive"]:
+                if npc["profession"] in DEFENDER_PROFESSIONS and npc["alive"] and npc["id"] not in away:
                     military.append(npc)
 
         return military
 
-    attacker_military = gather_military(attacker_cities)
-    defender_military = gather_military(defender_cities)
+    if attacker_military is None:
+        attacker_military = gather_military(attacker_cities)
+    if defender_military is None:
+        defender_military = gather_military(defender_cities)
 
     attack_power = sum(get_combat_power(npc) for npc in attacker_military)
     defense_power = sum(get_combat_power(npc) for npc in defender_military)
@@ -296,13 +339,16 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
         capturable = [c for c in defender_cities if c["type"] != "Capital"]
 
+        if target_city is not None:                     # a campaign takes the town it marched on
+            capturable = [c for c in capturable if c["id"] == target_city["id"]]
+
         if capturable:
 
             capturable.sort(key=total_resource_value, reverse=True)
 
             captured_city = capturable[0]
 
-            set_city_kingdom(conn, captured_city["id"], attacker_kingdom["id"])
+            transfer_conquest(conn, captured_city, attacker_kingdom, defender_kingdom)
 
             defender_kingdom["cities"] = [
                 c for c in defender_kingdom["cities"] if c["id"] != captured_city["id"]
@@ -468,7 +514,9 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
     Returns a result dict.
     """
 
-    living = [npc for city in cities for npc in get_city_npcs(conn, city["id"]) if npc["alive"]]
+    from Data.Government.armies import get_army_npc_ids
+    away = get_army_npc_ids(conn, kingdom["world_id"])      # soldiers away with an army are not home to fight
+    living = [npc for city in cities for npc in get_city_npcs(conn, city["id"]) if npc["alive"] and npc["id"] not in away]
 
     loyalists = [npc for npc in living if npc["profession"] in DEFENDER_PROFESSIONS]
     civilians = [npc for npc in living if npc["profession"] not in DEFENDER_PROFESSIONS]

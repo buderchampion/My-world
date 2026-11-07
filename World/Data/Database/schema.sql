@@ -232,6 +232,19 @@ CREATE TABLE IF NOT EXISTS provinces (
 
 -- Every edict a ruler has issued (Data.Government.edicts): the realm's
 -- policy history, and how a ruler avoids repeating themselves.
+-- Campaigns: an army marching on a real town (Data.Government.campaigns).
+CREATE TABLE IF NOT EXISTS campaigns (
+    id                   INTEGER PRIMARY KEY,
+    attacker_kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    defender_kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    army_id              INTEGER REFERENCES armies(id),
+    target_city_id       INTEGER NOT NULL REFERENCES cities(id),
+    status               TEXT NOT NULL,      -- Marching, Returning, Over
+    started_day          INTEGER NOT NULL,
+    battle_day           INTEGER,
+    outcome              TEXT                -- attacker_wins, defender_wins, no_battle, lost in the field
+);
+
 CREATE TABLE IF NOT EXISTS kingdom_edicts (
     id          INTEGER PRIMARY KEY,
     kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),

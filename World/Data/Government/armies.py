@@ -93,7 +93,7 @@ def get_army_npc_ids(conn, world_id):
     return {row["npc_id"] for row in rows}
 
 
-def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0,
+def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0, recruits=(),
                food_days=DEFAULT_FOOD_DAYS,
                weapons_per_soldier=DEFAULT_WEAPONS_PER_SOLDIER,
                potions_per_soldier=DEFAULT_POTIONS_PER_SOLDIER):
@@ -134,6 +134,11 @@ def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0,
         from Data.World.villagers import levy_villagers
         levied = [npc["id"] for npc in levy_villagers(conn, kingdom["id"], levies)]
         soldiers = soldiers + levied
+
+    # recruits: levies already called up by the caller (Data.Government.campaigns)
+    if recruits:
+        levied = list(levied) + list(recruits)
+        soldiers = soldiers + list(recruits)
 
     if not soldiers:
         return None
