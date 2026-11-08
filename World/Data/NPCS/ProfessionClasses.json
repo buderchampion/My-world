@@ -32,6 +32,13 @@
         ]
     },
 
+    "Armorer": {
+        "classes": [
+            "Fighter",
+            "Monk",
+            "None"
+        ]
+    },
     "Blacksmith": {
         "classes": [
             "Fighter",

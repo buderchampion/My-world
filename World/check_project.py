@@ -454,6 +454,16 @@ FEATURES = [
         },
     },
     {
+        "name": "Armor: made at Armories from Steel; armies and defenders wear it; it adds strength and saves lives",
+        "functions": {"Data/Combat/combat.py": ["armor_share", "city_armor", "side_power"]},
+        "wired": {
+            "Data/Combat/combat.py": ["side_power(attacker_military, attacker_armor)", "armor_share=attacker_armor"],
+            "Data/Government/armies.py": ['take("Armor"'],
+            "Data/Government/campaigns.py": ["attacker_armor=attacker_armor"],
+            "Data/Database/database.py": ['"armor"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2213,6 +2223,41 @@ def _smoke_body(r, holder):
 
     run_step(r, "a campaign musters two thirds of the army, marches on a town, and the day tick fights there", campaign_marches_and_fights)
 
+    def armor_protects():
+        import random as random_module
+        import Data.Combat.combat as C
+        import Data.Government.armies as A
+        from Data.Database.repository import get_kingdom, get_city, save_city, get_npc
+
+        assert C.armor_share(7, 10) == 0.7 and C.armor_share(20, 10) == 1.0, "armor share is not suits per fighter, at most one each"
+        soldiers = [get_npc(conn, row[0]) for row in conn.execute("SELECT id FROM npcs WHERE alive = 1 AND profession = 'Soldier' LIMIT 10")]
+        bare, clad = C.side_power(soldiers, 0.0), C.side_power(soldiers, 1.0)
+        assert abs(clad - bare * (1 + C.ARMOR_POWER)) < 0.01, f"a fully armored side does not fight at 1.5 times its strength ({bare} -> {clad})"
+
+        stand_ins = lambda n: [{"id": -i, "health": 100, "alive": True, "skills": {}, "profession": "Soldier", "workplace": None, "home": None} for i in range(n)]
+        state, real_save = random_module.getstate(), C.save_npc
+        C.save_npc = lambda *a, **kw: None                # stand-in soldiers are not in the database
+        try:
+            random_module.seed(1); unarmored = len(C.apply_casualties(conn, stand_ins(20000), won=False, armor_share=0.0))
+            random_module.seed(1); armored = len(C.apply_casualties(conn, stand_ins(20000), won=False, armor_share=1.0))
+        finally:
+            C.save_npc = real_save
+            random_module.setstate(state)
+        assert 0.5 < armored / unarmored < 0.7, f"full armor should cut deaths to about 60% (it cut them to {armored / unarmored:.0%})"
+
+        kingdom = get_kingdom(conn, kingdoms[0]["id"])
+        capital = get_city(conn, kingdom["capital"])
+        capital["resources"].update({"Food": 10.0 ** 5, "Armor": 3.0})
+        save_city(conn, capital)
+        conn.commit()
+        army = A.raise_army(conn, kingdom, get_city(conn, kingdom["capital"]), size=5)
+        if army:
+            carried = A.get_army(conn, army["id"])["armor"]
+            A.disband_army(conn, army["id"])
+            assert abs(carried - 3.0) < 0.01, f"an army of 5 did not take the capital's 3 suits of armor (took {carried})"
+
+    run_step(r, "armor: armies carry it; it adds half again to strength and saves two lives in five", armor_protects)
+
     def succession_shakes_relationships():
         from Data.Database.repository import get_kingdom, adjust_kingdom_favor, get_kingdom_favor
 
@@ -2289,7 +2334,7 @@ def _smoke_body(r, holder):
         assert monarch_id is not None, "(setup) the defending kingdom has no monarch"
         real_casualties, calls = combat.apply_casualties, {"n": 0}
 
-        def casualties_with_the_monarch(conn_, side, won):
+        def casualties_with_the_monarch(conn_, side, won, armor_share=0.0):      # wars now pass each side's armor
             dead = real_casualties(conn_, side, won)
             calls["n"] += 1
             if calls["n"] == 2 and all(n["id"] != monarch_id for n in dead):   # the second call is the defender's side
@@ -2369,7 +2414,7 @@ def _smoke_body(r, holder):
         last_id = conn.execute("SELECT COALESCE(MAX(id), 0) FROM chronicle_entries").fetchone()[0]
         real_casualties, calls = combat.apply_casualties, {"n": 0}
 
-        def casualties_with_the_monarch(conn_, side, won):
+        def casualties_with_the_monarch(conn_, side, won, armor_share=0.0):      # wars now pass each side's armor
             dead = real_casualties(conn_, side, won)
             calls["n"] += 1
             if calls["n"] == 1 and all(n["id"] != monarch["id"] for n in dead):

@@ -54,6 +54,9 @@ def init_database():
     # Who in an army was levied from the villages (they go home as Farmers).
     _add_missing_columns(connection, "army_members", {"levied": "INTEGER NOT NULL DEFAULT 0"})
 
+    # suits of armor an army carries (Data.Combat.combat)
+    _add_missing_columns(connection, "armies", {"armor": "REAL NOT NULL DEFAULT 0"})
+
     # How well each NPC ate today, 0-1 (Data.Economy.food_market): meals restore
     # only this share of their hunger.
     _add_missing_columns(connection, "npcs", {"fed": "REAL NOT NULL DEFAULT 1"})

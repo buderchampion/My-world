@@ -155,9 +155,21 @@ def fight(conn, campaign):
     attackers = [n for n in (get_npc(conn, i) for i in members) if n and n["alive"]]
     defenders = rally(conn, defender["id"], target["id"])
 
+    # armor: the army's from its wagons; the defenders' from the towns they came from
+    from Data.Combat.combat import armor_share, city_armor
+    army = get_army(conn, campaign["army_id"])
+    attacker_armor = armor_share(army["armor"] if army else 0, len(attackers))
+    defender_armor = armor_share(city_armor(conn, {d["city_id"] for d in defenders}), len(defenders))
+
     result = resolve_kingdom_war(conn, attacker, defender,
                                  get_kingdom_cities(conn, attacker["id"]), get_kingdom_cities(conn, defender["id"]),
-                                 attacker_military=attackers, defender_military=defenders, target_city=target)
+                                 attacker_military=attackers, defender_military=defenders, target_city=target,
+                                 attacker_armor=attacker_armor, defender_armor=defender_armor)
+
+    # the fallen's armor is lost with them
+    if army and result.get("attacker_deaths"):
+        lost = min(army["armor"], result["attacker_deaths"] * attacker_armor)
+        conn.execute("UPDATE armies SET armor = armor - ? WHERE id = ?", (round(lost, 2), army["id"]))
 
     # the wounded drink the army's potions
     army = get_army(conn, campaign["army_id"])

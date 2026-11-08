@@ -80,10 +80,37 @@ def get_combat_power(npc):
     return base + skill_bonus
 
 
-def apply_casualties(conn, participants, won):
+# Armor. A side's armor share is how much of it is equipped, 0-1 (the suits
+# it has against the fighters it fields). It fights harder and dies less:
+ARMOR_POWER = 0.5          # strength x (1 + ARMOR_POWER x share)
+ARMOR_PROTECTION = 0.4     # death and injury chances x (1 - ARMOR_PROTECTION x share)
+
+
+def side_power(fighters, armor_share=0.0):
+    """A side's strength in battle: its fighters' combat power, raised by its armor."""
+    return sum(get_combat_power(npc) for npc in fighters) * (1 + ARMOR_POWER * armor_share)
+
+
+def armor_share(suits, fighters):
+    return min(1.0, suits / fighters) if fighters else 0.0
+
+
+def city_armor(conn, city_ids):
+    """Suits of armor stored in these cities."""
+    ids = list(city_ids)
+    if not ids:
+        return 0.0
+    marks = ",".join("?" * len(ids))
+    return conn.execute(f"SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE resource_name = 'Armor' AND city_id IN ({marks})",
+                        ids).fetchone()[0]
+
+
+def apply_casualties(conn, participants, won, armor_share=0.0):
 
     death_chance = WINNER_DEATH_CHANCE if won else LOSER_DEATH_CHANCE
     injury_chance = WINNER_INJURY_CHANCE if won else LOSER_INJURY_CHANCE
+    death_chance *= 1 - ARMOR_PROTECTION * armor_share
+    injury_chance *= 1 - ARMOR_PROTECTION * armor_share
 
     xp = WINNER_XP if won else LOSER_XP
 
@@ -272,7 +299,8 @@ def transfer_conquest(conn, city, attacker_kingdom, defender_kingdom):
 
 
 def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities,
-                        attacker_military=None, defender_military=None, target_city=None):
+                        attacker_military=None, defender_military=None, target_city=None,
+                        attacker_armor=None, defender_armor=None):
     """
     Gathers every Guard/Soldier/Captian/Knight across all of each
     kingdom's cities, resolves one battle between the two militaries,
@@ -310,8 +338,14 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
     if defender_military is None:
         defender_military = gather_military(defender_cities)
 
-    attack_power = sum(get_combat_power(npc) for npc in attacker_military)
-    defense_power = sum(get_combat_power(npc) for npc in defender_military)
+    # each side's armor: given by a campaign, or else whatever its kingdom has in store
+    if attacker_armor is None:
+        attacker_armor = armor_share(city_armor(conn, (c["id"] for c in attacker_cities)), len(attacker_military))
+    if defender_armor is None:
+        defender_armor = armor_share(city_armor(conn, (c["id"] for c in defender_cities)), len(defender_military))
+
+    attack_power = side_power(attacker_military, attacker_armor)
+    defense_power = side_power(defender_military, defender_armor)
 
     total_power = attack_power + defense_power
 
@@ -327,8 +361,8 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
                      [(war_year, int(attacker_wins), attacker_kingdom["id"]),
                       (war_year, int(not attacker_wins), defender_kingdom["id"])])
 
-    attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins)
-    defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins)
+    attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins, armor_share=attacker_armor)
+    defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins, armor_share=defender_armor)
 
     captured_city = None
     spoils = 0
@@ -412,7 +446,10 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
         "attack_power": attack_power,
         "defense_power": defense_power,
         "captured_city": captured_city["name"] if captured_city else None,
-        "treasury_spoils": spoils
+        "treasury_spoils": spoils,
+        "attacker_armor": round(attacker_armor, 3),
+        "defender_armor": round(defender_armor, 3),
+        "attacker_deaths": len(attacker_deaths),
     }
 
     def gather_population(cities):

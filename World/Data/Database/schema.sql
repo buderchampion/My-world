@@ -276,6 +276,7 @@ CREATE TABLE IF NOT EXISTS armies (
     food                REAL NOT NULL DEFAULT 0,                 -- supplies carried in its wagons
     weapons             REAL NOT NULL DEFAULT 0,
     potions             REAL NOT NULL DEFAULT 0,
+    armor               REAL NOT NULL DEFAULT 0,       -- suits of armor in the wagons (Data.Combat.combat)
     days_without_food   INTEGER NOT NULL DEFAULT 0
 );
 

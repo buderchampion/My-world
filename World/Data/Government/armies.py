@@ -96,7 +96,8 @@ def get_army_npc_ids(conn, world_id):
 def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0, recruits=(),
                food_days=DEFAULT_FOOD_DAYS,
                weapons_per_soldier=DEFAULT_WEAPONS_PER_SOLDIER,
-               potions_per_soldier=DEFAULT_POTIONS_PER_SOLDIER):
+               potions_per_soldier=DEFAULT_POTIONS_PER_SOLDIER,
+               armor_per_soldier=1.0):
     """
     Musters an army at home_city (a city dict of this kingdom) from the
     kingdom's living soldiers who are not already away, up to `size` (all of
@@ -154,6 +155,7 @@ def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0, recruit
     food = take("Food", n * food_days * ARMY_FOOD_PER_SOLDIER_PER_DAY)
     weapons = take("Weapons", n * weapons_per_soldier)
     potions = take("Potions", n * potions_per_soldier)
+    armor = take("Armor", n * armor_per_soldier)         # as many suits as the city has, up to one each
 
     save_city(conn, home_city)
 
@@ -162,10 +164,10 @@ def raise_army(conn, kingdom, home_city, size=None, name=None, levies=0, recruit
 
     cursor = conn.execute(
         """
-        INSERT INTO armies (kingdom_id, name, status, home_city_id, location_city_id, food, weapons, potions)
-        VALUES (?, ?, 'Mustered', ?, ?, ?, ?, ?)
+        INSERT INTO armies (kingdom_id, name, status, home_city_id, location_city_id, food, weapons, potions, armor)
+        VALUES (?, ?, 'Mustered', ?, ?, ?, ?, ?, ?)
         """,
-        (kingdom["id"], name, home_city["id"], home_city["id"], food, weapons, potions)
+        (kingdom["id"], name, home_city["id"], home_city["id"], food, weapons, potions, armor)
     )
     army_id = cursor.lastrowid
 

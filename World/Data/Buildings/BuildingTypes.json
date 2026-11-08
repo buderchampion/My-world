@@ -7,6 +7,7 @@
     "Alchemist Lab":      {"category": "Academic",    "capacity": 3},
     "Market":             {"category": "Civillian",   "capacity": 10},
     "Blacksmith Shop":    {"category": "Civillian",   "capacity": 4},
+    "Armory":             {"category": "Civillian",   "capacity": 4},
     "Tavern":             {"category": "Civillian",   "capacity": 6},
     "Carpenter Workshop": {"category": "Civillian",   "capacity": 4},
     "Tailor Shop":        {"category": "Civillian",   "capacity": 3},

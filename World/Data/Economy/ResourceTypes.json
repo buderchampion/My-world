@@ -44,6 +44,11 @@
         "target_stock": 60,
         "consumable": false
     },
+    "Armor": {
+        "base_price": 9,
+        "target_stock": 40,
+        "consumable": false
+    },
     "Weapons": {
         "base_price": 7,
         "target_stock": 50,
