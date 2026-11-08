@@ -464,6 +464,17 @@ FEATURES = [
         },
     },
     {
+        "name": "Sieges: walled towns are besieged and blockaded, breached by siege works or starved, then stormed",
+        "functions": {"Data/Government/campaigns.py": ["walled", "besieged_city_ids", "siege_day_passes"]},
+        "wired": {
+            "Data/Government/campaigns.py": ["'Besieging'", "defender_bonus=WALL_DEFENSE * STARVING_STRENGTH"],
+            "Data/Combat/combat.py": ["* defender_bonus"],
+            "Data/Government/armies.py": ['take("Tools"'],
+            "Data/Simulation/simulation_manager.py": ["besieged_city_ids(self.conn"],
+            "Data/Economy/economy.py": ["besieged_city_ids(conn"],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2200,6 +2211,14 @@ def _smoke_body(r, holder):
             f"""SELECT n.id FROM npcs n JOIN cities c ON c.id = n.city_id
                 WHERE c.kingdom_id = ? AND n.alive = 1 AND n.profession IN ({marks})""", (attacker["id"], *MILITARY_PROFESSIONS))
             if row[0] not in away)
+        # make the target walled, so the siege is always tested (towns only sometimes have a Castle)
+        import json as json_module
+        from Data.Database.repository import create_building
+        target_now = CP.choose_target(conn, attacker, defender)
+        if not CP.walled(conn, target_now['id']):
+            castle = json_module.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data', 'Buildings', 'BuildingTypes.json')))['Castle']
+            create_building(conn, target_now['id'], 'Castle', 'Castle', castle['category'], castle['capacity'])
+            conn.commit()
         campaign = CP.start_campaign(conn, attacker, defender, today(conn, world_id))
         assert campaign, "a kingdom at war raised no campaign"
         army = A.get_army(conn, campaign["army_id"])
@@ -2212,16 +2231,22 @@ def _smoke_body(r, holder):
             if A.get_army(conn, army["id"])["status"] == "Encamped":
                 break
             A.advance_armies(conn, world_id)
-        manager.on_day()                                   # the battle, through the real day tick
+        manager.on_day()                                   # arrival, through the real day tick: the siege begins
+        siege = conn.execute("SELECT status FROM campaigns WHERE id = ?", (campaign["id"],)).fetchone()[0]
+        assert siege == 'Besieging', f"reaching a walled town, the army did not lay siege (campaign is {siege})"
+        assert campaign['target_city_id'] in CP.besieged_city_ids(conn, world_id), 'the besieged town is not blockaded'
+        conn.execute("UPDATE campaigns SET siege_progress = ? WHERE id = ?", (CP.WALL_STRENGTH - 1, campaign["id"]))
+        conn.commit()
+        manager.on_day()                                   # the siege works breach the walls, and the town is stormed
         after = conn.execute("SELECT status, outcome FROM campaigns WHERE id = ?", (campaign["id"],)).fetchone()
-        assert after["status"] == "Returning" and after["outcome"] in ("attacker_wins", "defender_wins", "no_battle"), \
-            f"the day tick did not fight the battle at the town (campaign is {after['status']}, {after['outcome']})"
+        assert after["status"] == "Returning" and after["outcome"] in ("attacker_wins", "defender_wins"), \
+            f"the day tick did not storm the breached town (campaign is {after['status']}, {after['outcome']})"
 
         A.disband_army(conn, army["id"])                  # peace again, for the steps that follow
         conn.execute("UPDATE campaigns SET status = 'Over' WHERE id = ?", (campaign["id"],))
         conn.commit()
 
-    run_step(r, "a campaign musters two thirds of the army, marches on a town, and the day tick fights there", campaign_marches_and_fights)
+    run_step(r, "a campaign musters two thirds of the army, marches on a walled town, besieges it, and storms it when the walls fall", campaign_marches_and_fights)
 
     def armor_protects():
         import random as random_module

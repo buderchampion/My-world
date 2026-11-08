@@ -300,7 +300,7 @@ def transfer_conquest(conn, city, attacker_kingdom, defender_kingdom):
 
 def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities,
                         attacker_military=None, defender_military=None, target_city=None,
-                        attacker_armor=None, defender_armor=None):
+                        attacker_armor=None, defender_armor=None, defender_bonus=1.0):
     """
     Gathers every Guard/Soldier/Captian/Knight across all of each
     kingdom's cities, resolves one battle between the two militaries,
@@ -345,7 +345,7 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
         defender_armor = armor_share(city_armor(conn, (c["id"] for c in defender_cities)), len(defender_military))
 
     attack_power = side_power(attacker_military, attacker_armor)
-    defense_power = side_power(defender_military, defender_armor)
+    defense_power = side_power(defender_military, defender_armor) * defender_bonus   # walls, or a starving garrison
 
     total_power = attack_power + defense_power
 

@@ -55,7 +55,14 @@ def init_database():
     _add_missing_columns(connection, "army_members", {"levied": "INTEGER NOT NULL DEFAULT 0"})
 
     # suits of armor an army carries (Data.Combat.combat)
-    _add_missing_columns(connection, "armies", {"armor": "REAL NOT NULL DEFAULT 0"})
+    _add_missing_columns(connection, "armies", {"armor": "REAL NOT NULL DEFAULT 0", "tools": "REAL NOT NULL DEFAULT 0"})
+
+    # sieges (Data.Government.campaigns)
+    _add_missing_columns(connection, "campaigns", {
+        "siege_day": "INTEGER",
+        "siege_progress": "REAL NOT NULL DEFAULT 0",
+        "starving_days": "INTEGER NOT NULL DEFAULT 0",
+    })
 
     # How well each NPC ate today, 0-1 (Data.Economy.food_market): meals restore
     # only this share of their hunger.

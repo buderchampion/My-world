@@ -510,7 +510,10 @@ def simulate_cross_kingdom_trade_day(
     consumption_rates = load_json(CONSUMPTION_RATES)
 
     kingdoms = get_world_kingdoms(conn, world_id)
-    cities_by_kingdom = {k["id"]: get_kingdom_cities(conn, k["id"]) for k in kingdoms}
+    # a besieged town is blockaded: it neither buys nor sells abroad (Data.Government.campaigns)
+    from Data.Government.campaigns import besieged_city_ids
+    blockaded = besieged_city_ids(conn, world_id)
+    cities_by_kingdom = {k["id"]: [c for c in get_kingdom_cities(conn, k["id"]) if c["id"] not in blockaded] for k in kingdoms}
 
     # a kingdom that has banned food exports sells no Food abroad (Data.Government.edicts)
     from Data.Government.edicts import exports_banned, today as edict_day

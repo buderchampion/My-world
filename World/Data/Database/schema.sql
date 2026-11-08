@@ -242,7 +242,10 @@ CREATE TABLE IF NOT EXISTS campaigns (
     status               TEXT NOT NULL,      -- Marching, Returning, Over
     started_day          INTEGER NOT NULL,
     battle_day           INTEGER,
-    outcome              TEXT                -- attacker_wins, defender_wins, no_battle, lost in the field
+    outcome              TEXT,               -- attacker_wins, defender_wins, no_battle, siege lifted, lost in the field
+    siege_day            INTEGER,            -- the day a siege began (status Besieging)
+    siege_progress       REAL NOT NULL DEFAULT 0,   -- siege works built against the walls
+    starving_days        INTEGER NOT NULL DEFAULT 0 -- days in a row the besieged town has had no Food
 );
 
 CREATE TABLE IF NOT EXISTS kingdom_edicts (
@@ -277,6 +280,7 @@ CREATE TABLE IF NOT EXISTS armies (
     weapons             REAL NOT NULL DEFAULT 0,
     potions             REAL NOT NULL DEFAULT 0,
     armor               REAL NOT NULL DEFAULT 0,       -- suits of armor in the wagons (Data.Combat.combat)
+    tools               REAL NOT NULL DEFAULT 0,       -- Tools for siege works (Data.Government.campaigns)
     days_without_food   INTEGER NOT NULL DEFAULT 0
 );
 

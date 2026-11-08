@@ -273,7 +273,10 @@ class SimulationManager:
             if capital_city is not None:
                 apply_military_upkeep(self.conn, kingdom, military_npcs, capital_city, deployed_ids=deployed_ids)
 
-            simulate_kingdom_trade_day(cities)
+            # a besieged town is blockaded: no trade in or out (Data.Government.campaigns)
+            from Data.Government.campaigns import besieged_city_ids
+            blockaded = besieged_city_ids(self.conn, self.world_id)
+            simulate_kingdom_trade_day([c for c in cities if c["id"] not in blockaded])
 
             # A kingdom with no Cloth left anywhere, even after its cities have
             # traded, is genuinely without: everyone in it is a little less

@@ -20,16 +20,52 @@ import random
 #      chronicle it, mourn their dead, and make a peace treaty.
 #   4. The wounded drink the army's potions; then the army marches home and
 #      disbands, its levies going back to their fields.
+#
+# Sieges. Capitals and towns with a Castle are walled: behind standing walls
+# the defenders fight at WALL_DEFENSE times their strength. An army reaching a
+# walled town besieges it instead of attacking: the town is blockaded (no
+# trade in or out), and each day the army builds siege works -- slowly by
+# labor, four times faster with Tools, which it carries for the purpose. The
+# siege ends in an assault when the walls are breached (they no longer help)
+# or the town has had no Food for STARVE_DAYS (its starving garrison fights at
+# half strength). An army that has besieged for MAX_SIEGE_DAYS, or gone
+# GIVE_UP_HUNGRY_DAYS without food, lifts the siege and goes home.
 
 MARCH_SHARE = 2 / 3
 HOUSEHOLDS_PER_LEVY = 20
 RALLY_DAYS = 5
 POTION_HEAL, POTION_BELOW = 25, 80        # a wounded soldier below this health drinks one potion for this much
 
+WALL_DEFENSE = 2.0               # defenders behind standing walls fight at this many times their strength
+WALL_STRENGTH = 1000             # siege works needed to breach the walls
+LABOR_PER_SOLDIER = 0.25         # siege works a soldier builds a day by labor alone
+WORKS_PER_TOOL = 20              # ...and each Tool spent adds this much (four times a soldier's day per 20 soldiers' tool)
+TOOLS_PER_SOLDIER_DAY = 0.05     # an army spends this many Tools a soldier a day while besieging
+SIEGE_TOOLS_PER_SOLDIER = 1.0    # a campaign army carries this many Tools a soldier
+STARVE_DAYS = 10                 # a town with no Food this many days in a row is assaulted, its garrison starving
+STARVING_STRENGTH = 0.5          # a starving garrison fights at this share of its strength
+MAX_SIEGE_DAYS = 120
+GIVE_UP_HUNGRY_DAYS = 7
+
 
 def capital_of(kingdom):
     """A kingdom's capital city id -- from a game kingdom record ('capital') or a raw row ('capital_city_id')."""
     return kingdom.get("capital_city_id") or kingdom.get("capital")
+
+
+def walled(conn, city_id):
+    """Capitals and towns with a Castle have walls."""
+    row = conn.execute("SELECT type FROM cities WHERE id = ?", (city_id,)).fetchone()
+    if row and row["type"] == "Capital":
+        return True
+    return bool(conn.execute("SELECT 1 FROM buildings WHERE city_id = ? AND type = 'Castle' LIMIT 1", (city_id,)).fetchone())
+
+
+def besieged_city_ids(conn, world_id):
+    """Towns under siege right now: blockaded, so no trade goes in or out."""
+    return {row[0] for row in conn.execute(
+        """SELECT c.target_city_id FROM campaigns c JOIN kingdoms k ON k.id = c.attacker_kingdom_id
+           WHERE k.world_id = ? AND c.status = 'Besieging'""", (world_id,))}
 
 
 def active_campaign(conn, kingdom_id):
@@ -95,7 +131,8 @@ def start_campaign(conn, attacker, defender, day):
 
     capital = get_city(conn, capital_of(attacker))
     army = raise_army(conn, attacker, capital, size=marching, recruits=levies,
-                      name=f"Army of {attacker['name']} against {target['name']}")
+                      name=f"Army of {attacker['name']} against {target['name']}",
+                      tools_per_soldier=SIEGE_TOOLS_PER_SOLDIER)
     if army is None:
         return None
     march_army(conn, army["id"], target["id"])
@@ -138,8 +175,10 @@ def rally(conn, defender_id, target_city_id):
     return [get_npc(conn, i) for i in ids if i not in away]
 
 
-def fight(conn, campaign):
-    """The army has reached the town: the battle, and its aftermath. Returns the war's result."""
+def fight(conn, campaign, defender_bonus=1.0):
+    """The army assaults the town: the battle, and its aftermath. defender_bonus
+    multiplies the defenders' strength (standing walls, a starving garrison).
+    Returns the war's result."""
 
     from Data.Combat.combat import resolve_kingdom_war
     from Data.Government.armies import get_army, get_army_npc_ids
@@ -164,7 +203,8 @@ def fight(conn, campaign):
     result = resolve_kingdom_war(conn, attacker, defender,
                                  get_kingdom_cities(conn, attacker["id"]), get_kingdom_cities(conn, defender["id"]),
                                  attacker_military=attackers, defender_military=defenders, target_city=target,
-                                 attacker_armor=attacker_armor, defender_armor=defender_armor)
+                                 attacker_armor=attacker_armor, defender_armor=defender_armor,
+                                 defender_bonus=defender_bonus)
 
     # the fallen's armor is lost with them
     if army and result.get("attacker_deaths"):
@@ -215,11 +255,22 @@ def advance_campaigns(conn, world_id, day):
             continue
 
         if campaign["status"] == "Marching" and army["status"] == "Encamped" and army["location_city_id"] == campaign["target_city_id"]:
+            if walled(conn, campaign["target_city_id"]):
+                conn.execute("UPDATE campaigns SET status = 'Besieging', siege_day = ?, siege_progress = 0, starving_days = 0 WHERE id = ?",
+                             (day, campaign["id"]))
+                town = conn.execute("SELECT name FROM cities WHERE id = ?", (campaign["target_city_id"],)).fetchone()["name"]
+                create_event(conn, "Siege", f"{army['name']} laid siege to the walled town of {town}.",
+                             city_id=campaign["target_city_id"], kingdom_id=campaign["attacker_kingdom_id"])
+                happened.append((campaign["id"], "siege begun"))
+                continue
             result = fight(conn, campaign)
             conn.execute("UPDATE campaigns SET status = 'Returning', battle_day = ?, outcome = ? WHERE id = ?",
                          (day, result["outcome"], campaign["id"]))
             march_army(conn, army["id"], army["home_city_id"])
             happened.append((campaign["id"], result["outcome"]))
+
+        elif campaign["status"] == "Besieging":
+            happened.append((campaign["id"], siege_day_passes(conn, campaign, army, alive, day)))
 
         elif campaign["status"] == "Returning" and army["status"] == "Encamped" and army["location_city_id"] == army["home_city_id"]:
             disband_army(conn, army["id"])
@@ -229,3 +280,56 @@ def advance_campaigns(conn, world_id, day):
 
     conn.commit()
     return happened
+
+
+def siege_day_passes(conn, campaign, army, soldiers, day):
+    """
+    One day of a siege: the army builds siege works (spending Tools), the
+    blockaded town eats into its stores, and the siege may end -- in an
+    assault on breached walls or a starving garrison, or by being lifted.
+    Returns what happened.
+    """
+
+    from Data.Government.armies import march_army
+    from Data.Database.repository import create_event
+
+    town_id = campaign["target_city_id"]
+    town = conn.execute("SELECT name, kingdom_id FROM cities WHERE id = ?", (town_id,)).fetchone()
+
+    def end_siege(outcome):
+        conn.execute("UPDATE campaigns SET status = 'Returning', battle_day = ?, outcome = ? WHERE id = ?",
+                     (day, outcome, campaign["id"]))
+        march_army(conn, army["id"], army["home_city_id"])
+        return outcome
+
+    if town["kingdom_id"] != campaign["defender_kingdom_id"]:
+        return end_siege("no_battle")                      # the town changed hands some other way
+
+    # siege works: labor, and Tools
+    tools_used = min(army["tools"], TOOLS_PER_SOLDIER_DAY * soldiers)
+    progress = campaign["siege_progress"] + LABOR_PER_SOLDIER * soldiers + WORKS_PER_TOOL * tools_used
+    conn.execute("UPDATE armies SET tools = tools - ? WHERE id = ?", (round(tools_used, 2), army["id"]))
+
+    # the blockaded town's stores
+    food = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE city_id = ? AND resource_name = 'Food'",
+                        (town_id,)).fetchone()[0]
+    starving = campaign["starving_days"] + 1 if food < 1 else 0
+    conn.execute("UPDATE campaigns SET siege_progress = ?, starving_days = ? WHERE id = ?",
+                 (round(progress, 2), starving, campaign["id"]))
+
+    if progress >= WALL_STRENGTH:
+        create_event(conn, "Siege", f"The walls of {town['name']} were breached; the besiegers stormed the town.",
+                     city_id=town_id, kingdom_id=campaign["attacker_kingdom_id"])
+        return end_siege(fight(conn, dict(campaign, siege_progress=progress), defender_bonus=1.0)["outcome"])
+
+    if starving >= STARVE_DAYS:
+        create_event(conn, "Siege", f"{town['name']}, starved by the siege, was stormed; its hungry garrison could barely fight.",
+                     city_id=town_id, kingdom_id=campaign["attacker_kingdom_id"])
+        return end_siege(fight(conn, campaign, defender_bonus=WALL_DEFENSE * STARVING_STRENGTH)["outcome"])
+
+    if day - campaign["siege_day"] >= MAX_SIEGE_DAYS or army["days_without_food"] >= GIVE_UP_HUNGRY_DAYS:
+        create_event(conn, "Siege", f"The siege of {town['name']} was lifted; the besiegers turned for home.",
+                     city_id=town_id, kingdom_id=campaign["attacker_kingdom_id"])
+        return end_siege("siege lifted")
+
+    return "besieging"
