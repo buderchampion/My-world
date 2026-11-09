@@ -90,7 +90,7 @@ def update_health(conn, world_id):
     today = (clock["clock_year"] - 1) * 360 + (clock["clock_month"] - 1) * 30 + (clock["clock_day"] - 1)
     result = {}
 
-    for kingdom in conn.execute("SELECT id, name, health_stability FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+    for kingdom in conn.execute("SELECT id, name, health_stability FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall():
         health = kingdom_health(conn, kingdom["id"], today)
         conn.execute("UPDATE kingdoms SET health_loyalty = ?, health_unrest = ?, health_stability = ? WHERE id = ?",
                      (health["loyalty"], health["unrest"], health["stability"], kingdom["id"]))

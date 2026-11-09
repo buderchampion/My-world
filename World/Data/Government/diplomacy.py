@@ -75,7 +75,7 @@ def _world_kingdoms(conn, world_id):
     get_world_kingdoms builds a full record per kingdom (about 400 ms each
     call) that would be thrown away."""
 
-    rows = conn.execute("SELECT id, name FROM kingdoms WHERE world_id = ? ORDER BY id", (world_id,)).fetchall()
+    rows = conn.execute("SELECT id, name FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id", (world_id,)).fetchall()
 
     return [dict(row) for row in rows]
 

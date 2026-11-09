@@ -373,8 +373,8 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
         capturable = [c for c in defender_cities if c["type"] != "Capital"]
 
-        if target_city is not None:                     # a campaign takes the town it marched on
-            capturable = [c for c in capturable if c["id"] == target_city["id"]]
+        if target_city is not None:                     # a campaign takes the town it marched on -- even the capital
+            capturable = [c for c in defender_cities if c["id"] == target_city["id"]]
 
         if capturable:
 
@@ -383,6 +383,11 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
             captured_city = capturable[0]
 
             transfer_conquest(conn, captured_city, attacker_kingdom, defender_kingdom)
+
+            if captured_city["type"] == "Capital":          # the ruler's fate, a new capital or the kingdom's end
+                from Data.Government.conquest import fall_of_capital
+                from Data.Database.repository import get_kingdom
+                fall_of_capital(conn, captured_city, attacker_kingdom, get_kingdom(conn, defender_kingdom["id"]))
 
             defender_kingdom["cities"] = [
                 c for c in defender_kingdom["cities"] if c["id"] != captured_city["id"]

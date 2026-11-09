@@ -235,7 +235,7 @@ def review(conn, world_id, kingdom_ids=None, crisis=False):
     year, season = current_date(conn, world_id)
     issued = []
 
-    for kingdom in conn.execute("SELECT * FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall():
+    for kingdom in conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall():
         kingdom = dict(kingdom)
         if kingdom_ids is not None and kingdom["id"] not in kingdom_ids:
             continue

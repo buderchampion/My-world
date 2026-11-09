@@ -484,6 +484,16 @@ FEATURES = [
         },
     },
     {
+        "name": "Captured capitals: a far stronger army marches on the capital; its fall moves the seat or ends the kingdom",
+        "functions": {"Data/Government/conquest.py": ["aims_at_capital", "fall_of_capital"]},
+        "wired": {
+            "Data/Combat/combat.py": ["fall_of_capital("],
+            "Data/Government/campaigns.py": ["aims_at_capital("],
+            "Data/Database/repository.py": ["status != 'Fallen'"],
+            "Data/Database/database.py": ['"status"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2054,16 +2064,23 @@ def _smoke_body(r, holder):
         conn.execute("UPDATE provinces SET loyalty = 70 WHERE kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?)", (world_id,))
         conn.execute("UPDATE provinces SET loyalty = 0 WHERE id = ?", (rebel["id"],))
         conn.commit()
+        risings_before = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Rebellion' AND description LIKE ?",
+                                      (f"%{rebel['name']}%",)).fetchone()[0]
         real_random, real_ratio = R.random, R.MIN_STRENGTH_RATIO
         R.random, R.MIN_STRENGTH_RATIO = Scripted([0.0, 0.999999]), 0       # rise, then lose the battle
         try:
             SimulationManager(conn, world_id).on_month()
         finally:
             R.random, R.MIN_STRENGTH_RATIO = real_random, real_ratio
-        lord = conn.execute("SELECT alive FROM npcs WHERE id = ?", (rebel["lord_id"],)).fetchone()[0]
-        now = conn.execute("SELECT lord_id, house FROM provinces WHERE id = ?", (rebel["id"],)).fetchone()
-        assert not lord and now["lord_id"] != rebel["lord_id"] and now["house"] != rebel["house"], \
-            "a restless lord did not rise through the monthly tick (or, crushed, kept their county)"
+        # three separate questions, each with its own answer if it fails (houses are named after a founder's
+        # first name, so two houses can share a name: the new lord is compared by who they are, not by name)
+        risings = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Rebellion' AND description LIKE ?",
+                               (f"%{rebel['name']}%",)).fetchone()[0]
+        assert risings > risings_before, f"the restless lord of the {rebel['name']} did not rise through the monthly tick"
+        lord_alive = conn.execute("SELECT alive FROM npcs WHERE id = ?", (rebel["lord_id"],)).fetchone()[0]
+        assert not lord_alive, "a crushed rebel lord was not executed"
+        now = conn.execute("SELECT lord_id FROM provinces WHERE id = ?", (rebel["id"],)).fetchone()
+        assert now["lord_id"] != rebel["lord_id"], "a crushed rebel lord's house kept the county"
 
         # 2. a coalition breaks away together
         pair = conn.execute(
@@ -2798,6 +2815,60 @@ def _smoke_body(r, holder):
                                 (forced_war["attacker"],)).fetchone()[0], "a war declared in the year tick did not become a campaign"
 
     run_step(r, "a war declared in the year tick becomes a campaign on the march", year_tick_sends_campaign)
+
+    def capitals_fall():
+        import random as random_module
+        import Data.Government.conquest as CQ
+        from Data.Combat.combat import transfer_conquest
+        from Data.Database.repository import get_kingdom, get_city, get_npc, get_world_kingdoms
+
+        class Flight:
+            def choice(self, seq): return "flight"
+            def __getattr__(self, name): return getattr(random_module, name)
+
+        crowns = [k["id"] for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' AND status != 'Fallen' ORDER BY id", (world_id,))]
+        living = [k["id"] for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id", (world_id,))]
+        attacker = get_kingdom(conn, crowns[0])
+        defender = get_kingdom(conn, next(k for k in living if k != attacker["id"]))
+        others = conn.execute("SELECT COUNT(*) FROM cities WHERE kingdom_id = ? AND id != ?", (defender["id"], defender["capital"])).fetchone()[0]
+        assert others, "(setup) the defender has no town but its capital"
+
+        # a capital falls, its ruler flees: the kingdom moves its seat
+        capital = get_city(conn, defender["capital"])
+        ruler = defender["ruler"]
+        ruler_alive = bool(ruler) and bool(get_npc(conn, ruler)["alive"])     # an earlier step may have killed this monarch
+        transfer_conquest(conn, capital, attacker, defender)
+        saved = CQ.random
+        CQ.random = Flight()
+        try:
+            CQ.fall_of_capital(conn, capital, attacker, get_kingdom(conn, defender["id"]))
+        finally:
+            CQ.random = saved
+        after = get_kingdom(conn, defender["id"])
+        assert after["capital"] and after["capital"] != capital["id"], "a kingdom whose capital fell did not move its seat"
+        assert get_city(conn, after["capital"])["type"] == "Capital" and get_city(conn, capital["id"])["type"] != "Capital", \
+            "the new and fallen capitals were not retitled"
+        if ruler_alive:                                    # only a living ruler can flee
+            assert get_npc(conn, ruler)["city_id"] == after["capital"], "the fleeing ruler did not reach the new capital"
+        assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Capital Fallen'").fetchone()[0] >= 2, \
+            "the fall of the capital was not chronicled by both kingdoms"
+
+        # it loses everything: it falls, and is no longer counted among the living
+        for c in conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND id != ?", (defender["id"], after["capital"])).fetchall():
+            transfer_conquest(conn, get_city(conn, c["id"]), attacker, get_kingdom(conn, defender["id"]))
+        last = get_city(conn, after["capital"])
+        transfer_conquest(conn, last, attacker, get_kingdom(conn, defender["id"]))
+        CQ.fall_of_capital(conn, last, attacker, get_kingdom(conn, defender["id"]))
+        assert conn.execute("SELECT status FROM kingdoms WHERE id = ?", (defender["id"],)).fetchone()[0] == "Fallen", \
+            "a kingdom that lost its last town did not fall"
+        assert defender["id"] not in [k["id"] for k in get_world_kingdoms(conn, world_id)], "a fallen kingdom is still counted among the living"
+        assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Kingdom Fallen'").fetchone()[0] >= 2, \
+            "the kingdom's end was not chronicled by both sides"
+
+        manager.on_day()                                   # the living world carries on
+        manager.on_month()
+
+    run_step(r, "a capital falls and the seat moves; a kingdom that loses everything falls, and the world goes on", capitals_fall)
 
     # --- invariants that should hold after any amount of simulation ----------
 

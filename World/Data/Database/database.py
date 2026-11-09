@@ -90,6 +90,7 @@ def init_database():
         "export_ban_until": "INTEGER",
         "martial_law_until": "INTEGER",
         "type": "TEXT NOT NULL DEFAULT 'Crown'",       # Crown or Republic (Data.Government.republic)
+        "status": "TEXT NOT NULL DEFAULT 'Standing'",  # Standing, or Fallen (Data.Government.conquest)
     })
 
     # who rules for a child lord (Data.Government.succession)

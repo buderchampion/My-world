@@ -88,7 +88,10 @@ def dispatch_supplies(conn, army):
         return None
 
     daily = soldiers * ARMY_FOOD_PER_SOLDIER_PER_DAY
-    capital = get_city(conn, get_kingdom(conn, army["kingdom_id"])["capital"])
+    capital_id = get_kingdom(conn, army["kingdom_id"])["capital"]
+    if not capital_id:
+        return None                    # a fallen kingdom has no capital to send supplies from
+    capital = get_city(conn, capital_id)
 
     if army["food"] >= daily * resupply_threshold_days(conn, capital["id"], army):
         return None

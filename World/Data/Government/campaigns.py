@@ -74,10 +74,20 @@ def active_campaign(conn, kingdom_id):
 
 
 def choose_target(conn, attacker, defender):
-    """The defender's richest non-capital town the attacker's army can reach by road, or None."""
+    """
+    Where the army marches: the defender's capital, if the attacker is far
+    stronger (Data.Government.conquest) and can reach it; otherwise the
+    defender's richest non-capital town it can reach by road. None if neither.
+    """
     from Data.Government.armies import find_route
     from Data.Database.repository import get_city
     from Data.Economy.economy import total_resource_value
+    from Data.Government.conquest import aims_at_capital
+
+    capital = capital_of(defender)
+    if capital and aims_at_capital(conn, attacker, defender) and find_route(conn, capital_of(attacker), capital):
+        return get_city(conn, capital)
+
     towns = [get_city(conn, row["id"]) for row in conn.execute(
         "SELECT id FROM cities WHERE kingdom_id = ? AND id != ?", (defender["id"], capital_of(defender) or -1))]
     reachable = [t for t in towns if find_route(conn, capital_of(attacker), t["id"])]
@@ -252,6 +262,15 @@ def advance_campaigns(conn, world_id, day):
         alive = conn.execute(
             "SELECT COUNT(*) FROM army_members m JOIN npcs n ON n.id = m.npc_id WHERE m.army_id = ? AND n.alive = 1",
             (campaign["army_id"],)).fetchone()[0] if army else 0
+
+        # an army whose kingdom has fallen has no crown to fight for: it disbands
+        fallen = conn.execute("SELECT status FROM kingdoms WHERE id = ?", (campaign["attacker_kingdom_id"],)).fetchone()[0] == "Fallen"
+        if fallen and army and army["status"] != "Disbanded":
+            disband_army(conn, army["id"])
+            conn.execute("UPDATE campaigns SET status = 'Over', outcome = COALESCE(outcome, 'their kingdom fell') WHERE id = ?",
+                         (campaign["id"],))
+            happened.append((campaign["id"], "kingdom fell"))
+            continue
 
         if not army or army["status"] == "Disbanded" or alive == 0:
             if army and army["status"] != "Disbanded":

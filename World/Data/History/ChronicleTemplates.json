@@ -168,5 +168,25 @@
         "{When}, the people of {city} rose against our garrison; it was driven out, and the town went back to {other}.",
         "{When}, {kingdom} lost {city}: its people rose against the garrison and returned to {other}.",
         "{When}, the garrison {kingdom} had left in {city} was overthrown by the townsfolk, and the town fell back to {other}."
+    ],
+    "Capital Fallen (lost)": [
+        "{When}, {city}, the seat of {kingdom}, fell to {other}; {fate}.",
+        "{When}, the armies of {other} took {city}, the capital of {kingdom}, and {fate}.",
+        "{When}, {kingdom} lost its capital: {city} was stormed by {other}, and {fate}."
+    ],
+    "Capital Fallen (taken)": [
+        "{When}, {kingdom} took {city}, the very seat of {other}; {fate}.",
+        "{When}, the armies of {kingdom} stormed {city}, capital of {other}, and {fate}.",
+        "{When}, {kingdom} won {city} from {other} -- their capital itself -- and {fate}."
+    ],
+    "Kingdom Fallen (lost)": [
+        "{When}, {city} fell to {other}, the last town of {kingdom}; and so {kingdom} passed from the world. At the end, {fate}.",
+        "{When}, with {city} taken by {other}, nothing remained of {kingdom}. Here its history ends; {fate}.",
+        "{When}, {kingdom} was no more: its last stronghold, {city}, fell to {other}, and {fate}."
+    ],
+    "Kingdom Fallen (conquered)": [
+        "{When}, {kingdom} took {city}, the last town of {other}, and that realm passed from the world; {fate}.",
+        "{When}, {kingdom} made an end of {other}: {city}, its last stronghold, was stormed, and {fate}.",
+        "{When}, with the fall of {city}, {other} was no more -- conquered by {kingdom}; {fate}."
     ]
 }

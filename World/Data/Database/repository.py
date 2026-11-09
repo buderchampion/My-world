@@ -640,7 +640,8 @@ def save_clock(conn, world_id, clock):
 
 def get_world_kingdoms(conn, world_id):
 
-    rows = conn.execute("SELECT id FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall()
+    # a fallen kingdom is history, not part of the living world (Data.Government.conquest)
+    rows = conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall()
 
     return [get_kingdom(conn, row["id"]) for row in rows]
 

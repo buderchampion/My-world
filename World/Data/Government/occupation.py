@@ -166,7 +166,8 @@ def occupations_monthly(conn, world_id, day):
                 WHERE city_id = ? AND alive = 1 AND id NOT IN ({marks})""",
             (RESENTMENT_HAPPINESS, RESENTMENT_STRESS, occupation["city_id"], *garrison_ids))
 
-        if random.random() < RISING_CHANCE:
+        fallen = conn.execute("SELECT status FROM kingdoms WHERE id = ?", (occupation["former_kingdom_id"],)).fetchone()[0] == "Fallen"
+        if not fallen and random.random() < RISING_CHANCE:          # a fallen kingdom has no crown to rise back to
             from Data.Database.repository import get_npc
             from Data.Combat.combat import get_combat_power, DEFENDER_PROFESSIONS
             garrison_power = side_power(garrison_of(conn, occupation["id"]))

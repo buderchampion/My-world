@@ -141,7 +141,7 @@ def run_grain_offices(conn, world_id):
     from Data.Infrastructure.caravans import dispatch_caravan
 
     day = today(conn, world_id)
-    kingdoms = [dict(k) for k in conn.execute("SELECT * FROM kingdoms WHERE world_id = ?", (world_id,))]
+    kingdoms = [dict(k) for k in conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,))]
     bought = []
 
     for republic in (k for k in kingdoms if k["type"] == "Republic"):
