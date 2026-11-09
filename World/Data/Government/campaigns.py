@@ -175,7 +175,7 @@ def rally(conn, defender_id, target_city_id):
     return [get_npc(conn, i) for i in ids if i not in away]
 
 
-def fight(conn, campaign, defender_bonus=1.0):
+def fight(conn, campaign, defender_bonus=1.0, day=None):
     """The army assaults the town: the battle, and its aftermath. defender_bonus
     multiplies the defenders' strength (standing walls, a starving garrison).
     Returns the war's result."""
@@ -224,6 +224,13 @@ def fight(conn, campaign, defender_bonus=1.0):
         conn.execute("UPDATE armies SET potions = ? WHERE id = ?", (round(potions, 2), army["id"]))
 
     result["attackers"], result["defenders"] = len(attackers), len(defenders)
+
+    # a town taken is held by a garrison left from the army (Data.Government.occupation)
+    if result.get("outcome") == "attacker_wins" and result.get("captured_city") == target["name"]:
+        from Data.Government.occupation import begin_occupation
+        from Data.Government.edicts import today
+        begin_occupation(conn, target["id"], attacker["id"], defender["id"], campaign["army_id"],
+                         day if day is not None else today(conn, attacker["world_id"]))
     return result
 
 

@@ -248,6 +248,21 @@ CREATE TABLE IF NOT EXISTS campaigns (
     starving_days        INTEGER NOT NULL DEFAULT 0 -- days in a row the besieged town has had no Food
 );
 
+-- Occupations: a conquered town held by a garrison for a year (Data.Government.occupation).
+CREATE TABLE IF NOT EXISTS occupations (
+    id                   INTEGER PRIMARY KEY,
+    city_id              INTEGER NOT NULL REFERENCES cities(id),
+    occupier_kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    former_kingdom_id    INTEGER NOT NULL REFERENCES kingdoms(id),
+    since_day            INTEGER NOT NULL,
+    status               TEXT NOT NULL          -- Occupied, Freed, Integrated, Ended
+);
+
+CREATE TABLE IF NOT EXISTS occupation_garrison (
+    occupation_id  INTEGER NOT NULL REFERENCES occupations(id),
+    npc_id         INTEGER NOT NULL REFERENCES npcs(id)
+);
+
 CREATE TABLE IF NOT EXISTS kingdom_edicts (
     id          INTEGER PRIMARY KEY,
     kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),

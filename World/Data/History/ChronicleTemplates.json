@@ -158,5 +158,15 @@
         "{When}, with {predecessor} cast down, the Great Council of {kingdom} elected {ruler} as Doge.",
         "{When}, after the fall of {predecessor}, {kingdom}'s Great Council gave the Dogeship to {ruler}.",
         "{When}, the Great Council of {kingdom}, freed of {predecessor}, chose {ruler} as Doge."
+    ],
+    "Uprising (freed)": [
+        "{When}, the people of {city} rose against the garrison of {other}, drove it out, and returned to {kingdom}.",
+        "{When}, {city} threw off the yoke of {other}; its people put the garrison to flight and called themselves subjects of {kingdom} once more.",
+        "{When}, {kingdom} won back {city} without a battle of its own: its people rose and cast out the soldiers of {other}."
+    ],
+    "Uprising (lost)": [
+        "{When}, the people of {city} rose against our garrison; it was driven out, and the town went back to {other}.",
+        "{When}, {kingdom} lost {city}: its people rose against the garrison and returned to {other}.",
+        "{When}, the garrison {kingdom} had left in {city} was overthrown by the townsfolk, and the town fell back to {other}."
     ]
 }

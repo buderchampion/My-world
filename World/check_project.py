@@ -475,6 +475,15 @@ FEATURES = [
         },
     },
     {
+        "name": "Occupation: a garrison holds a conquered town; its people resent it, may rise, and after a year it is integrated",
+        "tables": ["occupations", "occupation_garrison"],
+        "functions": {"Data/Government/occupation.py": ["begin_occupation", "occupations_monthly", "rise", "garrison_of", "occupied"]},
+        "wired": {
+            "Data/Government/campaigns.py": ["begin_occupation("],
+            "Data/Simulation/simulation_manager.py": ["occupations_monthly(self.conn"],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2237,11 +2246,38 @@ def _smoke_body(r, holder):
         assert campaign['target_city_id'] in CP.besieged_city_ids(conn, world_id), 'the besieged town is not blockaded'
         conn.execute("UPDATE campaigns SET siege_progress = ? WHERE id = ?", (CP.WALL_STRENGTH - 1, campaign["id"]))
         conn.commit()
-        manager.on_day()                                   # the siege works breach the walls, and the town is stormed
+        import random as random_module
+        # the storm succeeds: for this one day no defenders rally, and an undefended town falls
+        # (fixing a dice roll does not survive a whole day tick -- raids and others roll the same dice)
+        saved_rally = CP.rally
+        CP.rally = lambda *args, **kwargs: []
+        try:
+            manager.on_day()                               # the siege works breach the walls, and the town is stormed
+        finally:
+            CP.rally = saved_rally
         after = conn.execute("SELECT status, outcome FROM campaigns WHERE id = ?", (campaign["id"],)).fetchone()
         assert after["status"] == "Returning" and after["outcome"] in ("attacker_wins", "defender_wins"), \
             f"the day tick did not storm the breached town (campaign is {after['status']}, {after['outcome']})"
 
+        # the town taken is occupied: a garrison from the army holds it, and the townsfolk resent it
+        import Data.Government.occupation as OC
+        occupation = OC.occupied(conn, campaign['target_city_id'])
+        assert occupation, 'a town taken by a campaign was not occupied'
+        garrison = OC.garrison_of(conn, occupation['id'])
+        assert garrison and all(g['city_id'] == campaign['target_city_id'] for g in garrison), 'the garrison does not live in the town it holds'
+        ids = ','.join(str(g['id']) for g in garrison)
+        conn.execute(f"UPDATE npcs SET needs_happiness = 60 WHERE city_id = ? AND id NOT IN ({ids})", (campaign['target_city_id'],))
+        conn.commit()
+        saved_occ_random = OC.random
+        OC.random = type('NoRising', (), {'random': lambda self: 0.99, '__getattr__': lambda self, n: getattr(random_module, n)})()
+        try:
+            manager.on_month()                             # resentment, through the real month tick
+        finally:
+            OC.random = saved_occ_random
+        resent = conn.execute(f"SELECT AVG(needs_happiness) FROM npcs WHERE city_id = ? AND alive = 1 AND id NOT IN ({ids})",
+                              (campaign['target_city_id'],)).fetchone()[0]
+        assert resent is not None and resent < 60, 'the month tick did not make the occupied townsfolk resent their garrison'
+        
         A.disband_army(conn, army["id"])                  # peace again, for the steps that follow
         conn.execute("UPDATE campaigns SET status = 'Over' WHERE id = ?", (campaign["id"],))
         conn.commit()

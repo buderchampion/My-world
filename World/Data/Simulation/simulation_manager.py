@@ -406,6 +406,12 @@ class SimulationManager:
         from Data.Government.republic import run_grain_offices
         run_grain_offices(self.conn, self.world_id)
 
+        # Occupied towns resent their garrisons, may rise, and after a year are
+        # counted part of the realm (Data.Government.occupation).
+        from Data.Government.occupation import occupations_monthly
+        from Data.Government.edicts import today as occupation_day
+        occupations_monthly(self.conn, self.world_id, occupation_day(self.conn, self.world_id))
+
         # Each kingdom's Loyalty, Unrest and Stability, from all of the above
         # (Data.Government.health).
         from Data.Government.health import update_health
