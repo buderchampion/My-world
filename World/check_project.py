@@ -520,11 +520,13 @@ FEATURES = [
     {
         "name": "Nemesis engine: battle kills are credited; notable killings recorded; renown, champions, epithets; kin hold grievances",
         "tables": ["killings", "grievances"],
-        "functions": {"Data/Combat/nemesis.py": ["record_battle", "rank_of", "display_name", "grant_epithet", "hold_grievances"]},
+        "functions": {"Data/Combat/nemesis.py": ["record_battle", "rank_of", "display_name", "grant_epithet", "hold_grievances",
+                                                  "seek_nemeses", "slay"]},
         "wired": {
-            "Data/Combat/combat.py": ['context="raid"', 'context="war"', 'context="civil war"'],
-            "Data/Government/rebellion.py": ['context="rising"'],
-            "Data/Government/occupation.py": ['context="uprising"'],
+            "Data/Combat/combat.py": ['context="raid"', 'context="war"', 'context="civil war"', "seek_nemeses(conn, attackers, defenders",
+                                      "seek_nemeses(conn, attacker_military, defender_military", "seek_nemeses(conn, loyalists, rebels"],
+            "Data/Government/rebellion.py": ['context="rising"', "seek_nemeses(conn, fighters, crown"],
+            "Data/Government/occupation.py": ['context="uprising"', "seek_nemeses(conn, rebels, garrison"],
             "Data/Database/database.py": ['"renown"', '"epithet"'],
         },
     },
@@ -2705,9 +2707,27 @@ def _smoke_body(r, holder):
             assert held and held["amount"] == N.GRIEVANCE["child"], "a slain Knight's child holds no grievance against the killer"
             assert not conn.execute("SELECT 1 FROM grievances WHERE holder_id = ? AND target_id = ?", (killer["id"], child)).fetchone(), \
                 "a grievance was recorded both ways"
+
+            # revenge in battle: the child meets the killer across the line, and settles it before the general fighting
+            import random as random_module
+            import Data.Combat.combat as combat_module
+            avenger, nemesis = get_npc(conn, child), get_npc(conn, killer["id"])
+            saved = N.random
+            N.random = type("AvengerWins", (), {"random": lambda self: 0.0, "__getattr__": lambda self, name: getattr(random_module, name)})()
+            try:
+                duels = N.seek_nemeses(conn, [avenger], [nemesis])
+            finally:
+                N.random = saved
+            assert duels == [(child, killer["id"], True)], "an avenger did not seek out their nemesis on the other side of a battle"
+            assert not conn.execute("SELECT alive FROM npcs WHERE id = ?", (killer["id"],)).fetchone()["alive"], "the nemesis slain in vengeance is not dead"
+            assert conn.execute("SELECT settled FROM grievances WHERE holder_id = ? AND target_id = ?", (child, killer["id"])).fetchone()["settled"] == 1, \
+                "vengeance taken did not settle the grievance"
+            assert conn.execute("SELECT epithet FROM npcs WHERE id = ?", (child,)).fetchone()["epithet"], "the avenger earned no name"
+            assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Vengeance'").fetchone()[0] >= 1, "the vengeance was not chronicled"
+            assert combat_module.apply_casualties(conn, [nemesis], won=False) == [], "the general fighting killed the already slain a second time"
             conn.commit()
 
-        run_step(r, "battle kills are credited; a slain monarch's killer is recorded and named; a slain Knight's child holds a grievance", kills_and_grievances)
+        run_step(r, "battle kills are credited; a slain monarch's killer is named; a slain Knight's child holds a grievance, and takes vengeance in battle", kills_and_grievances)
 
     def sinks_work():
         from Data.Database.repository import get_city, save_city, get_npc

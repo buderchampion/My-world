@@ -100,6 +100,8 @@ def rise(conn, occupation):
     garrison_power = side_power(garrison)
 
     freed = rebel_power > 0 and (garrison_power <= 0 or random.random() < rebel_power / (rebel_power + garrison_power))
+    from Data.Combat.nemesis import seek_nemeses            # old scores are settled first
+    seek_nemeses(conn, rebels, garrison, city_id=town["id"])
     rebel_dead = apply_casualties(conn, rebels, won=freed)
     garrison_dead = apply_casualties(conn, garrison, won=not freed)
     from Data.Combat.nemesis import record_battle          # who slew whom

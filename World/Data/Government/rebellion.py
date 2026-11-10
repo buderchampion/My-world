@@ -143,6 +143,8 @@ def rise(conn, leader, allies=()):
     rebel_power = sum(get_combat_power(n) for n in fighters) + mercenaries * average
     rebels_win = (rebel_power > 0) and (crown_power <= 0 or random.random() < rebel_power / (rebel_power + crown_power))
 
+    from Data.Combat.nemesis import seek_nemeses            # old scores are settled first
+    seek_nemeses(conn, fighters, crown)
     rebel_dead = apply_casualties(conn, fighters, won=rebels_win)
     crown_dead = apply_casualties(conn, crown, won=not rebels_win)
     from Data.Combat.nemesis import record_battle          # who slew whom

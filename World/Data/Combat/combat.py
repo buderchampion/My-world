@@ -118,6 +118,9 @@ def apply_casualties(conn, participants, won, armor_share=0.0):
 
     for npc in participants:
 
+        if not npc.get("alive", True):
+            continue                     # already slain before the general fighting (a duel: Data.Combat.nemesis)
+
         roll = random.random()
 
         if roll < death_chance:
@@ -197,6 +200,8 @@ def resolve_raid(conn, city, bandit_camp):
 
     attackers_win = random.random() < (attack_power / total_power)
 
+    from Data.Combat.nemesis import seek_nemeses            # old scores are settled first
+    seek_nemeses(conn, attackers, defenders, city_id=city["id"])
     attacker_deaths = apply_casualties(conn, attackers, won=attackers_win)
     defender_deaths = apply_casualties(conn, defenders, won=not attackers_win)
 
@@ -366,6 +371,8 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
                      [(war_year, int(attacker_wins), attacker_kingdom["id"]),
                       (war_year, int(not attacker_wins), defender_kingdom["id"])])
 
+    from Data.Combat.nemesis import seek_nemeses            # old scores are settled first
+    seek_nemeses(conn, attacker_military, defender_military, city_id=target_city["id"] if target_city else None)
     attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins, armor_share=attacker_armor)
     defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins, armor_share=defender_armor)
 
@@ -600,6 +607,8 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
     from Data.History.chronicle import sovereign_of, record_civil_war
     sovereign = sovereign_of(conn, kingdom)
 
+    from Data.Combat.nemesis import seek_nemeses            # old scores are settled first
+    seek_nemeses(conn, loyalists, rebels)
     loyalist_deaths = apply_casualties(conn, loyalists, won=not rebels_win)
     rebel_deaths = apply_casualties(conn, rebels, won=rebels_win)
 
