@@ -220,7 +220,7 @@ def apply_edict(conn, kingdom, edict, day):
         from Data.Buildings.upgrades import public_works
         done = public_works(conn, kingdom)
         loan = f", {done['borrowed']:.0f} gold lent by the crown" if done["borrowed"] else ""
-        return f"{done['upgraded']} buildings enlarged in {done['towns']} towns{loan}"
+        return f"{done['upgraded']} buildings enlarged and {done['built']} built in {done['towns']} towns{loan}"
 
     if edict == "martial law":
         spend_treasury(conn, kid, MARTIAL_LAW_GOLD_PER_SOLDIER * s["soldiers"])

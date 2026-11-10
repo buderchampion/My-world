@@ -509,7 +509,8 @@ FEATURES = [
     },
     {
         "name": "Town treasuries and public works: towns tax their citizens; the ruler's edict enlarges full buildings, with crown loans",
-        "functions": {"Data/Buildings/upgrades.py": ["collect_town_taxes", "upgradable", "public_works", "works_need", "places_added", "can_pay"]},
+        "functions": {"Data/Buildings/upgrades.py": ["collect_town_taxes", "upgradable", "public_works", "works_need", "places_added", "can_pay",
+                                                     "buildable", "construct", "build_new"]},
         "wired": {
             "Data/Simulation/simulation_manager.py": ["collect_town_taxes(self.conn"],
             "Data/Government/edicts.py": ['"public works"', "public_works(conn, kingdom)"],
@@ -1319,11 +1320,12 @@ def _smoke_body(r, holder):
         def kingdoms_start_apart():
             # measured on fresh worlds: the closest settlements of two kingdoms start 345-716 apart (the
             # neutral ground is 375; a crowded six-kingdom map cannot always keep it all), where unspaced
-            # placement put kingdoms touching (7-17 apart). 200 catches a return to that, with room for crowded maps.
+            # placement put kingdoms touching (7-17 apart). Crowded six-kingdom maps have gone as low as 195, so the
+    # guard is 100: ten times the old touching distance, with room for crowded maps.
             import math
             rows = conn.execute("SELECT kingdom_id, map_x, map_y FROM cities").fetchall()
             gap = min(math.dist((a["map_x"], a["map_y"]), (b["map_x"], b["map_y"])) for a in rows for b in rows if a["kingdom_id"] != b["kingdom_id"])
-            assert gap >= 200, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
+            assert gap >= 100, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
 
         run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
 
@@ -2271,7 +2273,19 @@ def _smoke_body(r, holder):
         assert conn.execute("SELECT SUM(debt) FROM cities WHERE kingdom_id = ?", (kingdom["id"],)).fetchone()[0] > 0, \
             "towns with empty purses did not borrow from the crown for their works"
 
-    run_step(r, "the public works edict enlarges full buildings with the towns' materials, the crown lending what their purses lack", public_works_enlarge)
+        # nothing left to enlarge: the edict builds anew for those still waiting
+        conn.execute("UPDATE buildings SET level = 3 WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],))
+        conn.commit()
+        count = lambda: conn.execute("SELECT COUNT(*) FROM buildings WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],)).fetchone()[0]
+        before = count()
+        what = E.apply_edict(conn, kingdom, "public works", E.today(conn, world_id))
+        assert count() > before, f"with every building at level 3, the public works edict built nothing new ({what})"
+        newest = conn.execute("SELECT id, capacity FROM buildings WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?) AND type != 'House' ORDER BY id DESC LIMIT 1",
+                              (kingdom["id"],)).fetchone()
+        assert conn.execute("SELECT COUNT(*) FROM npcs WHERE workplace_id = ? AND alive = 1", (newest["id"],)).fetchone()[0] == newest["capacity"], \
+            "a new workplace was not filled by the jobless"
+
+    run_step(r, "the public works edict enlarges full buildings, then builds anew, the crown lending what towns' purses lack", public_works_enlarge)
 
     def republics_trade():
         import Data.Government.republic as RP

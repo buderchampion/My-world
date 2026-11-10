@@ -18,6 +18,14 @@ from pathlib import Path
 #   short of gold, it borrows the rest from the crown, which lends while it
 #   keeps at least CROWN_KEEPS of its treasury. Otherwise the town goes
 #   without. The new places are filled at once by the job market.
+#
+#   New buildings: a town whose jobless still wait after its upgrades builds
+#   up to BUILDS_PER_TOWN new workplaces, of the kinds its kit allows for a
+#   town of its size, those making what it lacks first; a town with at least
+#   HOMELESS_FOR_HOUSE homeless adults builds a House (up to BUILDS_PER_TOWN,
+#   apart from the workplaces: a roof does not wait behind jobs). A new building costs
+#   NEW_BUILDING_FACTOR times an upgrade's price per place (the foundations),
+#   paid the same way.
 
 TOWN_TAX_RATE = 0.02
 DEBT_REPAY_SHARE = 0.5
@@ -29,6 +37,9 @@ UPGRADES_PER_TOWN = 3
 MIN_JOBLESS = 3                 # a town calls for works when at least this many wait for work
 CROWN_KEEPS = 0.5
 ADULT_AGE = 16
+NEW_BUILDING_FACTOR = 1.5
+BUILDS_PER_TOWN = 2
+HOMELESS_FOR_HOUSE = 5
 
 DATA = Path(__file__).resolve().parents[1]
 
@@ -88,10 +99,10 @@ def upgradable(conn, city_id):
     return sorted(full, key=lambda b: (-shortage(b), b["id"]))
 
 
-def can_pay(conn, city, kingdom, places):
+def can_pay(conn, city, kingdom, places, factor=1.0):
     """(materials ok, gold the town has, gold it must borrow, can the crown lend it)"""
-    materials = all(city["resources"].get(r, 0) >= n * places for r, n in COST_PER_PLACE.items())
-    gold = GOLD_PER_PLACE * places
+    materials = all(city["resources"].get(r, 0) >= n * places * factor for r, n in COST_PER_PLACE.items())
+    gold = GOLD_PER_PLACE * places * factor
     purse = conn.execute("SELECT wealth FROM cities WHERE id = ?", (city["id"],)).fetchone()[0]
     from_town = min(max(0.0, purse), gold)
     loan = gold - from_town
@@ -105,13 +116,22 @@ def works_need(conn, kingdom):
     towns = [r[0] for r in conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND type != 'Village'", (kingdom["id"],))]
     if not towns:
         return 0.0
+    types = json.load(open(DATA / "Buildings" / "BuildingTypes.json"))
     ready = 0
     for town in towns:
+        city = get_city(conn, town)
         options = upgradable(conn, town)
+        can = False
         if options:
-            city = get_city(conn, town)
             materials, _, _, lendable = can_pay(conn, city, kingdom, places_added(options[0]["type"]))
-            ready += materials and lendable
+            can = materials and lendable
+        if not can and jobless_count(conn, town) >= MIN_JOBLESS:          # or it could build anew
+            for building_type in buildable(conn, town)[:3]:
+                materials, _, _, lendable = can_pay(conn, city, kingdom, types[building_type]["capacity"], NEW_BUILDING_FACTOR)
+                if materials and lendable:
+                    can = True
+                    break
+        ready += can
     return ready / len(towns)
 
 
@@ -120,9 +140,10 @@ def public_works(conn, kingdom):
     from Data.Database.repository import get_city, save_city
     from Data.Economy.jobs import hire_jobless
 
-    upgraded, towns, borrowed = 0, 0, 0.0
+    upgraded, built, towns, borrowed = 0, 0, 0, 0.0
     for town in [r[0] for r in conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND type != 'Village'", (kingdom["id"],))]:
         done_here = 0
+        added = 0
         for building in upgradable(conn, town)[:UPGRADES_PER_TOWN]:
             city = get_city(conn, town)
             places = places_added(building["type"])
@@ -140,9 +161,110 @@ def public_works(conn, kingdom):
                          (places, building["id"]))
             upgraded += 1
             done_here += 1
-        towns += done_here > 0
+            added += places
+        # then new buildings for whoever still waits (and Houses for the homeless)
+        new, loan = build_new(conn, town, kingdom, jobless_count(conn, town) - added)
+        built += new
+        borrowed += loan
+        towns += (done_here + new) > 0
 
-    if upgraded:
+    if upgraded or built:
         hire_jobless(conn, kingdom["world_id"])
     conn.commit()
-    return {"upgraded": upgraded, "towns": towns, "borrowed": round(borrowed, 2)}
+    return {"upgraded": upgraded, "built": built, "towns": towns, "borrowed": round(borrowed, 2)}
+
+
+
+def jobless_count(conn, city_id):
+    return conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Unemployed' AND age >= ?",
+                        (city_id, ADULT_AGE)).fetchone()[0]
+
+
+def homeless_count(conn, city_id):
+    return conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND home_id IS NULL AND age >= ?",
+                        (city_id, ADULT_AGE)).fetchone()[0]
+
+
+def buildable(conn, city_id):
+    """The kinds of workplace this town may build (its kit's, for a town of its size), those making what it lacks first."""
+    from Data.Economy.jobs import HIRING_CATEGORIES, trade_for_building
+    from Data.Database.repository import get_city
+    from Data.Economy.economy import get_target_stock
+    city = get_city(conn, city_id)
+    types = json.load(open(DATA / "Buildings" / "BuildingTypes.json"))
+    kit = json.load(open(DATA / "Buildings" / "CityBuildingKits.json")).get(city["type"], {})
+    production = json.load(open(DATA / "Economy" / "BuildingProduction.json"))
+    trades = trade_for_building()
+    allowed = [t for t, bounds in kit.items() if bounds[1] >= 1 and t in types and t in trades and types[t]["category"] in HIRING_CATEGORIES]
+
+    def shortage(t):
+        resource = production.get(t, {}).get("resource")
+        target = get_target_stock(resource, city) if resource else 0
+        return max(0.0, 1 - city["resources"].get(resource, 0) / target) if target else 0.0
+
+    return sorted(allowed, key=lambda t: (-shortage(t), -types[t]["capacity"], t))
+
+
+def construct(conn, city_id, building_type):
+    """A new building of this type in the town, named and placed in a district as the generator does."""
+    from Data.Database.repository import create_building
+    data = json.load(open(DATA / "Buildings" / "BuildingTypes.json"))[building_type]
+    building = create_building(conn, city_id, f"{building_type} #_", building_type, data["category"], data["capacity"])
+    # districts are one per category in each town (Data.Cities.districts): join it, or found it
+    district = conn.execute("SELECT id FROM districts WHERE city_id = ? AND category = ? ORDER BY id LIMIT 1",
+                            (city_id, data["category"])).fetchone()
+    district_id = district[0] if district else conn.execute(
+        "INSERT INTO districts (city_id, name, category) VALUES (?, ?, ?)", (city_id, f"{data['category']} District", data["category"])).lastrowid
+    conn.execute("UPDATE buildings SET name = ?, district_id = ? WHERE id = ?", (f"{building_type} #{building['id']}", district_id, building["id"]))
+    return building["id"]
+
+
+def pay(conn, city_id, kingdom, places, factor):
+    """Takes the price of `places` from the town (the crown lending what its purse lacks). Returns the loan, or None if it cannot pay."""
+    from Data.Database.repository import get_city, save_city
+    city = get_city(conn, city_id)
+    materials, from_town, loan, lendable = can_pay(conn, city, kingdom, places, factor)
+    if not materials or not lendable:
+        return None
+    for resource, per_place in COST_PER_PLACE.items():
+        city["resources"][resource] = round(city["resources"][resource] - per_place * places * factor, 2)
+    save_city(conn, city)
+    conn.execute("UPDATE cities SET wealth = wealth - ?, debt = debt + ? WHERE id = ?", (from_town, loan, city_id))
+    if loan:
+        conn.execute("UPDATE kingdoms SET treasury = treasury - ? WHERE id = ?", (loan, kingdom["id"]))
+    return loan
+
+
+def build_new(conn, city_id, kingdom, jobless_waiting):
+    """After its upgrades, a town builds new workplaces for jobless still waiting, and Houses for the homeless.
+    Returns (buildings built, gold borrowed)."""
+    types = json.load(open(DATA / "Buildings" / "BuildingTypes.json"))
+    built, borrowed = 0, 0.0
+    for building_type in buildable(conn, city_id):
+        if built >= BUILDS_PER_TOWN or jobless_waiting < MIN_JOBLESS:
+            break
+        places = types[building_type]["capacity"]
+        loan = pay(conn, city_id, kingdom, places, NEW_BUILDING_FACTOR)
+        if loan is None:
+            continue
+        construct(conn, city_id, building_type)
+        built += 1
+        borrowed += loan
+        jobless_waiting -= places
+
+    homeless = [r[0] for r in conn.execute(
+        "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND home_id IS NULL AND age >= ? ORDER BY id", (city_id, ADULT_AGE))]
+    house = types["House"]["capacity"]
+    houses = 0                         # Houses have their own allowance: a roof does not wait behind jobs
+    while len(homeless) >= HOMELESS_FOR_HOUSE and houses < BUILDS_PER_TOWN:
+        loan = pay(conn, city_id, kingdom, house, NEW_BUILDING_FACTOR)
+        if loan is None:
+            break
+        home = construct(conn, city_id, "House")
+        for npc_id in homeless[:house]:
+            conn.execute("UPDATE npcs SET home_id = ? WHERE id = ?", (home, npc_id))
+        homeless = homeless[house:]
+        houses += 1
+        built += 1
+        borrowed += loan
+    return built, borrowed
