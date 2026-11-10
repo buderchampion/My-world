@@ -499,6 +499,10 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["grow_villages(self.conn", "consider_settlement(self.conn"]},
     },
     {
+        "name": "Founding kingdoms start apart, with neutral ground between their settlements",
+        "wired": {"Data/Kingdoms/kingdom_generator.py": ["keep_clear(", "KINGDOM_SPACING", "NEUTRAL_GROUND"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1297,6 +1301,17 @@ def _smoke_body(r, holder):
                         f"{village['name']} is not under its nearest seat (or the crown, if the capital is nearest)"
 
         run_step(r, "every town besides the capital is a county; villages fall under the nearest seat or the crown", counties_made)
+
+        def kingdoms_start_apart():
+            # measured on fresh worlds: the closest settlements of two kingdoms start 345-716 apart (the
+            # neutral ground is 375; a crowded six-kingdom map cannot always keep it all), where unspaced
+            # placement put kingdoms touching (7-17 apart). 250 catches a return to that without flaking.
+            import math
+            rows = conn.execute("SELECT kingdom_id, map_x, map_y FROM cities").fetchall()
+            gap = min(math.dist((a["map_x"], a["map_y"]), (b["map_x"], b["map_y"])) for a in rows for b in rows if a["kingdom_id"] != b["kingdom_id"])
+            assert gap >= 250, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
+
+        run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
 
         def harvests_work():
             from Data.World import harvest as H

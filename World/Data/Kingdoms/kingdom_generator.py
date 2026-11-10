@@ -19,6 +19,9 @@ MAP_MARGIN = 150  # keeps kingdom centers off the very edge
 
 # How far from its kingdom's center a city can be placed.
 CAPITAL_JITTER = 40
+# kingdoms' centers keep this far apart: two kingdoms' spread plus the neutral
+# ground between their settlements (Data.World.expansion.NEUTRAL_GROUND = 375)
+KINGDOM_SPACING = 2 * 300 + 375
 CITY_SPREAD_RADIUS = 300
 
 # A small palette of visually distinct colors, cycled through so
@@ -83,13 +86,39 @@ def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
         return min(MAP_WIDTH - 1, max(0, point[0])), min(MAP_HEIGHT - 1, max(0, point[1]))
 
     if regions:
-        center_x, center_y = countryside.choose_site(regions, [
+        # Kingdoms keep wide neutral ground between them (as settlers do,
+        # Data.World.expansion): a new kingdom's center stays KINGDOM_SPACING
+        # from every other kingdom's capital, and each of its settlements
+        # NEUTRAL_GROUND from theirs. Where the map is too crowded for that,
+        # the farthest candidates are taken instead -- as much room as it allows.
+        from Data.World.expansion import NEUTRAL_GROUND
+        import math
+        foreign = conn.execute(
+            """SELECT c.map_x, c.map_y, c.type FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND c.kingdom_id != ?""", (world_id, kingdom["id"])).fetchall()
+        foreign_capitals = [(c["map_x"], c["map_y"]) for c in foreign if c["type"] == "Capital"]
+        foreign_settlements = [(c["map_x"], c["map_y"]) for c in foreign]
+
+        def keep_clear(candidates, others, gap):
+            """Candidates at least `gap` from all `others`; failing that, the farthest quarter of them."""
+            if not others:
+                return candidates
+            distance = lambda p: min(math.dist(p, o) for o in others)
+            clear = [p for p in candidates if distance(p) >= gap]
+            if clear:
+                return clear
+            ranked = sorted(candidates, key=distance, reverse=True)
+            return ranked[:max(1, len(ranked) // 4)]
+
+        center_x, center_y = countryside.choose_site(regions, keep_clear([
             (random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN), random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN))
-            for _ in range(countryside.KINGDOM_CANDIDATES)
-        ], best=True)
+            for _ in range(countryside.KINGDOM_CANDIDATES * (5 if foreign_capitals else 1))   # more to choose from, to find room
+        ], foreign_capitals, KINGDOM_SPACING), best=True)
 
         def site(radius, river=False, best=False):
-            candidates = [on_map(random_point_near(center_x, center_y, radius)) for _ in range(countryside.SITE_CANDIDATES)]
+            count = countryside.SITE_CANDIDATES * (3 if foreign_settlements else 1)              # more to choose from, to find room
+            candidates = [on_map(random_point_near(center_x, center_y, radius)) for _ in range(count)]
+            candidates = keep_clear(candidates, foreign_settlements, NEUTRAL_GROUND)
             return countryside.choose_site(regions, candidates, prefer_river=river, best=best)
     else:
         center_x = random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN)
