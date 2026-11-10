@@ -401,6 +401,11 @@ class SimulationManager:
         from Data.Government.rebellion import consider_rebellions
         consider_rebellions(self.conn, self.world_id)
 
+        # Every town taxes its citizens' savings into its own purse, and debtors
+        # repay the crown (Data.Buildings.upgrades).
+        from Data.Buildings.upgrades import collect_town_taxes
+        collect_town_taxes(self.conn, self.world_id)
+
         # The job market: the jobless take free places in their town (Data.Economy.jobs).
         from Data.Economy.jobs import hire_jobless
         hire_jobless(self.conn, self.world_id)

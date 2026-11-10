@@ -27,7 +27,7 @@
 # Every edict is logged; tax changes, the granary and martial law are
 # chronicled.
 
-EDICTS = ("lower taxes", "raise taxes", "festival", "open the granary", "ban food exports", "martial law")
+EDICTS = ("lower taxes", "raise taxes", "festival", "open the granary", "ban food exports", "martial law", "public works")
 
 ACT_THRESHOLD = 0.35
 SEASON_DAYS = 90
@@ -53,9 +53,10 @@ LEANS = {
     "open the granary": {"generosity": 0.6},
     "ban food exports": {"boldness": -0.6},
     "martial law":      {"mercy": -0.6, "boldness": 0.3},
+    "public works":     {"boldness": 0.4, "generosity": 0.3},     # builders: bold, and open-handed
 }
 
-CHRONICLED = {"lower taxes": "Edict (lower taxes)", "raise taxes": "Edict (raise taxes)",
+CHRONICLED = {"public works": "Edict (public works)", "lower taxes": "Edict (lower taxes)", "raise taxes": "Edict (raise taxes)",
               "open the granary": "Edict (open the granary)", "martial law": "Edict (martial law)"}
 
 
@@ -79,6 +80,7 @@ def lean(ruler, edict):
 
 def situation(conn, kingdom):
     """Everything a ruler weighs: the kingdom's health and its raw signs."""
+    from Data.Buildings.upgrades import works_need
     from Data.Combat.combat import DEFENDER_PROFESSIONS
     from Data.Government.feudal import RESTLESS_BELOW
 
@@ -103,6 +105,7 @@ def situation(conn, kingdom):
         "hungry_share": (villages["hungry"] or 0) / villages["n"] if villages["n"] else 0.0,
         "restless_share": (lords["restless"] or 0) / lords["n"] if lords["n"] else 0.0,
         "capital_food": capital_food,
+        "works_need": works_need(conn, kingdom),
         "unrest": kingdom["health_unrest"], "stability": kingdom["health_stability"], "loyalty": kingdom["health_loyalty"],
     }
 
@@ -126,6 +129,7 @@ def needs(kingdom, s, day):
         max(0.0, (kingdom["price_level"] or 1) - 1) / 1.5 + 0.5 * s["hungry_share"])
     n["martial law"] = 0.0 if martial_law_active(kingdom, day) or kingdom["treasury"] < MARTIAL_LAW_GOLD_PER_SOLDIER * s["soldiers"] \
         else min(1.0, max(0.0, (50 - s["stability"]) / 50) + 0.5 * s["restless_share"])
+    n["public works"] = min(1.0, s.get("works_need", 0.0))      # the share of towns bursting, and able to pay
     return n
 
 
@@ -211,6 +215,12 @@ def apply_edict(conn, kingdom, edict, day):
         for other in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND id != ?", (kingdom["world_id"], kid)):
             adjust_kingdom_favor(conn, other["id"], kid, EXPORT_BAN_FAVOR)
         return "no Food sold abroad this season"
+
+    if edict == "public works":
+        from Data.Buildings.upgrades import public_works
+        done = public_works(conn, kingdom)
+        loan = f", {done['borrowed']:.0f} gold lent by the crown" if done["borrowed"] else ""
+        return f"{done['upgraded']} buildings enlarged in {done['towns']} towns{loan}"
 
     if edict == "martial law":
         spend_treasury(conn, kid, MARTIAL_LAW_GOLD_PER_SOLDIER * s["soldiers"])

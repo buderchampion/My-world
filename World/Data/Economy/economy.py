@@ -628,6 +628,8 @@ def simulate_cross_kingdom_trade_day(
                         "paid": paid,
                         "received": received,
                         "buyer": buyer_kingdom["name"],
+                        "buyer_id": buyer_kingdom["id"],
+                        "seller_id": seller_kingdom["id"],
                         "seller": seller_kingdom["name"],
                     }
                 )

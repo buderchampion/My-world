@@ -508,6 +508,15 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["hire_jobless(self.conn"]},
     },
     {
+        "name": "Town treasuries and public works: towns tax their citizens; the ruler's edict enlarges full buildings, with crown loans",
+        "functions": {"Data/Buildings/upgrades.py": ["collect_town_taxes", "upgradable", "public_works", "works_need", "places_added", "can_pay"]},
+        "wired": {
+            "Data/Simulation/simulation_manager.py": ["collect_town_taxes(self.conn"],
+            "Data/Government/edicts.py": ['"public works"', "public_works(conn, kingdom)"],
+            "Data/Database/database.py": ['"level"', '"debt"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1136,14 +1145,14 @@ def _smoke_body(r, holder):
         trades = economy.simulate_cross_kingdom_trade_day(conn, world_id)
         conn.commit()
 
-        n = sum(1 for t in trades if t["buyer"] == buyer["name"] and t["seller"] == seller["name"])
+        n = sum(1 for t in trades if t["buyer_id"] == buyer["id"] and t["seller_id"] == seller["id"])   # by id: names need not be unique
 
         assert n > 0, "a forced Food shortage next to a Food surplus produced no trade at all"
 
         got_buyer = get_kingdom_favor(conn, buyer["id"], seller["id"])
         got_seller = get_kingdom_favor(conn, seller["id"], buyer["id"])
         # the seller may also have bought something from the buyer the same day
-        back = sum(1 for t in trades if t["buyer"] == seller["name"] and t["seller"] == buyer["name"])
+        back = sum(1 for t in trades if t["buyer_id"] == seller["id"] and t["seller_id"] == buyer["id"])
         want_buyer = n * economy.TRADE_FAVOR_GAIN + back * economy.TRADE_FAVOR_LOSS
         want_seller = n * economy.TRADE_FAVOR_LOSS + back * economy.TRADE_FAVOR_GAIN
 
@@ -1925,6 +1934,14 @@ def _smoke_body(r, holder):
 
     run_step(r, "(setup) two workers die in a full workplace just before the month tick", prepare_vacancies)
 
+    def empty_purses():
+        # right before the month tick: every town's purse empty. Towns also earn gold selling food each day,
+        # but the month tick sells nothing -- so whatever is in the purses after it is the town tax.
+        conn.execute("UPDATE cities SET wealth = 0")
+        conn.commit()
+
+    run_step(r, "(setup) every town's purse empty just before the month tick", empty_purses)
+
     run_step(r, "month tick (families, relationships, tourism, migration)", manager.on_month)
 
     def month_tick_moves_the_starving():
@@ -1958,6 +1975,11 @@ def _smoke_body(r, holder):
             f"the month tick did not fill the dead workers' places with jobless townsfolk ({filled} of {vacancy['capacity']} {vacancy['trade']}s)"
 
     run_step(r, "the month tick's job market fills the places of the dead with jobless townsfolk of that trade", month_tick_fills_vacancies)
+
+    def month_tick_fills_purses():
+        assert conn.execute("SELECT COALESCE(SUM(wealth), 0) FROM cities").fetchone()[0] > 0, "the month tick did not tax the towns into their purses"
+
+    run_step(r, "the month tick taxes every town's citizens into its purse", month_tick_fills_purses)
 
     def rulers_saved():
         saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]
@@ -2170,6 +2192,8 @@ def _smoke_body(r, holder):
         saved_traits = tuple(conn.execute("SELECT generosity, mercy, boldness FROM npcs WHERE id = ?", (ruler,)).fetchone())
         saved_lords = conn.execute("SELECT id, loyalty FROM provinces WHERE kingdom_id = ?", (kingdom["id"],)).fetchall()
         # a calm realm is a fed one: its villages' hunger and its people's meals are staged too, and restored after
+        # a quiet realm has no works to call for either: its towns have no Wood to build with (restored after)
+        saved_wood = conn.execute("SELECT city_id, amount FROM city_resources WHERE resource_name = 'Wood' AND city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],)).fetchall()
         saved_hunger = conn.execute("SELECT id, hungry_days FROM cities WHERE kingdom_id = ?", (kingdom["id"],)).fetchall()
         saved_meals = conn.execute("SELECT n.id, n.fed FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ?", (kingdom["id"],)).fetchall()
         try:
@@ -2178,6 +2202,7 @@ def _smoke_body(r, holder):
                             WHERE id = ?""", (kingdom["id"],))
             conn.execute("UPDATE provinces SET loyalty = 65 WHERE kingdom_id = ?", (kingdom["id"],))
             conn.execute("UPDATE cities SET hungry_days = 0 WHERE kingdom_id = ?", (kingdom["id"],))
+            conn.execute("UPDATE city_resources SET amount = 0 WHERE resource_name = 'Wood' AND city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],))
             conn.execute("UPDATE npcs SET fed = 1 WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],))
             conn.execute("DELETE FROM kingdom_edicts WHERE kingdom_id = ?", (kingdom["id"],))
             conn.commit()
@@ -2214,10 +2239,39 @@ def _smoke_body(r, holder):
             conn.execute("UPDATE npcs SET generosity = ?, mercy = ?, boldness = ? WHERE id = ?", (*saved_traits, ruler))
             conn.executemany("UPDATE provinces SET loyalty = ? WHERE id = ?", [(row["loyalty"], row["id"]) for row in saved_lords])
             conn.executemany("UPDATE cities SET hungry_days = ? WHERE id = ?", [(row["hungry_days"], row["id"]) for row in saved_hunger])
+            conn.executemany("UPDATE city_resources SET amount = ? WHERE resource_name = 'Wood' AND city_id = ?", [(row["amount"], row["city_id"]) for row in saved_wood])
             conn.executemany("UPDATE npcs SET fed = ? WHERE id = ?", [(row["fed"], row["id"]) for row in saved_meals])
             conn.commit()
 
     run_step(r, "rulers choose edicts by their nature; the seasons bring reviews; an export ban keeps Food home", rulers_issue_edicts)
+
+    def public_works_enlarge():
+        import Data.Buildings.upgrades as U
+        import Data.Government.edicts as E
+        from Data.Database.repository import get_city, save_city
+        kingdom = dict(conn.execute("""SELECT k.* FROM kingdoms k WHERE k.world_id = ? AND k.status != 'Fallen' AND
+            (SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = k.id AND n.alive = 1 AND n.profession = 'Unemployed') > 20
+            ORDER BY k.id LIMIT 1""", (world_id,)).fetchone())
+        towns = [row[0] for row in conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND type != 'Village'", (kingdom["id"],))]
+        for town in towns:
+            city = get_city(conn, town)
+            city["resources"].update({"Wood": 2000.0, "Stone": 2000.0, "Tools": 2000.0})
+            save_city(conn, city)
+        conn.execute("UPDATE cities SET wealth = 0, debt = 0 WHERE kingdom_id = ?", (kingdom["id"],))
+        conn.execute("UPDATE kingdoms SET treasury = 1000000 WHERE id = ?", (kingdom["id"],))
+        conn.commit()
+        assert E.situation(conn, kingdom)["works_need"] > 0, "a realm with jobless towns that can build feels no need for public works"
+
+        levels_before = conn.execute("SELECT COALESCE(SUM(level), 0) FROM buildings WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],)).fetchone()[0]
+        what = E.apply_edict(conn, kingdom, "public works", E.today(conn, world_id))
+        levels_after = conn.execute("SELECT COALESCE(SUM(level), 0) FROM buildings WHERE city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],)).fetchone()[0]
+        assert levels_after > levels_before, f"the public works edict enlarged nothing ({what})"
+        assert conn.execute("SELECT MIN(amount) FROM city_resources WHERE resource_name = 'Wood' AND city_id IN (SELECT id FROM cities WHERE kingdom_id = ? AND type != 'Village')",
+                            (kingdom["id"],)).fetchone()[0] < 2000, "public works cost the towns no materials"
+        assert conn.execute("SELECT SUM(debt) FROM cities WHERE kingdom_id = ?", (kingdom["id"],)).fetchone()[0] > 0, \
+            "towns with empty purses did not borrow from the crown for their works"
+
+    run_step(r, "the public works edict enlarges full buildings with the towns' materials, the crown lending what their purses lack", public_works_enlarge)
 
     def republics_trade():
         import Data.Government.republic as RP

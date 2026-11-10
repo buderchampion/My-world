@@ -63,7 +63,12 @@ BIAS_RANGE = (0.5, 2.0)
 
 def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
 
-    kingdom = create_kingdom(conn, world_id, generate_kingdom_name(), color)
+    # a name no other kingdom in this world bears (two realms of one name would confuse every chronicle)
+    taken = {row[0] for row in conn.execute("SELECT name FROM kingdoms WHERE world_id = ?", (world_id,))}
+    name = next((n for n in (generate_kingdom_name() for _ in range(200)) if n not in taken), None)
+    if name is None:
+        name = f"{generate_kingdom_name()} {len(taken) + 1}"
+    kingdom = create_kingdom(conn, world_id, name, color)
 
     # a Crown or a merchant Republic (Data.Government.republic)
     conn.execute("UPDATE kingdoms SET type = ? WHERE id = ?", (kingdom_type, kingdom["id"]))

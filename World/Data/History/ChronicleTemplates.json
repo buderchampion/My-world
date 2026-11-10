@@ -193,5 +193,10 @@
         "{When}, families out of {other} crossed the wild lands and raised {city} far beyond its reach; and there they founded a realm of their own, {kingdom}.",
         "{When}, settlers from {other} built {city} in the empty country, too far for any crown to rule, and named their new realm {kingdom}.",
         "{When}, {kingdom} was born on the frontier: settlers from {other} founded {city}, and owed no crown but their own."
+    ],
+    "Edict (public works)": [
+        "{When}, the {nature} {title} {ruler} of {kingdom} decreed great works: workshops were enlarged, and the idle of the towns set to labor.",
+        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, set the masons and carpenters to work, and the towns grew.",
+        "{When}, {kingdom}'s {nature} {title}, {ruler}, ordered the towns to build, that their idle hands might find work."
     ]
 }
