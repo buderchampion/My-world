@@ -260,7 +260,7 @@ def form_relationships(conn, city):
 
     for npc in npcs:
 
-        if npc["workplace"] is not None:
+        if npc["alive"] and npc["workplace"] is not None:
             by_workplace[npc["workplace"]].append(npc)
 
     for coworkers in by_workplace.values():

@@ -67,7 +67,7 @@ def form_families(conn, city):
 
     eligible = [
         npc for npc in npcs
-        if npc["age"] >= MIN_MARRY_AGE and npc["spouse"] is None
+        if npc["alive"] and npc["age"] >= MIN_MARRY_AGE and npc["spouse"] is None     # the dead do not marry
     ]
 
     random.shuffle(eligible)

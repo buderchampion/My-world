@@ -100,9 +100,12 @@ def rise(conn, occupation):
     garrison_power = side_power(garrison)
 
     freed = rebel_power > 0 and (garrison_power <= 0 or random.random() < rebel_power / (rebel_power + garrison_power))
-    for npc in apply_casualties(conn, rebels, won=freed):
-        death_event(conn, npc, "Uprising", kingdom_id=occupation["occupier_kingdom_id"])
-    for npc in apply_casualties(conn, garrison, won=not freed):
+    rebel_dead = apply_casualties(conn, rebels, won=freed)
+    garrison_dead = apply_casualties(conn, garrison, won=not freed)
+    from Data.Combat.nemesis import record_battle          # who slew whom
+    record_battle(conn, rebels, rebel_dead, garrison, garrison_dead, city_id=town["id"], context="uprising",
+                  kingdom_id=occupation["occupier_kingdom_id"])
+    for npc in rebel_dead + garrison_dead:
         death_event(conn, npc, "Uprising", kingdom_id=occupation["occupier_kingdom_id"])
 
     occupier = get_kingdom(conn, occupation["occupier_kingdom_id"])

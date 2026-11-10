@@ -248,6 +248,28 @@ CREATE TABLE IF NOT EXISTS campaigns (
     starving_days        INTEGER NOT NULL DEFAULT 0 -- days in a row the besieged town has had no Food
 );
 
+-- The nemesis engine (Data.Combat.nemesis): the killings of notable people, and
+-- the one-way grievances their kin and friends hold against the killers.
+CREATE TABLE IF NOT EXISTS killings (
+    id           INTEGER PRIMARY KEY,
+    killer_id    INTEGER NOT NULL REFERENCES npcs(id),
+    victim_id    INTEGER NOT NULL REFERENCES npcs(id),
+    day          INTEGER NOT NULL,
+    city_id      INTEGER REFERENCES cities(id),
+    context      TEXT NOT NULL,          -- raid, war, civil war, rising, uprising (later: duel, assassination)
+    victim_rank  TEXT NOT NULL           -- monarch, lord, mayor, knight, captain, champion
+);
+
+CREATE TABLE IF NOT EXISTS grievances (
+    holder_id   INTEGER NOT NULL REFERENCES npcs(id),
+    target_id   INTEGER NOT NULL REFERENCES npcs(id),
+    amount      REAL NOT NULL,
+    reason      TEXT NOT NULL,
+    since_day   INTEGER NOT NULL,
+    settled     INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (holder_id, target_id)
+);
+
 -- Occupations: a conquered town held by a garrison for a year (Data.Government.occupation).
 CREATE TABLE IF NOT EXISTS occupations (
     id                   INTEGER PRIMARY KEY,

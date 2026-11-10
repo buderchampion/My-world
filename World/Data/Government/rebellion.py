@@ -143,7 +143,11 @@ def rise(conn, leader, allies=()):
     rebel_power = sum(get_combat_power(n) for n in fighters) + mercenaries * average
     rebels_win = (rebel_power > 0) and (crown_power <= 0 or random.random() < rebel_power / (rebel_power + crown_power))
 
-    for npc in apply_casualties(conn, fighters, won=rebels_win) + apply_casualties(conn, crown, won=not rebels_win):
+    rebel_dead = apply_casualties(conn, fighters, won=rebels_win)
+    crown_dead = apply_casualties(conn, crown, won=not rebels_win)
+    from Data.Combat.nemesis import record_battle          # who slew whom
+    record_battle(conn, fighters, rebel_dead, crown, crown_dead, context="rising", kingdom_id=kingdom["id"])
+    for npc in rebel_dead + crown_dead:
         death_event(conn, npc, "Rebellion", kingdom_id=kingdom["id"])
 
     send_levies_home(conn, [n["id"] for n in levies])

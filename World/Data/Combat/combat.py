@@ -200,6 +200,11 @@ def resolve_raid(conn, city, bandit_camp):
     attacker_deaths = apply_casualties(conn, attackers, won=attackers_win)
     defender_deaths = apply_casualties(conn, defenders, won=not attackers_win)
 
+    # who slew whom (Data.Combat.nemesis)
+    from Data.Combat.nemesis import record_battle
+    record_battle(conn, attackers, attacker_deaths, defenders, defender_deaths, city_id=city["id"], context="raid",
+                  kingdom_id=city.get("kingdom"))
+
     from Data.Events.events import death_event
     from Data.Relationships.relationships import apply_grief
     for npc in attacker_deaths + defender_deaths:
@@ -363,6 +368,11 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
 
     attacker_deaths = apply_casualties(conn, attacker_military, won=attacker_wins, armor_share=attacker_armor)
     defender_deaths = apply_casualties(conn, defender_military, won=not attacker_wins, armor_share=defender_armor)
+
+    # who slew whom (Data.Combat.nemesis)
+    from Data.Combat.nemesis import record_battle
+    record_battle(conn, attacker_military, attacker_deaths, defender_military, defender_deaths,
+                  city_id=target_city["id"] if target_city else None, context="war", kingdom_id=defender_kingdom["id"])
 
     captured_city = None
     spoils = 0
@@ -592,6 +602,10 @@ def resolve_civil_war(conn, kingdom, cities, current_year):
 
     loyalist_deaths = apply_casualties(conn, loyalists, won=not rebels_win)
     rebel_deaths = apply_casualties(conn, rebels, won=rebels_win)
+
+    # who slew whom (Data.Combat.nemesis)
+    from Data.Combat.nemesis import record_battle
+    record_battle(conn, loyalists, loyalist_deaths, rebels, rebel_deaths, context="civil war", kingdom_id=kingdom["id"])
 
     # The chronicle tells of the uprising before anyone who fell in it --
     # the deaths below, a ruler's included, follow it.

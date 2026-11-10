@@ -49,15 +49,16 @@ def assign_city_ruler(conn, city):
 
     npcs = get_city_npcs(conn, city["id"])
 
+    # only the living can rule: a city's people include its dead
     candidates = [
         npc for npc in npcs
-        if npc["profession"] in RULER_CANDIDATE_PROFESSIONS and npc["title"] is None
+        if npc["alive"] and npc["profession"] in RULER_CANDIDATE_PROFESSIONS and npc["title"] is None
     ]
 
     if not candidates:
         candidates = [
             npc for npc in npcs
-            if npc["profession"] not in NON_RULER_PROFESSIONS and npc["title"] is None
+            if npc["alive"] and npc["profession"] not in NON_RULER_PROFESSIONS and npc["title"] is None
         ]
 
     if not candidates:

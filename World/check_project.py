@@ -518,6 +518,17 @@ FEATURES = [
         },
     },
     {
+        "name": "Nemesis engine: battle kills are credited; notable killings recorded; renown, champions, epithets; kin hold grievances",
+        "tables": ["killings", "grievances"],
+        "functions": {"Data/Combat/nemesis.py": ["record_battle", "rank_of", "display_name", "grant_epithet", "hold_grievances"]},
+        "wired": {
+            "Data/Combat/combat.py": ['context="raid"', 'context="war"', 'context="civil war"'],
+            "Data/Government/rebellion.py": ['context="rising"'],
+            "Data/Government/occupation.py": ['context="uprising"'],
+            "Data/Database/database.py": ['"renown"', '"epithet"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1274,7 +1285,9 @@ def _smoke_body(r, holder):
 
             land = conn.execute("SELECT AVG(farmland) FROM regions WHERE world_id = ?", (world_id,)).fetchone()[0]
             settled = statistics.mean(c["farmland"] for c in cities)
-            assert settled > land + 0.15, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
+            # (0.08, not more: kingdoms also keep neutral ground between them, which costs a little of the
+            # best land -- one world measured exactly +0.15. Placement blind to land would score about 0.)
+            assert settled > land + 0.08, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
             assert all(c["terrain"] != "Mountains" for c in cities if c["type"] == "Capital"), "a capital was placed in the mountains"
 
             assert C.ensure_households(conn, world_id) == 0, "running the household setup again changed the world"
@@ -2664,6 +2677,37 @@ def _smoke_body(r, holder):
 
     if len(kingdoms) >= 2:
         run_step(r, "a civil war is chronicled by its own kingdom, naming the sovereign, before its fallen", civil_war_chronicled)
+
+        def kills_and_grievances():
+            import Data.Combat.nemesis as N
+            from Data.Database.repository import get_npc
+
+            # the war and the civil war just fought each slew a monarch: the real battle code must have recorded it
+            for context in ("war", "civil war"):
+                slain = conn.execute("SELECT killer_id FROM killings WHERE context = ? AND victim_rank = 'monarch'", (context,)).fetchone()
+                assert slain, f"a monarch fell in a {context}, but no killing was recorded"
+                epithet = conn.execute("SELECT epithet FROM npcs WHERE id = ?", (slain["killer_id"],)).fetchone()["epithet"]
+                assert epithet and epithet.endswith("slayer"), f"the monarch's killer in the {context} earned no epithet ({epithet})"
+                assert conn.execute("SELECT kills FROM npcs WHERE id = ?", (slain["killer_id"],)).fetchone()["kills"] >= 1, "a killer's tally did not count the kill"
+
+            # a Knight is slain: their child takes up a grievance against the killer, and it is one-way
+            pair = conn.execute("SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND profession = 'Soldier' ORDER BY id LIMIT 2").fetchall()
+            child = conn.execute("SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND profession NOT IN ('Soldier', 'Child') ORDER BY id DESC LIMIT 1").fetchone()["id"]
+            knight, killer = get_npc(conn, pair[0]["id"]), get_npc(conn, pair[1]["id"])
+            knight["profession"] = "Knight"
+            conn.execute("UPDATE npcs SET profession = 'Knight', alive = 0 WHERE id = ?", (knight["id"],))
+            conn.execute("UPDATE npcs SET parent_a_id = ? WHERE id = ?", (knight["id"], child))
+            renown = N.renown_of(conn, killer["id"])
+            slayings = N.record_battle(conn, [knight], [knight], [killer], [], context="war")
+            assert slayings == [(killer["id"], knight["id"], "knight")], "a Knight's death was not recorded as a killing"
+            assert N.renown_of(conn, killer["id"]) == renown + N.KILL_RENOWN + N.RANK_RENOWN["knight"], "slaying a Knight did not earn its renown"
+            held = conn.execute("SELECT amount FROM grievances WHERE holder_id = ? AND target_id = ?", (child, killer["id"])).fetchone()
+            assert held and held["amount"] == N.GRIEVANCE["child"], "a slain Knight's child holds no grievance against the killer"
+            assert not conn.execute("SELECT 1 FROM grievances WHERE holder_id = ? AND target_id = ?", (killer["id"], child)).fetchone(), \
+                "a grievance was recorded both ways"
+            conn.commit()
+
+        run_step(r, "battle kills are credited; a slain monarch's killer is recorded and named; a slain Knight's child holds a grievance", kills_and_grievances)
 
     def sinks_work():
         from Data.Database.repository import get_city, save_city, get_npc

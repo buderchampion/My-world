@@ -57,6 +57,13 @@ def init_database():
     # suits of armor an army carries (Data.Combat.combat)
     _add_missing_columns(connection, "armies", {"armor": "REAL NOT NULL DEFAULT 0", "tools": "REAL NOT NULL DEFAULT 0"})
 
+    # kills, renown and epithets (Data.Combat.nemesis)
+    _add_missing_columns(connection, "npcs", {
+        "kills": "INTEGER NOT NULL DEFAULT 0",
+        "renown": "REAL NOT NULL DEFAULT 0",
+        "epithet": "TEXT",
+    })
+
     # building levels, and what a town owes the crown (Data.Buildings.upgrades)
     _add_missing_columns(connection, "buildings", {"level": "INTEGER NOT NULL DEFAULT 1"})
     _add_missing_columns(connection, "cities", {"debt": "REAL NOT NULL DEFAULT 0"})
