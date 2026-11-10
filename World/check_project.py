@@ -494,6 +494,11 @@ FEATURES = [
         },
     },
     {
+        "name": "Expansion: villages grow on their land; crowded lands send settlers to empty farmland, keeping neutral ground",
+        "functions": {"Data/World/expansion.py": ["grow_villages", "consider_settlement", "find_site", "settle", "region_fill"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["grow_villages(self.conn", "consider_settlement(self.conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2869,6 +2874,40 @@ def _smoke_body(r, holder):
         manager.on_month()
 
     run_step(r, "a capital falls and the seat moves; a kingdom that loses everything falls, and the world goes on", capitals_fall)
+
+    def settlers_found_villages():
+        import math
+        import Data.World.expansion as EX
+
+        people = lambda: conn.execute("SELECT SUM(households) * 5 + SUM(population) FROM cities").fetchone()[0]
+        before_ids = {row[0] for row in conn.execute("SELECT id FROM cities")}
+        settled_regions = {row[0] for row in conn.execute("SELECT DISTINCT region_id FROM cities WHERE region_id IS NOT NULL")}
+        households_before = conn.execute("SELECT SUM(households) FROM cities").fetchone()[0]
+        assert EX.grow_villages(conn, world_id) >= 0
+        assert conn.execute("SELECT SUM(households) FROM cities").fetchone()[0] >= households_before, "villages shrank in a year of growth"
+
+        population = people()
+        saved = (EX.CROWDED, EX.SETTLE_CHANCE, EX.REALM_CHANCE)
+        EX.CROWDED, EX.SETTLE_CHANCE, EX.REALM_CHANCE = 0.0, 1.0, 0.0      # every kingdom sends settlers, none found a realm
+        try:
+            founded = EX.consider_settlement(conn, world_id)
+        finally:
+            EX.CROWDED, EX.SETTLE_CHANCE, EX.REALM_CHANCE = saved
+        assert founded, "no kingdom sent settlers to found a village"
+        assert abs(people() - population) < 0.01, "settling made people appear from nowhere (or lose them)"
+        for village_id in founded:
+            v = conn.execute("SELECT * FROM cities WHERE id = ?", (village_id,)).fetchone()
+            assert village_id not in before_ids and v["type"] == "Village" and v["households"] > 0, "a settlement is not a new village with households"
+            assert v["region_id"] not in settled_regions, "settlers took land in a region already settled"
+            capital = conn.execute("SELECT capital_city_id FROM kingdoms WHERE id = ?", (v["kingdom_id"],)).fetchone()[0]
+            assert conn.execute("SELECT 1 FROM roads WHERE (city_a_id = ? AND city_b_id = ?) OR (city_a_id = ? AND city_b_id = ?)",
+                                (village_id, capital, capital, village_id)).fetchone(), "a new village has no road to its capital"
+            nearest_foreign = min((math.dist((v["map_x"], v["map_y"]), (o["map_x"], o["map_y"]))
+                                   for o in conn.execute("SELECT map_x, map_y FROM cities WHERE kingdom_id != ?", (v["kingdom_id"],))), default=1e9)
+            assert nearest_foreign >= EX.NEUTRAL_GROUND - 45, \
+                f"a new village sits {nearest_foreign:.0f} from another kingdom's settlement, inside the neutral ground ({EX.NEUTRAL_GROUND})"
+
+    run_step(r, "villages grow; settlers found villages on empty land, keeping neutral ground between kingdoms", settlers_found_villages)
 
     # --- invariants that should hold after any amount of simulation ----------
 

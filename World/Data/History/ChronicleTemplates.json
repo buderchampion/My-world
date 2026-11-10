@@ -188,5 +188,10 @@
         "{When}, {kingdom} took {city}, the last town of {other}, and that realm passed from the world; {fate}.",
         "{When}, {kingdom} made an end of {other}: {city}, its last stronghold, was stormed, and {fate}.",
         "{When}, with the fall of {city}, {other} was no more -- conquered by {kingdom}; {fate}."
+    ],
+    "Realm Founded (settlers)": [
+        "{When}, families out of {other} crossed the wild lands and raised {city} far beyond its reach; and there they founded a realm of their own, {kingdom}.",
+        "{When}, settlers from {other} built {city} in the empty country, too far for any crown to rule, and named their new realm {kingdom}.",
+        "{When}, {kingdom} was born on the frontier: settlers from {other} founded {city}, and owed no crown but their own."
     ]
 }

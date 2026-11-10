@@ -543,6 +543,12 @@ class SimulationManager:
 
         self.conn.commit()
 
+        # Villages grow, and crowded lands send settlers to found new villages --
+        # now and then, far from the crown, a new realm (Data.World.expansion).
+        from Data.World.expansion import grow_villages, consider_settlement
+        grow_villages(self.conn, self.world_id)
+        consider_settlement(self.conn, self.world_id)
+
 
 def run_realtime(conn, world_id, sim_minutes_per_real_second: float = 1.0, on_tick=None, max_ticks: int | None = None):
     """
