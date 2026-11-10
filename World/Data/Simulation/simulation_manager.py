@@ -401,6 +401,10 @@ class SimulationManager:
         from Data.Government.rebellion import consider_rebellions
         consider_rebellions(self.conn, self.world_id)
 
+        # The job market: the jobless take free places in their town (Data.Economy.jobs).
+        from Data.Economy.jobs import hire_jobless
+        hire_jobless(self.conn, self.world_id)
+
         # Republics' grain offices top up their reserves from abroad
         # (Data.Government.republic).
         from Data.Government.republic import run_grain_offices

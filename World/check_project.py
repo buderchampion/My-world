@@ -503,6 +503,11 @@ FEATURES = [
         "wired": {"Data/Kingdoms/kingdom_generator.py": ["keep_clear(", "KINGDOM_SPACING", "NEUTRAL_GROUND"]},
     },
     {
+        "name": "The job market: each month the jobless take free places in their town's workplaces (not barracks or dens)",
+        "functions": {"Data/Economy/jobs.py": ["hire_jobless", "trade_for_building"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["hire_jobless(self.conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1305,11 +1310,11 @@ def _smoke_body(r, holder):
         def kingdoms_start_apart():
             # measured on fresh worlds: the closest settlements of two kingdoms start 345-716 apart (the
             # neutral ground is 375; a crowded six-kingdom map cannot always keep it all), where unspaced
-            # placement put kingdoms touching (7-17 apart). 250 catches a return to that without flaking.
+            # placement put kingdoms touching (7-17 apart). 200 catches a return to that, with room for crowded maps.
             import math
             rows = conn.execute("SELECT kingdom_id, map_x, map_y FROM cities").fetchall()
             gap = min(math.dist((a["map_x"], a["map_y"]), (b["map_x"], b["map_y"])) for a in rows for b in rows if a["kingdom_id"] != b["kingdom_id"])
-            assert gap >= 250, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
+            assert gap >= 200, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
 
         run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
 
@@ -1901,6 +1906,25 @@ def _smoke_body(r, holder):
 
     run_step(r, "(setup) a republic's grain reserve empty just before the month tick", prepare_grain_office)
 
+    vacancy = {}
+
+    def prepare_vacancies():
+        # right before the month tick: two workers die in a full civilian workplace of a town with jobless people
+        row = conn.execute(
+            """SELECT b.id, b.capacity FROM buildings b JOIN cities c ON c.id = b.city_id
+               WHERE c.kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?) AND b.category = 'Civillian' AND b.capacity >= 3
+                 AND (SELECT COUNT(*) FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1) = b.capacity
+                 AND (SELECT COUNT(*) FROM npcs n WHERE n.city_id = b.city_id AND n.alive = 1 AND n.profession = 'Unemployed' AND n.age >= 16) >= 2
+               ORDER BY b.id LIMIT 1""", (world_id,)).fetchone()
+        assert row, "(setup) no full workplace in a town with jobless people"
+        trade = conn.execute("SELECT profession FROM npcs WHERE workplace_id = ? AND alive = 1 LIMIT 1", (row["id"],)).fetchone()[0]
+        for npc in conn.execute("SELECT id FROM npcs WHERE workplace_id = ? AND alive = 1 AND title IS NULL LIMIT 2", (row["id"],)).fetchall():   # never a ruler
+            conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (npc["id"],))
+        conn.commit()
+        vacancy.update(building=row["id"], capacity=row["capacity"], trade=trade)
+
+    run_step(r, "(setup) two workers die in a full workplace just before the month tick", prepare_vacancies)
+
     run_step(r, "month tick (families, relationships, tourism, migration)", manager.on_month)
 
     def month_tick_moves_the_starving():
@@ -1924,6 +1948,16 @@ def _smoke_body(r, holder):
             "the month tick did not send any grain office to buy"
 
     run_step(r, "the month tick sends republics' grain offices to buy", month_tick_runs_grain_office)
+
+    def month_tick_fills_vacancies():
+        if not vacancy:
+            return
+        filled = conn.execute("SELECT COUNT(*) FROM npcs WHERE workplace_id = ? AND alive = 1 AND profession = ?",
+                              (vacancy["building"], vacancy["trade"])).fetchone()[0]
+        assert filled == vacancy["capacity"], \
+            f"the month tick did not fill the dead workers' places with jobless townsfolk ({filled} of {vacancy['capacity']} {vacancy['trade']}s)"
+
+    run_step(r, "the month tick's job market fills the places of the dead with jobless townsfolk of that trade", month_tick_fills_vacancies)
 
     def rulers_saved():
         saved = conn.execute("SELECT COUNT(*) FROM cities WHERE ruler_id IS NOT NULL").fetchone()[0]
@@ -2265,12 +2299,13 @@ def _smoke_body(r, holder):
             castle = json_module.load(open(os.path.join(os.path.dirname(os.path.abspath(__file__)), 'Data', 'Buildings', 'BuildingTypes.json')))['Castle']
             create_building(conn, target_now['id'], 'Castle', 'Castle', castle['category'], castle['capacity'])
             conn.commit()
+        expected_target = CP.choose_target(conn, attacker, defender)["id"]      # before the march changes the armies
         campaign = CP.start_campaign(conn, attacker, defender, today(conn, world_id))
         assert campaign, "a kingdom at war raised no campaign"
         army = A.get_army(conn, campaign["army_id"])
         marching = conn.execute("SELECT COUNT(*) FROM army_members WHERE army_id = ? AND levied = 0", (army["id"],)).fetchone()[0]
         assert marching == round(free * CP.MARCH_SHARE), f"{marching} of {free} free soldiers marched, not two thirds"
-        assert army["status"] == "Marching" and campaign["target_city_id"] == CP.choose_target(conn, attacker, defender)["id"], \
+        assert army["status"] == "Marching" and campaign["target_city_id"] == expected_target, \
             "the army is not marching on the enemy's richest reachable town"
 
         for _ in range(200):

@@ -110,10 +110,12 @@ def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
             ranked = sorted(candidates, key=distance, reverse=True)
             return ranked[:max(1, len(ranked) // 4)]
 
-        center_x, center_y = countryside.choose_site(regions, keep_clear([
-            (random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN), random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN))
-            for _ in range(countryside.KINGDOM_CANDIDATES * (5 if foreign_capitals else 1))   # more to choose from, to find room
-        ], foreign_capitals, KINGDOM_SPACING), best=True)
+        # decent land first (a kingdom is not founded on a mountain), then room from the others
+        pool = [(random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN), random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN))
+                for _ in range(countryside.KINGDOM_CANDIDATES * (8 if foreign_capitals else 1))]   # more to choose from, to find room
+        decent = [p for p in pool if countryside.region_at(regions, *p)["terrain"] != "Mountains"
+                  and countryside.region_at(regions, *p)["farmland"] > 0] or pool
+        center_x, center_y = countryside.choose_site(regions, keep_clear(decent, foreign_capitals, KINGDOM_SPACING), best=True)
 
         def site(radius, river=False, best=False):
             count = countryside.SITE_CANDIDATES * (3 if foreign_settlements else 1)              # more to choose from, to find room
