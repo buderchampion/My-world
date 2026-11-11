@@ -131,6 +131,9 @@ def works_need(conn, kingdom):
                 if materials and lendable:
                     can = True
                     break
+        if not can and homeless_count(conn, town) + len(crowded_out(conn, town)) >= HOMELESS_FOR_HOUSE:   # or it needs Houses
+            materials, _, _, lendable = can_pay(conn, city, kingdom, types["House"]["capacity"], NEW_BUILDING_FACTOR)
+            can = materials and lendable
         ready += can
     return ready / len(towns)
 
@@ -254,6 +257,7 @@ def build_new(conn, city_id, kingdom, jobless_waiting):
 
     homeless = [r[0] for r in conn.execute(
         "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND home_id IS NULL AND age >= ? ORDER BY id", (city_id, ADULT_AGE))]
+    homeless += crowded_out(conn, city_id)       # adults beyond their house's places need a roof too
     house = types["House"]["capacity"]
     houses = 0                         # Houses have their own allowance: a roof does not wait behind jobs
     while len(homeless) >= HOMELESS_FOR_HOUSE and houses < BUILDS_PER_TOWN:
@@ -268,3 +272,30 @@ def build_new(conn, city_id, kingdom, jobless_waiting):
         built += 1
         borrowed += loan
     return built, borrowed
+
+
+
+def crowded_out(conn, city_id):
+    """In each overfull house, the adults beyond its places -- the youngest grown first, each with their
+    spouse if they share the house -- who would move to a new House."""
+    out = []
+    for house in conn.execute(
+        """SELECT b.id, b.capacity, (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) people
+           FROM buildings b WHERE b.city_id = ? AND b.type = 'House'""", (city_id,)).fetchall():
+        excess = house["people"] - house["capacity"]
+        if excess <= 0:
+            continue
+        for adult in conn.execute(
+            "SELECT id, spouse_id FROM npcs WHERE home_id = ? AND alive = 1 AND age >= ? ORDER BY age, id", (house["id"], ADULT_AGE)).fetchall():
+            if excess <= 0:
+                break
+            if adult["id"] in out:
+                continue
+            out.append(adult["id"])
+            excess -= 1
+            spouse = adult["spouse_id"]
+            if spouse and spouse not in out and conn.execute(
+                    "SELECT 1 FROM npcs WHERE id = ? AND home_id = ? AND alive = 1", (spouse, house["id"])).fetchone():
+                out.append(spouse)                    # couples move together
+                excess -= 1
+    return out

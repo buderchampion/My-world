@@ -16,14 +16,41 @@ CHILD_CHANCE = 0.5
 MAX_CHILDREN = 3
 
 
-def marry(npc_a, npc_b):
+def residents(conn, house_id):
+    """How many living people call this house home."""
+    if not house_id:
+        return 0
+    return conn.execute("SELECT COUNT(*) FROM npcs WHERE home_id = ? AND alive = 1", (house_id,)).fetchone()[0]
+
+
+def room_in(conn, house_id, needed):
+    """Does this house have room for `needed` more?"""
+    if not house_id:
+        return False
+    capacity = conn.execute("SELECT capacity FROM buildings WHERE id = ?", (house_id,)).fetchone()
+    return bool(capacity) and residents(conn, house_id) + needed <= capacity[0]
+
+
+def marry(npc_a, npc_b, conn=None):
 
     npc_a["spouse"] = npc_b["id"]
     npc_b["spouse"] = npc_a["id"]
 
-    # Move npc_b in with npc_a so the couple actually lives together.
-    # (No building lists to update -- home_id on npc_b IS the residency.)
-    npc_b["home"] = npc_a["home"]
+    # The couple lives together, where there is room: npc_a's home, else
+    # npc_b's, else any house in town with room for both. Only if the whole
+    # town is full do they crowd into npc_a's home (public works then counts
+    # the crowding as a need for Houses -- Data.Buildings.upgrades).
+    # (No building lists to update -- home_id IS the residency.)
+    if conn is None or room_in(conn, npc_a["home"], 1):
+        npc_b["home"] = npc_a["home"]
+    elif room_in(conn, npc_b["home"], 1):
+        npc_a["home"] = npc_b["home"]
+    else:
+        house = conn.execute(
+            """SELECT b.id FROM buildings b WHERE b.city_id = ? AND b.type = 'House'
+               AND b.capacity - (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) >= 2
+               ORDER BY b.id LIMIT 1""", (npc_a["city_id"],)).fetchone()
+        npc_a["home"] = npc_b["home"] = house[0] if house else npc_a["home"]
 
 
 def create_child(conn, parent_a, parent_b, city_type):
@@ -83,7 +110,9 @@ def form_families(conn, city):
         if random.random() > MARRIAGE_CHANCE:
             continue
 
-        marry(npc_a, npc_b)
+        marry(npc_a, npc_b, conn)
+        save_npc(conn, npc_a)          # housed at once, so the next couple counts them
+        save_npc(conn, npc_b)
         new_marriages.append((npc_a, npc_b))
 
         can_have_children = (

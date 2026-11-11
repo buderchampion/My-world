@@ -594,6 +594,11 @@ def simulate_cross_kingdom_trade_day(
                 affordable_amount = int(current_treasury / (price_per_unit * duty_rate(seller_kingdom, buyer_kingdom)) * 100) / 100
                 amount = min(amount, affordable_amount)
 
+                # the goods leave from the seller's capital, so it can only ship what the capital
+                # actually holds -- the kingdom's surplus may lie in its other towns
+                on_hand = max(0.0, seller_capital["resources"].get(resource, 0))
+                amount = round(min(amount, on_hand), 2)
+
                 if amount <= 0:
                     continue
 
