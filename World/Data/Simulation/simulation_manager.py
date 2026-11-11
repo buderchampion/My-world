@@ -303,6 +303,10 @@ class SimulationManager:
         collect_tourist_revenue(self.conn, self.world_id)
         travel_result = advance_npc_travels(self.conn, self.world_id)
 
+        # An avenger who has reached their nemesis's town challenges them (Data.Combat.vendetta).
+        from Data.Combat.vendetta import arrivals
+        arrivals(self.conn, self.world_id)
+
         from Data.Infrastructure.migration import relocate_npc
         for trip in travel_result["arrived"]:
             if trip["purpose"] == "Migration":
@@ -400,6 +404,11 @@ class SimulationManager:
         # its freedom (Data.Government.rebellion).
         from Data.Government.rebellion import consider_rebellions
         consider_rebellions(self.conn, self.world_id)
+
+        # Old scores: avengers train, hire blades, duel, or set out to find
+        # their nemesis (Data.Combat.vendetta).
+        from Data.Combat.vendetta import pursue_vendettas
+        pursue_vendettas(self.conn, self.world_id)
 
         # Every town taxes its citizens' savings into its own purse, and debtors
         # repay the crown (Data.Buildings.upgrades).

@@ -531,6 +531,12 @@ FEATURES = [
         },
     },
     {
+        "name": "Nemesis engine in peacetime: avengers train, duel, journey to their nemesis, or hire assassins",
+        "functions": {"Data/Combat/vendetta.py": ["pursue_vendettas", "arrivals", "train", "hire_assassin"],
+                      "Data/Combat/nemesis.py": ["duel", "win_chance"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["pursue_vendettas(self.conn", "arrivals(self.conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2728,6 +2734,84 @@ def _smoke_body(r, holder):
             conn.commit()
 
         run_step(r, "battle kills are credited; a slain monarch's killer is named; a slain Knight's child holds a grievance, and takes vengeance in battle", kills_and_grievances)
+
+        def revenge_in_peacetime():
+            import random as random_module
+            import Data.Combat.nemesis as N
+            import Data.Combat.vendetta as V
+
+            class Dice:
+                def __init__(self, *rolls): self.rolls = list(rolls)
+                def random(self): return self.rolls.pop(0) if len(self.rolls) > 1 else self.rolls[0]
+                def __getattr__(self, name): return getattr(random_module, name)
+
+            towns = [row[0] for row in conn.execute(
+                """SELECT c.id FROM cities c WHERE c.type != 'Village' AND c.kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen')
+                   AND (SELECT COUNT(*) FROM npcs n WHERE n.city_id = c.id AND n.alive = 1 AND n.title IS NULL AND n.profession NOT IN ('Child', 'Thief')) >= 6
+                   ORDER BY c.id LIMIT 2""", (world_id,))]
+            used = set()
+
+            def cast(same_town=True, age=40, trade="Farmer", foe="Soldier", gold=0, boldness=0):
+                def pick(town):
+                    marks = ",".join(str(i) for i in used) or "0"
+                    npc = conn.execute(f"SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND title IS NULL AND profession NOT IN ('Child', 'Thief') "
+                                       f"AND id NOT IN ({marks}) AND id NOT IN (SELECT npc_id FROM army_members) ORDER BY id DESC LIMIT 1", (town,)).fetchone()[0]
+                    used.add(npc)
+                    return npc
+                avenger, nemesis = pick(towns[0]), pick(towns[0] if same_town else towns[1])
+                conn.execute("DELETE FROM npc_skills WHERE npc_id IN (?, ?)", (avenger, nemesis))
+                conn.execute("DELETE FROM npc_travels WHERE npc_id IN (?, ?)", (avenger, nemesis))
+                conn.execute("UPDATE npcs SET age = ?, profession = ?, gold = ?, boldness = ? WHERE id = ?", (age, trade, gold, boldness, avenger))
+                conn.execute("UPDATE npcs SET age = 35, profession = ? WHERE id = ?", (foe, nemesis))
+                conn.execute("UPDATE grievances SET settled = 1")                       # only this feud is live
+                conn.execute("INSERT OR REPLACE INTO grievances (holder_id, target_id, amount, reason, since_day, settled) VALUES (?, ?, 100, 'slew their parent, Edmund', 0, 0)",
+                             (avenger, nemesis))
+                conn.commit()
+                return avenger, nemesis
+
+            alive = lambda npc: conn.execute("SELECT alive FROM npcs WHERE id = ?", (npc,)).fetchone()[0]
+            saved_v, saved_n = V.random, N.random
+            try:
+                # a youth no match for a Knight trains
+                avenger, nemesis = cast(age=18, foe="Knight")
+                assert V.pursue_vendettas(conn, world_id) == [(avenger, "train")], "a young avenger no match for their nemesis did not train"
+                learned = conn.execute("SELECT level FROM npc_skills WHERE npc_id = ? AND skill_name = ?", (avenger, V.TRAINING_SKILL)).fetchone()
+                assert learned and learned[0] == 1, "a month's training taught the avenger nothing"
+
+                # a ready avenger duels their nemesis in the town they share
+                avenger, nemesis = cast(trade="Soldier", foe="Farmer")
+                V.random, N.random = Dice(0.0), Dice(0.0)
+                assert V.pursue_vendettas(conn, world_id) == [(avenger, "duel: won")] and not alive(nemesis), "a ready avenger did not duel their nemesis"
+                assert conn.execute("SELECT context FROM killings ORDER BY id DESC LIMIT 1").fetchone()[0] == "duel", "the duel was not recorded as one"
+
+                # a nemesis elsewhere: the avenger sets out, and fights on arriving
+                avenger, nemesis = cast(same_town=False, trade="Soldier", foe="Farmer")
+                V.random, N.random = Dice(0.0), saved_n
+                assert V.pursue_vendettas(conn, world_id) == [(avenger, "journey")], "an avenger did not set out to find a nemesis who lives elsewhere"
+                conn.execute("UPDATE npc_travels SET status = 'Staying', days_remaining = 3 WHERE npc_id = ? AND purpose = 'Vengeance'", (avenger,))
+                conn.commit()
+                N.random = Dice(0.0)
+                assert V.arrivals(conn, world_id) == [(avenger, nemesis, True)] and not alive(nemesis), "an avenger who arrived did not fight their nemesis"
+
+                # too old to train, no match for a Knight, but rich: a hired blade
+                avenger, nemesis = cast(age=60, foe="Knight", gold=1000)
+                town = conn.execute("SELECT city_id FROM npcs WHERE id = ?", (nemesis,)).fetchone()[0]
+                conn.execute("UPDATE npcs SET profession = 'Unemployed' WHERE city_id = ? AND profession = 'Thief'", (town,))
+                blade = conn.execute("SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND title IS NULL AND profession != 'Child' AND id NOT IN (?, ?) ORDER BY id LIMIT 1",
+                                     (town, avenger, nemesis)).fetchone()[0]
+                conn.execute("UPDATE npcs SET profession = 'Thief' WHERE id = ?", (blade,))
+                conn.commit()
+                V.random, N.random = Dice(0.0, 0.999999), saved_n
+                assert V.pursue_vendettas(conn, world_id) == [(avenger, "assassin: killed")] and not alive(nemesis), "a rich avenger's hired blade did not kill"
+                last = conn.execute("SELECT killer_id, context FROM killings ORDER BY id DESC LIMIT 1").fetchone()
+                assert (last["killer_id"], last["context"]) == (blade, "assassination"), "the murder was not recorded as the hired Thief's"
+                assert conn.execute("SELECT gold FROM npcs WHERE id = ?", (avenger,)).fetchone()[0] == 1000 - V.ASSASSIN_FEE, "the patron did not pay the blade"
+            finally:
+                V.random, N.random = saved_v, saved_n
+                conn.execute("UPDATE grievances SET settled = 1")
+                conn.commit()
+
+        run_step(r, "in peacetime an avenger trains, duels, journeys to their nemesis, or hires a blade", revenge_in_peacetime)
 
     def sinks_work():
         from Data.Database.repository import get_city, save_city, get_npc

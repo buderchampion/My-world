@@ -103,8 +103,9 @@ def grant_epithet(conn, npc_id, epithet):
     return True
 
 
-def hold_grievances(conn, victim_id, killer_id, day):
-    """The victim's kin and close friends take up a grievance against the killer. Returns how many did."""
+def hold_grievances(conn, victim_id, killer_id, day, deed="slew"):
+    """The victim's kin and close friends take up a grievance against the killer (or, with another `deed`,
+    against whoever is to blame: "paid for the murder of"). Returns how many did."""
     from Data.Government.succession import children_of, parents_of, siblings_of, spouse_of
 
     holders = {}
@@ -132,7 +133,7 @@ def hold_grievances(conn, victim_id, killer_id, day):
         conn.execute(
             """INSERT INTO grievances (holder_id, target_id, amount, reason, since_day, settled) VALUES (?, ?, ?, ?, ?, 0)
                ON CONFLICT(holder_id, target_id) DO UPDATE SET amount = MIN(?, grievances.amount + excluded.amount), settled = 0""",
-            (holder, killer_id, amount, f"slew their {'friend' if kind == 'friend' else kind_of_victim(kind)}, {victim_name}", day, MAX_GRIEVANCE))
+            (holder, killer_id, amount, f"{deed} their {'friend' if kind == 'friend' else kind_of_victim(kind)}, {victim_name}", day, MAX_GRIEVANCE))
         count += 1
     return count
 
@@ -269,38 +270,58 @@ def seek_nemeses(conn, side_a, side_b, city_id=None, context="battle"):
         holder, target = feud["holder_id"], feud["target_id"]
         if (holder in a) == (target in a) or holder in fought or target in fought:
             continue                                          # same side, or one of them has already dueled
-        avenger = a.get(holder) or b.get(holder)
-        nemesis = a.get(target) or b.get(target)
         fought.update((holder, target))
-
-        world = conn.execute("SELECT k.world_id FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id WHERE n.id = ?",
-                             (holder,)).fetchone()["world_id"]
-        day = today(conn, world)
-        place = conn.execute("SELECT name FROM cities WHERE id = ?", (city_id,)).fetchone() if city_id else None
-        where = place["name"] if place else "the field of battle"
-
-        fury = 1 + FURY * min(1.0, feud["amount"] / MAX_GRIEVANCE)
-        power_a, power_n = max(0.1, get_combat_power(avenger)) * fury, max(0.1, get_combat_power(nemesis))
-        avenger_won = random.random() < power_a / (power_a + power_n)
-        avenger_name, nemesis_name = display_name(conn, holder), display_name(conn, target)
-
-        if avenger_won:
-            slay(conn, avenger, nemesis, city_id, "revenge", day, f"slain in vengeance by {avenger_name}")
-            conn.execute("UPDATE grievances SET settled = 1 WHERE holder_id = ? AND target_id = ?", (holder, target))
-            conn.execute("UPDATE npcs SET renown = renown + ? WHERE id = ?", (VENGEANCE_RENOWN, holder))
-            grant_epithet(conn, holder, "the Avenger")
-            kingdom_id = _kingdom_of(conn, holder)
-            create_event(conn, "Vengeance", f"{avenger_name} found {nemesis_name}, who {feud['reason']}, at {where}, and slew them.",
-                         participants=[holder, target], city_id=city_id, kingdom_id=kingdom_id)
-            if kingdom_id:
-                year, season = current_date(conn, world)
-                kingdom = conn.execute("SELECT name FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()["name"]
-                write_entry(conn, kingdom_id, "Vengeance", "Vengeance (battle)", year, season,
-                            {"kingdom": kingdom, "avenger": avenger_name, "nemesis": nemesis_name, "reason": feud["reason"], "city": where},
-                            seed_parts=(holder, target))
-        else:
-            slay(conn, nemesis, avenger, city_id, "revenge", day, f"slain seeking vengeance on {nemesis_name}")
-            create_event(conn, "Vengeance", f"{avenger_name} sought out {nemesis_name}, who {feud['reason']}, at {where} -- and fell to them.",
-                         participants=[holder, target], city_id=city_id, kingdom_id=_kingdom_of(conn, target))
-        duels.append((holder, target, avenger_won))
+        won = duel(conn, feud, a.get(holder) or b.get(holder), a.get(target) or b.get(target), city_id,
+                   context="revenge", template="Vengeance (battle)")
+        duels.append((holder, target, won))
     return duels
+
+
+def win_chance(conn, feud, avenger, nemesis):
+    """The avenger's chance in single combat: strength against strength, their fury included."""
+    from Data.Combat.combat import get_combat_power
+    fury = 1 + FURY * min(1.0, feud["amount"] / MAX_GRIEVANCE)
+    power_a, power_n = max(0.1, get_combat_power(avenger)) * fury, max(0.1, get_combat_power(nemesis))
+    return power_a / (power_a + power_n)
+
+
+def duel(conn, feud, avenger, nemesis, city_id, context, template):
+    """
+    Single combat to the death between the holder of a grievance and its
+    target -- in the press of battle, or in peacetime (Data.Combat.vendetta).
+    The loser dies; an avenger who wins settles the grievance and is
+    chronicled. Returns True if the avenger won.
+    """
+    from Data.Database.repository import create_event
+    from Data.Government.edicts import today
+    from Data.History.chronicle import write_entry, current_date
+
+    holder, target = avenger["id"], nemesis["id"]
+    world = conn.execute("SELECT k.world_id FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id WHERE n.id = ?",
+                         (holder,)).fetchone()["world_id"]
+    day = today(conn, world)
+    place = conn.execute("SELECT name FROM cities WHERE id = ?", (city_id,)).fetchone() if city_id else None
+    where = place["name"] if place else "the field of battle"
+
+    avenger_won = random.random() < win_chance(conn, feud, avenger, nemesis)
+    avenger_name, nemesis_name = display_name(conn, holder), display_name(conn, target)
+
+    if avenger_won:
+        slay(conn, avenger, nemesis, city_id, context, day, f"slain in vengeance by {avenger_name}")
+        conn.execute("UPDATE grievances SET settled = 1 WHERE holder_id = ? AND target_id = ?", (holder, target))
+        conn.execute("UPDATE npcs SET renown = renown + ? WHERE id = ?", (VENGEANCE_RENOWN, holder))
+        grant_epithet(conn, holder, "the Avenger")
+        kingdom_id = _kingdom_of(conn, holder)
+        create_event(conn, "Vengeance", f"{avenger_name} found {nemesis_name}, who {feud['reason']}, at {where}, and slew them.",
+                     participants=[holder, target], city_id=city_id, kingdom_id=kingdom_id)
+        if kingdom_id:
+            year, season = current_date(conn, world)
+            kingdom = conn.execute("SELECT name FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()["name"]
+            write_entry(conn, kingdom_id, "Vengeance", template, year, season,
+                        {"kingdom": kingdom, "avenger": avenger_name, "nemesis": nemesis_name, "reason": feud["reason"], "city": where},
+                        seed_parts=(holder, target))
+    else:
+        slay(conn, nemesis, avenger, city_id, context, day, f"slain seeking vengeance on {nemesis_name}")
+        create_event(conn, "Vengeance", f"{avenger_name} sought out {nemesis_name}, who {feud['reason']}, at {where} -- and fell to them.",
+                     participants=[holder, target], city_id=city_id, kingdom_id=_kingdom_of(conn, target))
+    return avenger_won

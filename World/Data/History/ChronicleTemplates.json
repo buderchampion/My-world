@@ -203,5 +203,10 @@
         "{When}, at {city}, {avenger} of {kingdom} came face to face with {nemesis}, who {reason} -- and cut them down.",
         "{When}, {avenger} had vengeance at {city}: {nemesis}, who {reason}, fell to their blade.",
         "{When}, an old score was settled at {city}. {avenger} of {kingdom} slew {nemesis}, who {reason}."
+    ],
+    "Vengeance (duel)": [
+        "{When}, {avenger} of {kingdom} challenged {nemesis}, who {reason}, in {city} -- and left them dead.",
+        "{When}, in {city}, {avenger} called out {nemesis}, who {reason}. They fought, and {nemesis} did not rise.",
+        "{When}, {avenger} of {kingdom} had waited long for {nemesis}, who {reason}. In {city} the waiting ended, by the sword."
     ]
 }
