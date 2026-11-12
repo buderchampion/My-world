@@ -18,7 +18,7 @@ LOW_HUNGER_THRESHOLD = 40
 SOCIAL_BUILDING_TYPES = ("Tavern", "Market")
 FOOD_BUILDING_TYPES = ("Tavern", "Market", "Bakery")
 
-NO_SCHEDULE_PROFESSIONS = ("Unemployed", "Child")
+NO_SCHEDULE_PROFESSIONS = ("Laborer", "Child")
 
 
 def load_json(file):

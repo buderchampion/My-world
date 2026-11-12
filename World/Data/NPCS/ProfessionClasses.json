@@ -57,7 +57,7 @@
     "Merchant": {
         "classes": [
             "Bard",
-            "Rouge",
+            "Rogue",
             "Wizard",
             "Fighter",
             "None"
@@ -66,7 +66,7 @@
 
     "Tailor": {
         "classes": [
-            "Rouge",
+            "Rogue",
             "None"
         ]
     },
@@ -112,7 +112,7 @@
             "Bard",
             "Monk",
             "Warlock",
-            "Rouge",
+            "Rogue",
             "None"
         ]
     },
@@ -179,7 +179,7 @@
     "Alchemist": {
         "classes": [
             "Cleric",
-            "Rouge",
+            "Rogue",
             "Sorcerer",
             "None"
         ]
@@ -198,7 +198,7 @@
     "Thief": {
         "classes": [
             "Fighter",
-            "Rouge",
+            "Rogue",
             "Monk",
             "None"
         ]
@@ -208,7 +208,7 @@
         "classes": [
             "Fighter",
             "Sorcerer",
-            "Rouge",
+            "Rogue",
             "Bard",
             "Barbarian"
         ]
@@ -217,12 +217,12 @@
     "Bandit": {
         "classes": [
             "Fighter",
-            "Rouge",
+            "Rogue",
             "None"
         ]
     },
 
-    "Unemployed": {
+    "Laborer": {
         "classes": [
             "None"
         ]

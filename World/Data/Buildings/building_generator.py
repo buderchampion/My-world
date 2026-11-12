@@ -153,7 +153,7 @@ def ensure_production_chain_buildings(conn, city_id, city_type):
         for mill in new_mills:
             mill_slots.extend([mill["id"]] * mill_capacity)
 
-        unemployed = [n for n in npcs if n["alive"] and n["profession"] == "Unemployed"]
+        unemployed = [n for n in npcs if n["alive"] and n["profession"] == "Laborer"]
 
         for npc, slot in zip(unemployed, mill_slots):
             npc["profession"] = "Miller"

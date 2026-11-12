@@ -35,7 +35,7 @@ def make_individual(conn, village_id, city_id=None, profession="Farmer", age=Non
     Turns one of a village's peasants into an individual NPC: the village
     loses a fifth of a household, and the new NPC lives in city_id (the
     village itself if None), working as `profession` if that city has an
-    open place for it (otherwise Unemployed -- unless needs_workplace is
+    open place for it (otherwise Laborer -- unless needs_workplace is
     False, as for a levy, who serves in an army rather than at a building),
     and housed if it has an open house. Returns the NPC.
     """
@@ -60,7 +60,7 @@ def make_individual(conn, village_id, city_id=None, profession="Farmer", age=Non
         if workplace:
             npc["workplace"] = workplace["id"]
         elif profession != "Child" and needs_workplace:
-            npc["profession"] = "Unemployed"      # no place for that trade here
+            npc["profession"] = "Laborer"      # no place for that trade here
 
     house = find_open_building(conn, city_id, "House", "home_id")
     if house:
@@ -91,8 +91,8 @@ def _move_family(conn, village, town_id):
     if not find_open_building(conn, town_id, "House", "home_id"):
         return None
 
-    husband = make_individual(conn, village["id"], town_id, "Unemployed", age=random.randint(20, 45), gender="Male")
-    wife = make_individual(conn, village["id"], town_id, "Unemployed", age=max(18, husband["age"] + random.randint(-6, 3)), gender="Female")
+    husband = make_individual(conn, village["id"], town_id, "Laborer", age=random.randint(20, 45), gender="Male")
+    wife = make_individual(conn, village["id"], town_id, "Laborer", age=max(18, husband["age"] + random.randint(-6, 3)), gender="Female")
     wife["home"] = husband["home"]
     marry(husband, wife)
     save_npc(conn, husband)
@@ -248,7 +248,7 @@ def levy_villagers(conn, kingdom_id, count):
 
 def send_levies_home(conn, npc_ids):
     """A disbanded army's levies go back to the land: each becomes a Farmer
-    in their own village if it has an open farm, otherwise Unemployed."""
+    in their own village if it has an open farm, otherwise Laborer."""
 
     from Data.Database.repository import get_npc, save_npc, find_open_building
 
@@ -257,6 +257,6 @@ def send_levies_home(conn, npc_ids):
         if npc is None or not npc["alive"]:
             continue
         farm = find_open_building(conn, npc["city_id"], "Farm", "workplace_id")
-        npc["profession"] = "Farmer" if farm else "Unemployed"
+        npc["profession"] = "Farmer" if farm else "Laborer"
         npc["workplace"] = farm["id"] if farm else None
         save_npc(conn, npc)

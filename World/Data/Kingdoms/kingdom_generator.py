@@ -122,19 +122,21 @@ def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
                   and countryside.region_at(regions, *p)["farmland"] > 0] or pool
         center_x, center_y = countryside.choose_site(regions, keep_clear(decent, foreign_capitals, KINGDOM_SPACING), best=True)
 
-        def site(radius, river=False, best=False):
+        def site(radius, river=False, best=False, lowland=False):
             count = countryside.SITE_CANDIDATES * (3 if foreign_settlements else 1)              # more to choose from, to find room
             candidates = [on_map(random_point_near(center_x, center_y, radius)) for _ in range(count)]
+            if lowland:                    # a capital is not built on a mountain, even near one
+                candidates = [p for p in candidates if countryside.region_at(regions, *p)["terrain"] != "Mountains"] or candidates
             candidates = keep_clear(candidates, foreign_settlements, NEUTRAL_GROUND)
             return countryside.choose_site(regions, candidates, prefer_river=river, best=best)
     else:
         center_x = random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN)
         center_y = random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN)
 
-        def site(radius, river=False, best=False):
+        def site(radius, river=False, best=False, lowland=False):
             return random_point_near(center_x, center_y, radius)
 
-    capital_x, capital_y = site(CAPITAL_JITTER, river=True, best=True)
+    capital_x, capital_y = site(CAPITAL_JITTER, river=True, best=True, lowland=True)
 
     capital = generate_city(conn, kingdom["id"], "Capital", capital_x, capital_y, biases)
 

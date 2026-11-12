@@ -108,9 +108,9 @@ def relocate_npc(conn, npc_id, new_city_id):
 
     Also makes a fresh attempt at employment in their existing
     profession (if there's an open building for it in the new city)
-    -- falls back to Unemployed if there isn't, since a job that
+    -- falls back to Laborer if there isn't, since a job that
     doesn't exist anywhere in the new city obviously can't carry
-    over. Children (profession "Child") and the already-Unemployed
+    over. Children (profession "Child") and the already-Laborer
     skip the employment step entirely.
     """
 
@@ -131,7 +131,7 @@ def relocate_npc(conn, npc_id, new_city_id):
         npc["home"] = new_home["id"]
         npc["location"] = new_home["id"]
 
-    if npc["profession"] not in ("Unemployed", "Child"):
+    if npc["profession"] not in ("Laborer", "Child"):
 
         profession_buildings = load_json(PROFESSION_BUILDINGS)
         building_type = get_building_type(npc["profession"], profession_buildings)
@@ -144,7 +144,7 @@ def relocate_npc(conn, npc_id, new_city_id):
         if new_workplace:
             npc["workplace"] = new_workplace["id"]
         else:
-            npc["profession"] = "Unemployed"
+            npc["profession"] = "Laborer"
             npc["workplace"] = None
 
     save_npc(conn, npc)

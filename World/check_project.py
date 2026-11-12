@@ -554,6 +554,11 @@ FEATURES = [
         "wired": {"Data/World/world_generator.py": ["found_families(conn"]},
     },
     {
+        "name": "Contentment: happiness drifts toward what a person's life is like, not up from where they spend their hours",
+        "functions": {"Data/NPCS/contentment.py": ["life_levels", "drift_happiness"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["drift_happiness(self.conn"], "Data/Events/events.py": ["died_day"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1151,7 +1156,8 @@ def _smoke_body(r, holder):
 
     kingdoms = get_world_kingdoms(conn, world_id)
     npc_count = conn.execute("SELECT COUNT(*) FROM npcs").fetchone()[0]
-    r.info(f"{len(kingdoms)} kingdoms, {npc_count} NPCs")
+    seed = conn.execute("SELECT seed FROM worlds WHERE id = ?", (world_id,)).fetchone()[0]
+    r.info(f"{len(kingdoms)} kingdoms, {npc_count} NPCs, seed {seed}  (rebuild this exact world: python saves.py new {seed})")
 
     # --- forced scenarios, run on the fresh world before any ticking ---------
 
@@ -1313,7 +1319,8 @@ def _smoke_body(r, holder):
             # (0.08, not more: kingdoms also keep neutral ground between them, which costs a little of the
             # best land -- one world measured exactly +0.15. Placement blind to land would score about 0.)
             assert settled > land + 0.08, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
-            assert all(c["terrain"] != "Mountains" for c in cities if c["type"] == "Capital"), "a capital was placed in the mountains"
+            assert all(c["terrain"] != "Mountains" for c in cities if c["type"] == "Capital"), \
+                "a capital was placed in the mountains: " + ", ".join(c["name"] for c in cities if c["type"] == "Capital" and c["terrain"] == "Mountains")
 
             assert C.ensure_households(conn, world_id) == 0, "running the household setup again changed the world"
 
@@ -1421,6 +1428,26 @@ def _smoke_body(r, holder):
                 conn.commit()
 
         run_step(r, "half the adults over 25 start married; close friends court for six months before marrying; married couples have children", families)
+
+        def contentment():
+            import Data.NPCS.contentment as CT
+            from Data.Government.edicts import today
+            pair = conn.execute("""SELECT a.id, a.spouse_id FROM npcs a JOIN npcs b ON b.id = a.spouse_id
+                                   WHERE a.alive = 1 AND b.alive = 1 AND a.age BETWEEN 25 AND 50 AND a.home_id IS NOT NULL LIMIT 1""").fetchone()
+            content, spouse = pair["id"], pair["spouse_id"]
+            lonely = conn.execute("SELECT id FROM npcs WHERE alive = 1 AND age BETWEEN 25 AND 50 AND spouse_id IS NULL AND id != ? LIMIT 1", (spouse,)).fetchone()[0]
+            smith = conn.execute("SELECT profession FROM npcs WHERE alive = 1 AND workplace_id IS NOT NULL AND profession NOT IN ('Laborer', 'Child') LIMIT 1").fetchone()[0]
+            conn.execute("UPDATE npcs SET fed = 1, gold = 500, needs_stress = 0, needs_happiness = 100, profession = ? WHERE id = ?", (smith, content))
+            conn.execute("UPDATE npcs SET fed = 0, gold = 0, needs_stress = 60, needs_happiness = 100, profession = 'Laborer', home_id = NULL WHERE id = ?", (lonely,))
+            conn.commit()
+            for _ in range(30):
+                CT.drift_happiness(conn, world_id, today(conn, world_id))
+            happy = lambda i: conn.execute("SELECT needs_happiness FROM npcs WHERE id = ?", (i,)).fetchone()[0]
+            assert 70 <= happy(content) < 100, f"a fed, housed, married tradesman's happiness did not settle where life puts it ({happy(content)})"
+            assert happy(lonely) <= 40, f"a hungry, homeless, penniless laborer is still at {happy(lonely)} after a month"
+            assert not conn.execute("SELECT 1 FROM npcs WHERE alive = 1 AND profession = 'Unemployed'").fetchone(), "someone is still 'Unemployed' (they are Laborers)"
+
+        run_step(r, "happiness follows life: a fed, housed, married tradesman stays content; a hungry homeless laborer sinks", contentment)
 
         def seeds_and_saves():
             import sqlite3 as sqlite_module
@@ -1584,7 +1611,7 @@ def _smoke_body(r, holder):
 
             if fled:
                 couple = conn.execute(
-                    """SELECT id, spouse_id FROM npcs WHERE spouse_id IS NOT NULL AND profession = 'Unemployed'
+                    """SELECT id, spouse_id FROM npcs WHERE spouse_id IS NOT NULL AND profession = 'Laborer'
                        ORDER BY id DESC LIMIT 1"""
                 ).fetchone()
                 partner = get_npc(conn, couple["spouse_id"])
@@ -1599,7 +1626,7 @@ def _smoke_body(r, holder):
             assert len(levied) == 4, f"an army raised with 4 levies has {len(levied)}"
             assert all(get_npc(conn, i)["profession"] == "Soldier" for i in levied), "levied men are not serving as Soldiers"
             assert A.disband_army(conn, army["id"]), "the army with levies could not disband at home"
-            assert all(get_npc(conn, i)["profession"] in ("Farmer", "Unemployed") for i in levied), \
+            assert all(get_npc(conn, i)["profession"] in ("Farmer", "Laborer") for i in levied), \
                 "levies did not go back to the land when their army disbanded"
 
 
@@ -2061,7 +2088,7 @@ def _smoke_body(r, holder):
             """SELECT b.id, b.capacity FROM buildings b JOIN cities c ON c.id = b.city_id
                WHERE c.kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?) AND b.category = 'Civillian' AND b.capacity >= 3
                  AND (SELECT COUNT(*) FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1) = b.capacity
-                 AND (SELECT COUNT(*) FROM npcs n WHERE n.city_id = b.city_id AND n.alive = 1 AND n.profession = 'Unemployed' AND n.age >= 16) >= 2
+                 AND (SELECT COUNT(*) FROM npcs n WHERE n.city_id = b.city_id AND n.alive = 1 AND n.profession = 'Laborer' AND n.age >= 16) >= 2
                ORDER BY b.id LIMIT 1""", (world_id,)).fetchone()
         assert row, "(setup) no full workplace in a town with jobless people"
         trade = conn.execute("SELECT profession FROM npcs WHERE workplace_id = ? AND alive = 1 LIMIT 1", (row["id"],)).fetchone()[0]
@@ -2388,7 +2415,7 @@ def _smoke_body(r, holder):
         import Data.Government.edicts as E
         from Data.Database.repository import get_city, save_city
         kingdom = dict(conn.execute("""SELECT k.* FROM kingdoms k WHERE k.world_id = ? AND k.status != 'Fallen' AND
-            (SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = k.id AND n.alive = 1 AND n.profession = 'Unemployed') > 20
+            (SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = k.id AND n.alive = 1 AND n.profession = 'Laborer') > 20
             ORDER BY k.id LIMIT 1""", (world_id,)).fetchone())
         towns = [row[0] for row in conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND type != 'Village'", (kingdom["id"],))]
         for town in towns:
@@ -2911,7 +2938,7 @@ def _smoke_body(r, holder):
                 # too old to train, no match for a Knight, but rich: a hired blade
                 avenger, nemesis = cast(age=60, foe="Knight", gold=1000)
                 town = conn.execute("SELECT city_id FROM npcs WHERE id = ?", (nemesis,)).fetchone()[0]
-                conn.execute("UPDATE npcs SET profession = 'Unemployed' WHERE city_id = ? AND profession = 'Thief'", (town,))
+                conn.execute("UPDATE npcs SET profession = 'Laborer' WHERE city_id = ? AND profession = 'Thief'", (town,))
                 blade = conn.execute("SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND title IS NULL AND profession != 'Child' AND id NOT IN (?, ?) ORDER BY id LIMIT 1",
                                      (town, avenger, nemesis)).fetchone()[0]
                 conn.execute("UPDATE npcs SET profession = 'Thief' WHERE id = ?", (blade,))
@@ -3148,12 +3175,12 @@ def _smoke_body(r, holder):
         # list -- the case where the yearly tick used to save the survivor's old
         # copy over their grief, leaving them married to the dead.
         city = conn.execute(
-            """SELECT city_id FROM npcs WHERE alive = 1 AND title IS NULL AND profession NOT IN ('Unemployed', 'Child')
+            """SELECT city_id FROM npcs WHERE alive = 1 AND title IS NULL AND profession NOT IN ('Laborer', 'Child')
                GROUP BY city_id HAVING COUNT(*) >= 2 LIMIT 1"""
         ).fetchone()["city_id"]
         pool = [row["id"] for row in conn.execute(
             """SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND title IS NULL
-               AND profession NOT IN ('Unemployed', 'Child') ORDER BY id""", (city,))]
+               AND profession NOT IN ('Laborer', 'Child') ORDER BY id""", (city,))]
         dead, survivor = pool[0], pool[-1]
         for a, b in ((dead, survivor), (survivor, dead)):
             conn.execute("UPDATE npcs SET spouse_id = ?, needs_stress = 10 WHERE id = ?", (b, a))

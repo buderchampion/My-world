@@ -123,7 +123,7 @@ def generate_npc(conn, city_id, city_type=None):
     profession = generate_profession(conn, city_id, city_type)
 
     if profession is None:
-        profession = "Unemployed"
+        profession = "Laborer"
 
     npc_class = generate_class(profession)
 

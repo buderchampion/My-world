@@ -14,6 +14,13 @@ def marriage_event(conn, npc_a, npc_b):
 def death_event(conn, npc, cause, city_id=None, kingdom_id=None, foe_kingdom=None):
 
     from Data.Database.repository import create_event
+
+    # the day they died, so grief can last while the loss is recent (Data.NPCS.contentment)
+    world = conn.execute("SELECT k.world_id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE c.id = ?",
+                         (city_id if city_id is not None else npc.get("city_id"),)).fetchone()
+    if world:
+        from Data.Government.edicts import today
+        conn.execute("UPDATE npcs SET died_day = ? WHERE id = ?", (today(conn, world[0]), npc["id"]))
     from Data.History.chronicle import record_ruler_death
 
     event = create_event(

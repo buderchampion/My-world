@@ -32,6 +32,7 @@ EDICTS = ("lower taxes", "raise taxes", "festival", "open the granary", "ban foo
 ACT_THRESHOLD = 0.35
 SEASON_DAYS = 90
 REPEAT_AFTER_DAYS = 360
+REPEAT_AFTER = {"public works": 90}     # building can go on season after season
 
 TAX_STEP, TAX_MIN, TAX_MAX = 0.05, 0.02, 0.30
 TAX_MOOD = 5
@@ -141,7 +142,7 @@ def choose(conn, kingdom, ruler, day, crisis=False):
         if not crisis:
             last = conn.execute("SELECT MAX(day) FROM kingdom_edicts WHERE kingdom_id = ? AND edict = ?",
                                 (kingdom["id"], edict)).fetchone()[0]
-            if last is not None and day - last < REPEAT_AFTER_DAYS:
+            if last is not None and day - last < REPEAT_AFTER.get(edict, REPEAT_AFTER_DAYS):
                 continue
         scores[edict] = round(need * (1 + lean(ruler, edict)), 3)
     best = max(scores, key=scores.get) if scores else None

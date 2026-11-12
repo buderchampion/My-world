@@ -32,14 +32,15 @@ TOWN_TAX_RATE = 0.02
 DEBT_REPAY_SHARE = 0.5
 MAX_LEVEL = 3
 LEVEL_GAIN = 0.5
-COST_PER_PLACE = {"Wood": 10, "Stone": 10, "Tools": 2}
+COST_PER_PLACE = {"Wood": 4, "Stone": 4, "Tools": 1}     # Wood is what runs short: kept cheap
 GOLD_PER_PLACE = 25
-UPGRADES_PER_TOWN = 3
+UPGRADES_PER_TOWN = 6
 MIN_JOBLESS = 3                 # a town calls for works when at least this many wait for work
 CROWN_KEEPS = 0.5
 ADULT_AGE = 16
 NEW_BUILDING_FACTOR = 1.5
-BUILDS_PER_TOWN = 2
+BUILDS_PER_TOWN = 2             # Houses; workplaces scale with who is waiting:
+JOBLESS_PER_BUILD, MAX_BUILDS_PER_TOWN = 25, 8
 HOMELESS_FOR_HOUSE = 5
 
 DATA = Path(__file__).resolve().parents[1]
@@ -78,7 +79,7 @@ def upgradable(conn, city_id):
     from Data.Economy.jobs import HIRING_CATEGORIES
     from Data.Database.repository import get_city
     from Data.Economy.economy import get_target_stock
-    jobless = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Unemployed' AND age >= ?",
+    jobless = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND age >= ?",
                            (city_id, ADULT_AGE)).fetchone()[0]
     if jobless < MIN_JOBLESS:
         return []
@@ -181,7 +182,7 @@ def public_works(conn, kingdom):
 
 
 def jobless_count(conn, city_id):
-    return conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Unemployed' AND age >= ?",
+    return conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND age >= ?",
                         (city_id, ADULT_AGE)).fetchone()[0]
 
 
@@ -245,8 +246,9 @@ def build_new(conn, city_id, kingdom, jobless_waiting):
     Returns (buildings built, gold borrowed)."""
     types = json.load(open(DATA / "Buildings" / "BuildingTypes.json"))
     built, borrowed = 0, 0.0
-    for building_type in buildable(conn, city_id):
-        if built >= BUILDS_PER_TOWN or jobless_waiting < MIN_JOBLESS:
+    allowance = min(MAX_BUILDS_PER_TOWN, max(BUILDS_PER_TOWN, jobless_waiting // JOBLESS_PER_BUILD))
+    for building_type in buildable(conn, city_id) * MAX_BUILDS_PER_TOWN:     # a kind may be built more than once
+        if built >= allowance or jobless_waiting < MIN_JOBLESS:
             break
         places = types[building_type]["capacity"]
         if places > jobless_waiting:

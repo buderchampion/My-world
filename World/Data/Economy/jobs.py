@@ -2,7 +2,7 @@ import json
 from collections import Counter
 from pathlib import Path
 
-# The job market. Each month, jobless adults ("Unemployed") take free places in
+# The job market. Each month, jobless adults ("Laborer") take free places in
 # their own town's workplaces, learning the trade of the place they join (the
 # trade its workers already follow, or else the trade that building is for).
 #
@@ -40,7 +40,7 @@ def hire_jobless(conn, world_id):
         """SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
            WHERE k.world_id = ? AND k.status != 'Fallen'""", (world_id,)).fetchall():
         jobless = [row[0] for row in conn.execute(
-            "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Unemployed' AND age >= ? ORDER BY age, id",
+            "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND age >= ? ORDER BY age, id",
             (city["id"], WORKING_AGE))]
         if not jobless:
             continue

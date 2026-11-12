@@ -57,6 +57,16 @@ def init_database():
     # suits of armor an army carries (Data.Combat.combat)
     _add_missing_columns(connection, "armies", {"armor": "REAL NOT NULL DEFAULT 0", "tools": "REAL NOT NULL DEFAULT 0"})
 
+    # the jobless were once "Unemployed"; they are Laborers, paid a day's labour (Data.Economy.food_market)
+    connection.execute("UPDATE npcs SET profession = 'Laborer' WHERE profession = 'Unemployed'")
+
+    # the Rogue class was once spelled "Rouge": worlds made before the fix are corrected
+    connection.execute("UPDATE npcs SET class = 'Rogue' WHERE class = 'Rouge'")
+    connection.commit()
+
+    # the day each person died, so grief can last while a loss is recent (Data.NPCS.contentment)
+    _add_missing_columns(connection, "npcs", {"died_day": "INTEGER"})
+
     # the seed a world was generated from (Data.Infrastructure.seeds)
     _add_missing_columns(connection, "worlds", {"seed": "INTEGER"})
 

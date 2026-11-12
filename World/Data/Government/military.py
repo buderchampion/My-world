@@ -9,7 +9,7 @@ UPKEEP_FOOD_PER_SOLDIER_PER_DAY = 1.0
 UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY = 0.1
 
 # If a kingdom can't afford its full upkeep bill (any of the three),
-# this fraction of its military deserts (becomes Unemployed) -- an
+# this fraction of its military deserts (becomes Laborer) -- an
 # army that isn't fed, armed, and paid doesn't stay together.
 DESERTION_FRACTION = 0.05
 
@@ -70,7 +70,7 @@ def apply_military_upkeep(conn, kingdom, military_npcs, capital_city, deployed_i
         desertion_count = max(1, round(count * DESERTION_FRACTION))
 
         for npc in military_npcs[:desertion_count]:
-            npc["profession"] = "Unemployed"
+            npc["profession"] = "Laborer"
             save_npc(conn, npc)
             deserters += 1
 

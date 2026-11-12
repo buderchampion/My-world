@@ -103,6 +103,8 @@ class SimulationManager:
                     npc["location"] = location_id
 
                     for need, delta in effect.items():
+                        if need == "happiness":
+                            continue          # happiness follows a person's life, day by day (Data.NPCS.contentment)
                         # A meal restores hunger only as far as the household
                         # could afford food today (Data.Economy.food_market).
                         if need == "hunger" and delta > 0:
@@ -216,7 +218,7 @@ class SimulationManager:
 
                     changed = False
 
-                    if npc["profession"] != "Unemployed":
+                    if npc["profession"] != "Laborer":
                         tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
                         changed = True
                     elif npc["id"] not in away_ids:
@@ -293,6 +295,12 @@ class SimulationManager:
 
             for city in cities:
                 save_city(self.conn, city)
+
+        # Everyone's happiness drifts toward what their life is like, now the day's meals are bought
+        # (Data.NPCS.contentment).
+        from Data.NPCS.contentment import drift_happiness
+        from Data.Government.edicts import today as contentment_day
+        drift_happiness(self.conn, self.world_id, contentment_day(self.conn, self.world_id))
 
         simulate_cross_kingdom_trade_day(self.conn, self.world_id)
 
