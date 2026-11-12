@@ -548,6 +548,12 @@ FEATURES = [
         },
     },
     {
+        "name": "Families: half the adults over 25 start married; close friends court for six months before marrying; children come over the years",
+        "tables": ["courtships"],
+        "functions": {"Data/NPCS/family.py": ["found_families", "form_families"]},
+        "wired": {"Data/World/world_generator.py": ["found_families(conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1360,6 +1366,61 @@ def _smoke_body(r, holder):
             assert gap >= 100, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
 
         run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
+
+        def families():
+            import Data.NPCS.family as F
+            from Data.Database.repository import get_city, set_relationship
+            from Data.Government.edicts import today
+
+            over = conn.execute("SELECT COUNT(*) FROM npcs WHERE alive = 1 AND age >= ?", (F.FOUNDING_AGE,)).fetchone()[0]
+            wed = conn.execute("SELECT COUNT(*) FROM npcs WHERE alive = 1 AND age >= ? AND spouse_id IS NOT NULL", (F.FOUNDING_AGE,)).fetchone()[0]
+            assert 0.4 <= wed / over <= 0.6, f"{wed / over:.0%} of adults over {F.FOUNDING_AGE} start married, not about half"
+            assert not conn.execute("SELECT 1 FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE b.spouse_id IS NOT a.id").fetchone(), "a marriage is one-sided"
+            couples = conn.execute("SELECT COUNT(*) FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.id < b.id").fetchone()[0]
+            together = conn.execute("SELECT COUNT(*) FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.id < b.id AND a.home_id = b.home_id").fetchone()[0]
+            assert together >= 0.9 * couples, f"only {together} of {couples} founding couples live together"
+
+            town = conn.execute("""SELECT city_id FROM npcs WHERE alive = 1 AND spouse_id IS NULL AND age BETWEEN 20 AND 40
+                                   GROUP BY city_id ORDER BY COUNT(*) DESC LIMIT 1""").fetchone()[0]
+            singles = [row[0] for row in conn.execute(
+                "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND spouse_id IS NULL AND age BETWEEN 20 AND 40 ORDER BY id LIMIT 4", (town,))]
+            a, b, c, d = singles
+            ids = ",".join(str(i) for i in singles)
+            conn.execute(f"DELETE FROM relationships WHERE npc_a_id IN ({ids}) OR npc_b_id IN ({ids})")
+            conn.execute(f"UPDATE npcs SET age = 25 WHERE id IN ({ids})")
+            set_relationship(conn, a, b, "Friend", 85)                      # a and b are close friends; c and d strangers
+            conn.execute("DELETE FROM courtships")
+            conn.commit()
+            saved = (F.COURTSHIP_CHANCE, F.WEDDING_CHANCE, F.BIRTH_CHANCE)
+            F.COURTSHIP_CHANCE, F.WEDDING_CHANCE, F.BIRTH_CHANCE = 1.0, 1.0, 0.0
+            married = lambda x: conn.execute("SELECT spouse_id FROM npcs WHERE id = ?", (x,)).fetchone()[0]
+            try:
+                F.form_families(conn, get_city(conn, town))
+                pair = (min(a, b), max(a, b))
+                assert conn.execute("SELECT 1 FROM courtships WHERE npc_a_id = ? AND npc_b_id = ?", pair).fetchone(), "close friends did not begin to court"
+                assert not married(c) and not married(d), "strangers married"
+                assert not married(a), "a new courtship went straight to the altar"
+                day = today(conn, world_id)
+                conn.execute("UPDATE courtships SET since_day = ? WHERE npc_a_id = ?", (day - 2 * F.DAYS_PER_MONTH, pair[0]))
+                conn.commit()
+                F.form_families(conn, get_city(conn, town))
+                assert not married(a), "a courtship of two months ended in marriage (it takes at least six)"
+                conn.execute("UPDATE courtships SET since_day = ? WHERE npc_a_id = ?", (day - F.COURTSHIP_MONTHS * F.DAYS_PER_MONTH, pair[0]))
+                conn.commit()
+                F.form_families(conn, get_city(conn, town))
+                assert married(a) == b and married(b) == a, "a courtship of six months did not end in marriage"
+
+                F.WEDDING_CHANCE, F.BIRTH_CHANCE = 0.0, 1.0
+                before = conn.execute("SELECT COUNT(*) FROM npcs WHERE parent_a_id IN (?, ?) AND parent_b_id IN (?, ?)", (a, b, a, b)).fetchone()[0]
+                F.form_families(conn, get_city(conn, town))
+                after = conn.execute("SELECT COUNT(*) FROM npcs WHERE parent_a_id IN (?, ?) AND parent_b_id IN (?, ?)", (a, b, a, b)).fetchone()[0]
+                assert after == before + 1, "the married couple did not have a child"
+            finally:
+                F.COURTSHIP_CHANCE, F.WEDDING_CHANCE, F.BIRTH_CHANCE = saved
+                conn.execute("DELETE FROM courtships")
+                conn.commit()
+
+        run_step(r, "half the adults over 25 start married; close friends court for six months before marrying; married couples have children", families)
 
         def seeds_and_saves():
             import sqlite3 as sqlite_module

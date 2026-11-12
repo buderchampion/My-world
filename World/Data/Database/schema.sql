@@ -286,6 +286,14 @@ CREATE TABLE IF NOT EXISTS occupation_garrison (
     npc_id         INTEGER NOT NULL REFERENCES npcs(id)
 );
 
+-- Courtships: close friends growing closer before they marry (Data.NPCS.family).
+CREATE TABLE IF NOT EXISTS courtships (
+    npc_a_id   INTEGER NOT NULL REFERENCES npcs(id),
+    npc_b_id   INTEGER NOT NULL REFERENCES npcs(id),
+    since_day  INTEGER NOT NULL,
+    PRIMARY KEY (npc_a_id, npc_b_id)
+);
+
 CREATE TABLE IF NOT EXISTS kingdom_edicts (
     id          INTEGER PRIMARY KEY,
     kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),

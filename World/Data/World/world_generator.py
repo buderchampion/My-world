@@ -64,6 +64,11 @@ def generate_world(seed=None):
     from Data.Economy.food_market import give_starting_savings
     give_starting_savings(conn, world["id"])
 
+    # About half the adults over 25 start married, and the children have
+    # parents, so families are there from the first day (Data.NPCS.family).
+    from Data.NPCS.family import found_families
+    found_families(conn, world["id"])
+
     conn.commit()
 
     conn.close()

@@ -7,13 +7,23 @@ from Data.Database.repository import get_city_npcs, save_npc, create_npc, set_np
 DATA_DIR = Path(__file__).resolve().parent.parent
 
 MIN_MARRY_AGE = 18
-MARRIAGE_CHANCE = 0.6
+# Courtship (form_families): close friends court, grow closer, and marry.
+COURTSHIP_START = 70        # a friendship this warm can become a courtship
+COURTSHIP_CHANCE = 0.25     # each month, for an unmarried adult not yet courting
+COURTSHIP_GROWTH = 4        # reputation a courting pair gains each month
+COURTSHIP_MONTHS = 6        # the least time before they may marry
+WEDDING_CHANCE = 0.35       # each month after that
+MAX_AGE_GAP = 15
+DAYS_PER_MONTH = 30
+BIRTH_CHANCE = 0.02         # each month, for a married couple of whom one is of age to have children
+FOUNDING_AGE = 25           # at generation, about FOUNDING_SHARE of adults this old start married
+FOUNDING_SHARE = 0.5
+FOUNDING_AGE_GAP = 10
 
 SPOUSE_REPUTATION_RANGE = (70, 95)
 FERTILE_AGE_MIN = 18
 FERTILE_AGE_MAX = 45
-CHILD_CHANCE = 0.5
-MAX_CHILDREN = 3
+MAX_CHILDREN = 6           # a couple's children in a lifetime
 
 
 def residents(conn, house_id):
@@ -81,54 +91,77 @@ def create_child(conn, parent_a, parent_b, city_type):
 
 def form_families(conn, city):
     """
-    Loads every NPC in this city, pairs up eligible adults into
-    marriages (moving them into one household), and gives some married
-    couples children. Saves every changed NPC back to the database, and
-    adds any newborn children to city["npcs"].
-
-    Not called automatically -- run whenever you want a city's
-    population to settle into families.
+    Monthly, for one town: courtships begin between close friends, grow,
+    and after COURTSHIP_MONTHS may end in marriage; married couples have
+    children now and then. (Before, strangers were paired at random and
+    married at once, with all their children born on the wedding day.)
     """
 
+    from Data.Government.edicts import today
+    world_id = conn.execute("SELECT k.world_id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE c.id = ?", (city["id"],)).fetchone()[0]
+    day = today(conn, world_id)
     npcs = get_city_npcs(conn, city["id"])
+    by_id = {n["id"]: n for n in npcs}
+    single = {n["id"] for n in npcs if n["alive"] and n["age"] >= MIN_MARRY_AGE and n["spouse"] is None}     # the dead do not marry
 
-    eligible = [
-        npc for npc in npcs
-        if npc["alive"] and npc["age"] >= MIN_MARRY_AGE and npc["spouse"] is None     # the dead do not marry
-    ]
-
-    random.shuffle(eligible)
-
-    new_children = []
     new_marriages = []
+    new_children = []
 
-    while len(eligible) >= 2:
+    # courtships that can no longer go on end (a death, another marriage, a move away)
+    courting = {}
+    for row in conn.execute("SELECT * FROM courtships").fetchall():
+        a, b = row["npc_a_id"], row["npc_b_id"]
+        if a in by_id or b in by_id:
+            if a in single and b in single:
+                courting[a] = courting[b] = dict(row)
+            else:
+                conn.execute("DELETE FROM courtships WHERE npc_a_id = ? AND npc_b_id = ?", (a, b))
 
-        npc_a = eligible.pop()
-        npc_b = eligible.pop()
+    # going on: they grow closer, and after long enough may marry
+    for court in {(c["npc_a_id"], c["npc_b_id"]): c for c in courting.values()}.values():
+        a, b = by_id[court["npc_a_id"]], by_id[court["npc_b_id"]]
+        conn.execute("""UPDATE relationships SET reputation = MIN(100, reputation + ?) WHERE npc_a_id = ? AND npc_b_id = ?""",
+                     (COURTSHIP_GROWTH, min(a["id"], b["id"]), max(a["id"], b["id"])))
+        if day - court["since_day"] >= COURTSHIP_MONTHS * DAYS_PER_MONTH and random.random() < WEDDING_CHANCE:
+            conn.execute("DELETE FROM courtships WHERE npc_a_id = ? AND npc_b_id = ?", (court["npc_a_id"], court["npc_b_id"]))
+            marry(a, b, conn)
+            save_npc(conn, a)          # housed at once, so the next couple counts them
+            save_npc(conn, b)
+            new_marriages.append((a, b))
+            single -= {a["id"], b["id"]}
 
-        if random.random() > MARRIAGE_CHANCE:
+    # beginning: an unmarried adult who is not courting may court their closest unmarried friend in town
+    free = [i for i in single if i not in courting]
+    random.shuffle(free)
+    taken = set(courting)
+    for npc_id in free:
+        if npc_id in taken or random.random() >= COURTSHIP_CHANCE:
             continue
+        me = by_id[npc_id]
+        friend = conn.execute(
+            """SELECT CASE WHEN npc_a_id = ? THEN npc_b_id ELSE npc_a_id END other, reputation FROM relationships
+               WHERE (npc_a_id = ? OR npc_b_id = ?) AND reputation >= ? ORDER BY reputation DESC""",
+            (npc_id, npc_id, npc_id, COURTSHIP_START)).fetchall()
+        for row in friend:
+            other = by_id.get(row["other"])
+            if other and other["id"] in single and other["id"] not in taken and abs(other["age"] - me["age"]) <= MAX_AGE_GAP:
+                pair = (min(npc_id, other["id"]), max(npc_id, other["id"]))
+                conn.execute("INSERT OR IGNORE INTO courtships (npc_a_id, npc_b_id, since_day) VALUES (?, ?, ?)", (*pair, day))
+                taken.update(pair)
+                break
 
-        marry(npc_a, npc_b, conn)
-        save_npc(conn, npc_a)          # housed at once, so the next couple counts them
-        save_npc(conn, npc_b)
-        new_marriages.append((npc_a, npc_b))
-
-        can_have_children = (
-            FERTILE_AGE_MIN <= npc_a["age"] <= FERTILE_AGE_MAX
-            or FERTILE_AGE_MIN <= npc_b["age"] <= FERTILE_AGE_MAX
-        )
-
-        num_children = 0
-
-        while can_have_children and num_children < MAX_CHILDREN and random.random() < CHILD_CHANCE:
-
-            child = create_child(conn, npc_a, npc_b, city["type"])
-
-            new_children.append(child)
-
-            num_children += 1
+    # children: now and then, for married couples
+    for npc in npcs:
+        partner = by_id.get(npc["spouse"]) if npc["spouse"] else None
+        if not partner or npc["id"] > partner["id"] or not npc["alive"] or not partner["alive"]:
+            continue                                   # each couple once, both living, both in this town
+        fertile = FERTILE_AGE_MIN <= npc["age"] <= FERTILE_AGE_MAX or FERTILE_AGE_MIN <= partner["age"] <= FERTILE_AGE_MAX
+        if not fertile or random.random() >= BIRTH_CHANCE:
+            continue
+        had = conn.execute("SELECT COUNT(*) FROM npcs WHERE (parent_a_id = ? AND parent_b_id = ?) OR (parent_a_id = ? AND parent_b_id = ?)",
+                           (npc["id"], partner["id"], partner["id"], npc["id"])).fetchone()[0]
+        if had < MAX_CHILDREN:
+            new_children.append(create_child(conn, npc, partner, city["type"]))
 
     for npc in npcs:
         save_npc(conn, npc)
@@ -158,3 +191,70 @@ def form_families(conn, city):
         })
 
     return city
+
+
+
+def _swap_into(conn, mover_id, home_id, keep):
+    """Moves `mover_id` into `home_id` by swapping homes with one single resident not in `keep`
+    (a generated world's houses are exactly full). Returns True if they moved."""
+    mover_home = conn.execute("SELECT home_id FROM npcs WHERE id = ?", (mover_id,)).fetchone()[0]
+    if mover_home == home_id:
+        return True
+    marks = ",".join(str(i) for i in keep) or "0"
+    resident = conn.execute(
+        f"""SELECT id FROM npcs WHERE home_id = ? AND alive = 1 AND spouse_id IS NULL AND parent_a_id IS NULL
+            AND id NOT IN ({marks}) ORDER BY id LIMIT 1""", (home_id,)).fetchone()
+    if resident is None:
+        return False
+    conn.execute("UPDATE npcs SET home_id = ? WHERE id = ?", (mover_home, resident[0]))
+    conn.execute("UPDATE npcs SET home_id = ? WHERE id = ?", (home_id, mover_id))
+    return True
+
+
+def found_families(conn, world_id):
+    """
+    At generation: about FOUNDING_SHARE of each town's adults over FOUNDING_AGE
+    start married to someone close in age, living together, and the town's
+    children are given to couples old enough to be their parents, living
+    with them. Returns (couples, children placed).
+    """
+    from Data.Database.repository import set_relationship
+    couples = placed = 0
+    for city in conn.execute(
+            "SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?", (world_id,)).fetchall():
+        adults = [dict(r) for r in conn.execute(
+            "SELECT id, age FROM npcs WHERE city_id = ? AND alive = 1 AND age >= ? AND spouse_id IS NULL ORDER BY age, id",
+            (city["id"], FOUNDING_AGE))]
+        # neighbours in age make the likeliest couples; about half of these adults end up married
+        pairs = [(adults[i], adults[i + 1]) for i in range(0, len(adults) - 1, 2)
+                 if adults[i + 1]["age"] - adults[i]["age"] <= FOUNDING_AGE_GAP]
+        random.shuffle(pairs)
+        town_couples = []
+        for a, b in pairs[:round(len(adults) * FOUNDING_SHARE / 2)]:
+            conn.execute("UPDATE npcs SET spouse_id = ? WHERE id = ?", (b["id"], a["id"]))
+            conn.execute("UPDATE npcs SET spouse_id = ? WHERE id = ?", (a["id"], b["id"]))
+            home = conn.execute("SELECT home_id FROM npcs WHERE id = ?", (a["id"],)).fetchone()[0]
+            if home:
+                _swap_into(conn, b["id"], home, keep={a["id"], b["id"]})
+            set_relationship(conn, a["id"], b["id"], "Spouse", random.randint(*SPOUSE_REPUTATION_RANGE), origin="married")
+            town_couples.append((a, b))
+        couples += len(town_couples)
+
+        # the town's children, each to a couple old enough to be their parents
+        children = [dict(r) for r in conn.execute(
+            "SELECT id, age FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Child' AND parent_a_id IS NULL", (city["id"],))]
+        count = {}
+        for child in children:
+            fits = [c for c in town_couples if min(c[0]["age"], c[1]["age"]) >= child["age"] + FERTILE_AGE_MIN
+                    and min(c[0]["age"], c[1]["age"]) <= child["age"] + FERTILE_AGE_MAX and count.get(c[0]["id"], 0) < MAX_CHILDREN]
+            if not fits:
+                continue
+            a, b = random.choice(fits)
+            count[a["id"]] = count.get(a["id"], 0) + 1
+            set_npc_parents(conn, child["id"], a["id"], b["id"])
+            home = conn.execute("SELECT home_id FROM npcs WHERE id = ?", (a["id"],)).fetchone()[0]
+            if home:
+                _swap_into(conn, child["id"], home, keep={a["id"], b["id"], child["id"]})
+            placed += 1
+    conn.commit()
+    return couples, placed
