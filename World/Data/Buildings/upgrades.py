@@ -21,7 +21,8 @@ from pathlib import Path
 #
 #   New buildings: a town whose jobless still wait after its upgrades builds
 #   up to BUILDS_PER_TOWN new workplaces, of the kinds its kit allows for a
-#   town of its size, those making what it lacks first; a town with at least
+#   town of its size, those making what it lacks first -- and only kinds its
+#   waiting jobless can fill; a town with at least
 #   HOMELESS_FOR_HOUSE homeless adults builds a House (up to BUILDS_PER_TOWN,
 #   apart from the workplaces: a roof does not wait behind jobs). A new building costs
 #   NEW_BUILDING_FACTOR times an upgrade's price per place (the foundations),
@@ -125,8 +126,9 @@ def works_need(conn, kingdom):
         if options:
             materials, _, _, lendable = can_pay(conn, city, kingdom, places_added(options[0]["type"]))
             can = materials and lendable
-        if not can and jobless_count(conn, town) >= MIN_JOBLESS:          # or it could build anew
-            for building_type in buildable(conn, town)[:3]:
+        waiting = jobless_count(conn, town)
+        if not can and waiting >= MIN_JOBLESS:                              # or it could build anew
+            for building_type in [t for t in buildable(conn, town) if types[t]["capacity"] <= waiting][:3]:   # what they can fill
                 materials, _, _, lendable = can_pay(conn, city, kingdom, types[building_type]["capacity"], NEW_BUILDING_FACTOR)
                 if materials and lendable:
                     can = True
@@ -247,6 +249,8 @@ def build_new(conn, city_id, kingdom, jobless_waiting):
         if built >= BUILDS_PER_TOWN or jobless_waiting < MIN_JOBLESS:
             break
         places = types[building_type]["capacity"]
+        if places > jobless_waiting:
+            continue                     # only what the waiting jobless can fill -- no half-empty workshops
         loan = pay(conn, city_id, kingdom, places, NEW_BUILDING_FACTOR)
         if loan is None:
             continue

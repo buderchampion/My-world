@@ -57,6 +57,9 @@ def init_database():
     # suits of armor an army carries (Data.Combat.combat)
     _add_missing_columns(connection, "armies", {"armor": "REAL NOT NULL DEFAULT 0", "tools": "REAL NOT NULL DEFAULT 0"})
 
+    # the seed a world was generated from (Data.Infrastructure.seeds)
+    _add_missing_columns(connection, "worlds", {"seed": "INTEGER"})
+
     # kills, renown and epithets (Data.Combat.nemesis)
     _add_missing_columns(connection, "npcs", {
         "kills": "INTEGER NOT NULL DEFAULT 0",

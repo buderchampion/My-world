@@ -113,10 +113,71 @@ def on_tick(clock, rollover):
     if rollover["day"]:
         print(f"[{clock}]")
 
+    # Each new in-game year is autosaved; only the last three are kept (Data.Infrastructure.saves).
+    if rollover["year"]:
+        from Data.Infrastructure.saves import autosave_current
+        summary = autosave_current()
+        print(f"  (autosaved as '{summary['name']}')")
+
+
+def startup_menu():
+    """
+    Continue the world, load a save, or start a new world from a seed.
+    Without a terminal to answer (or with --continue), it simply continues.
+    """
+    import sys
+    from Data.Infrastructure import saves
+    from Data.Infrastructure.seeds import parse_seed
+
+    if "--continue" in sys.argv or not sys.stdin.isatty():
+        return
+
+    while True:
+        current = None
+        if saves._db_file().exists():
+            connection = get_connection()
+            if connection.execute("SELECT 1 FROM worlds LIMIT 1").fetchone():
+                current = saves.summarize(connection)
+            connection.close()            # closed before any load or new world replaces the file (Windows)
+        print("\n=== My World ===")
+        if current:
+            print(f"  [1] Continue    -- {current['world']}, year {current['year']}, seed {current['seed']}")
+        print("  [2] Load a save")
+        print("  [3] New world")
+        print("  [4] Quit")
+        choice = input("> ").strip()
+
+        if choice == "1" and current:
+            return
+        if choice == "2":
+            found = saves.list_saves()
+            if not found:
+                print("No saves yet.")
+                continue
+            for number, summary in enumerate(found, 1):
+                print(f"  [{number}] " + saves.describe(summary))
+            pick = input("Which save? (number, or Enter to go back) > ").strip()
+            if pick.isdigit() and 1 <= int(pick) <= len(found):
+                summary = saves.load_save(found[int(pick) - 1]["key"])
+                print(f"Loaded '{summary['name']}'." + (" (the world you had is kept as 'before-load')" if current else ""))
+                return
+            continue
+        if choice == "3":
+            text = input("Seed (a number or any word; Enter for a random one) > ").strip()
+            print("Generating a new world -- this takes a little while ...")
+            world = saves.new_world(parse_seed(text) if text else None)
+            print(f"New world generated from seed {world['seed']}." + (" (the world you had is kept as 'before-new')" if current else ""))
+            return
+        if choice == "4":
+            raise SystemExit(0)
+        print("Choose 1, 2, 3 or 4.")
+
 
 def main():
 
     init_database()
+
+    startup_menu()
 
     world = get_or_create_world()
 

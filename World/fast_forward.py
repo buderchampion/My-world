@@ -130,11 +130,10 @@ def main():
     report = open(REPORT_FILE, "a", encoding="utf-8")
 
     if not db_file.exists():
-        if args.seed is not None:
-            random.seed(args.seed)
         say(f"Generating a new world in {db_file.name} ...", report)
         from Data.World.world_generator import generate_world
-        generate_world()
+        world_made = generate_world(args.seed)
+        say(f"  seed {world_made['seed']}", report)
 
     init_database()
     conn = get_connection()

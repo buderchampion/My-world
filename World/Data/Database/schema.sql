@@ -7,7 +7,8 @@ CREATE TABLE IF NOT EXISTS worlds (
     clock_hour   INTEGER NOT NULL DEFAULT 0,
     clock_day    INTEGER NOT NULL DEFAULT 1,
     clock_month  INTEGER NOT NULL DEFAULT 1,
-    clock_year   INTEGER NOT NULL DEFAULT 1
+    clock_year   INTEGER NOT NULL DEFAULT 1,
+    seed         INTEGER                    -- what it was generated from (Data.Infrastructure.seeds)
 );
 
 CREATE TABLE IF NOT EXISTS kingdoms (

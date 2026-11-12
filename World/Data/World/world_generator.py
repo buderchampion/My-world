@@ -5,13 +5,20 @@ from Data.Database.repository import create_world, get_world_kingdoms
 from Data.Infrastructure.roads import generate_roads
 
 
-def generate_world():
+def generate_world(seed=None):
+    """Generates a world. The same seed always generates the same world
+    (Data.Infrastructure.seeds); without one, a fresh seed is chosen and recorded."""
+
+    from Data.Infrastructure.seeds import new_seed, apply_seed
+    seed = apply_seed(new_seed() if seed is None else seed)
 
     init_database()
 
     conn = get_connection()
 
     world = create_world(conn, "Generated World")
+    conn.execute("UPDATE worlds SET seed = ? WHERE id = ?", (seed, world["id"]))
+    world["seed"] = seed
 
     # The land comes first, so kingdoms can be placed where it can feed them.
     from Data.World.regions import ensure_regions

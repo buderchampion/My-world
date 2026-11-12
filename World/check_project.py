@@ -537,6 +537,17 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["pursue_vendettas(self.conn", "arrivals(self.conn"]},
     },
     {
+        "name": "Seeds and saves: worlds record their seed; named saves, loading, autosaves; a startup menu",
+        "functions": {"Data/Infrastructure/seeds.py": ["new_seed", "parse_seed", "apply_seed", "world_seed"],
+                      "Data/Infrastructure/saves.py": ["save_world", "list_saves", "load_save", "delete_save", "new_world", "autosave", "autosave_current"]},
+        "wired": {
+            "Data/World/world_generator.py": ["apply_seed("],
+            "run_world.py": ["startup_menu()", "autosave_current()"],
+            "fast_forward.py": ["generate_world(args.seed)"],
+            "Data/Database/database.py": ['"seed"'],
+        },
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1349,6 +1360,49 @@ def _smoke_body(r, holder):
             assert gap >= 100, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
 
         run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
+
+        def seeds_and_saves():
+            import sqlite3 as sqlite_module
+            import tempfile
+            from pathlib import Path as PathType
+            import Data.Infrastructure.saves as SV
+            from Data.Database import database as database_module
+
+            assert conn.execute("SELECT seed FROM worlds WHERE id = ?", (world_id,)).fetchone()[0] is not None, "the world did not record its seed"
+
+            # a round trip on a temporary copy of this world, in a temporary Saves folder (nothing real is touched)
+            scratch = PathType(tempfile.mkdtemp())
+            copy = scratch / "world.db"
+            target = sqlite_module.connect(copy)
+            conn.backup(target)
+            target.close()
+            saved_dir, saved_db = SV.SAVES_DIR, database_module.DB_FILE
+            SV.SAVES_DIR, database_module.DB_FILE = scratch / "Saves", copy
+            try:
+                summary = SV.save_world("check")
+                assert summary["seed"] is not None and summary["kingdoms"], "a save's summary is missing the world's seed or kingdoms"
+                moved = sqlite_module.connect(copy)
+                moved.execute("UPDATE worlds SET clock_year = 99")
+                moved.commit()
+                moved.close()
+                SV.load_save("check")
+                back = sqlite_module.connect(copy)
+                year = back.execute("SELECT clock_year FROM worlds").fetchone()[0]
+                back.close()
+                assert year != 99, "loading a save did not put the saved world back"
+                assert SV.find_save("before-load"), "loading did not keep the world it replaced"
+                for year in range(1, 5):
+                    moved = sqlite_module.connect(copy)
+                    moved.execute("UPDATE worlds SET clock_year = ?", (year,))
+                    moved.commit()
+                    moved.close()
+                    SV.autosave_current()
+                autos = sorted(s["name"] for s in SV.list_saves() if s.get("autosave"))
+                assert autos == [f"autosave-year-{y}" for y in (2, 3, 4)], f"autosaves were not kept to the last three: {autos}"
+            finally:
+                SV.SAVES_DIR, database_module.DB_FILE = saved_dir, saved_db
+
+        run_step(r, "the world records its seed; a save, a load and yearly autosaves (only the last three kept)", seeds_and_saves)
 
         def harvests_work():
             from Data.World import harvest as H
