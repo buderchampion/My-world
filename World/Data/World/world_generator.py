@@ -5,7 +5,10 @@ from Data.Database.repository import create_world, get_world_kingdoms
 from Data.Infrastructure.roads import generate_roads
 
 
-def generate_world(seed=None):
+KINGDOMS = (6, 10)               # how many kingdoms a new world starts with
+
+
+def generate_world(seed=None, kingdoms=None):
     """Generates a world. The same seed always generates the same world
     (Data.Infrastructure.seeds); without one, a fresh seed is chosen and recorded."""
 
@@ -17,14 +20,15 @@ def generate_world(seed=None):
     conn = get_connection()
 
     world = create_world(conn, "Generated World")
-    conn.execute("UPDATE worlds SET seed = ? WHERE id = ?", (seed, world["id"]))
+    from Data.Kingdoms.kingdom_generator import MAP_WIDTH, MAP_HEIGHT
+    conn.execute("UPDATE worlds SET seed = ?, map_width = ?, map_height = ? WHERE id = ?", (seed, MAP_WIDTH, MAP_HEIGHT, world["id"]))
     world["seed"] = seed
 
     # The land comes first, so kingdoms can be placed where it can feed them.
     from Data.World.regions import ensure_regions
     ensure_regions(conn, world["id"])
 
-    number_of_kingdoms = random.randint(3, 6)
+    number_of_kingdoms = kingdoms if kingdoms else random.randint(*KINGDOMS)
 
     colors = random.sample(KINGDOM_COLORS, number_of_kingdoms)
 

@@ -133,17 +133,31 @@ class MapStore:
         return existing
 
     def kingdom_colors(self, kingdom_ids: Iterable[int]) -> dict[int, tuple[int, int, int]]:
-        """Return durable, visually distinct political colors for kingdoms."""
+        """Return durable, visually distinct political colors for kingdoms.
+
+        Hues are assigned in golden-ratio steps (0.618... apart, mod 1) in
+        the order each kingdom is first seen, rather than as an
+        independent random hue per kingdom id. Independent random hues
+        can coincidentally land close together (this happened in testing
+        -- two kingdoms both came out a similar green); golden-ratio
+        stepping guarantees good separation no matter how many kingdoms
+        exist. Already-assigned colors are still read from
+        map_kingdom_styles first, so existing worlds keep their colors.
+        """
         result: dict[int, tuple[int, int, int]] = {}
+        existing_count = self.connection.execute(
+            "SELECT COUNT(*) as n FROM map_kingdom_styles"
+        ).fetchone()["n"]
+        next_ordinal = existing_count
         for kingdom_id in sorted(set(kingdom_ids)):
             row = self.connection.execute(
                 "SELECT color_r, color_g, color_b FROM map_kingdom_styles WHERE kingdom_id = ?",
                 (kingdom_id,),
             ).fetchone()
             if row is None:
-                rng = random.Random(kingdom_id * 78_781)
-                hue = rng.random()
-                red, green, blue = colorsys.hsv_to_rgb(hue, 0.58, 0.92)
+                hue = (next_ordinal * 0.618033988749895) % 1.0
+                next_ordinal += 1
+                red, green, blue = colorsys.hsv_to_rgb(hue, 0.62, 0.92)
                 color = (round(red * 255), round(green * 255), round(blue * 255))
                 self.connection.execute(
                     "INSERT INTO map_kingdom_styles (kingdom_id, color_r, color_g, color_b) VALUES (?, ?, ?, ?)",

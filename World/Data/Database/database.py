@@ -71,7 +71,7 @@ def init_database():
     _add_missing_columns(connection, "npcs", {"died_day": "INTEGER"})
 
     # the seed a world was generated from (Data.Infrastructure.seeds)
-    _add_missing_columns(connection, "worlds", {"seed": "INTEGER"})
+    _add_missing_columns(connection, "worlds", {"seed": "INTEGER", "map_width": "INTEGER", "map_height": "INTEGER"})
 
     # kills, renown and epithets (Data.Combat.nemesis)
     _add_missing_columns(connection, "npcs", {

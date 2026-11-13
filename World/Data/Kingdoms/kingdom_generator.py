@@ -13,15 +13,15 @@ SUFFIXES = DATA_DIR / "Names" / "KingdomSuffixes.json"
 # The whole world map is treated as an abstract MAP_WIDTH x MAP_HEIGHT
 # plane -- these are just coordinate units, not tied to any real unit
 # of distance.
-MAP_WIDTH = 2000
-MAP_HEIGHT = 2000
-MAP_MARGIN = 150  # keeps kingdom centers off the very edge
+MAP_WIDTH = 6000                  # a big world: room for many kingdoms, and wide neutral land between them
+MAP_HEIGHT = 6000
+MAP_MARGIN = 300  # keeps kingdom centers off the very edge
 
 # How far from its kingdom's center a city can be placed.
 CAPITAL_JITTER = 40
 # kingdoms' centers keep this far apart: two kingdoms' spread plus the neutral
 # ground between their settlements (Data.World.expansion.NEUTRAL_GROUND = 375)
-KINGDOM_SPACING = 2 * 300 + 375
+KINGDOM_SPACING = 2 * 300 + 800   # at least 800 units of open land between two realms' outer settlements
 CITY_SPREAD_RADIUS = 300
 
 # A small palette of visually distinct colors, cycled through so

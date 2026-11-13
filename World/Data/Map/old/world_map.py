@@ -41,6 +41,16 @@ class City:
     y: float
 
 
+@dataclass(frozen=True)
+class Selection:
+    """What's currently selected -- a city (has a map sprite), a kingdom
+    (selected via its name label, no sprite of its own), or a building
+    (selected via a row in the sidebar once its city is showing, since
+    buildings have no map position of their own)."""
+    kind: str  # "city", "kingdom", or "building"
+    id: int
+
+
 class WorldData:
     def __init__(self, world_database: Path, map_database: Path) -> None:
         self.connection = sqlite3.connect(f"file:{world_database.as_posix()}?mode=ro", uri=True)
@@ -77,6 +87,85 @@ class WorldData:
         ).fetchone()
         resources = self.connection.execute("SELECT resource_name, amount FROM city_resources WHERE city_id = ? ORDER BY amount DESC", (city_id,)).fetchall()
         return {"city": city, "resources": resources}
+
+    def kingdom_details(self, kingdom_id: int) -> dict[str, object]:
+        kingdom = self.connection.execute(
+            """
+            SELECT k.*, cap.name AS capital_name, r.name AS ruler_name,
+                   (SELECT COUNT(*) FROM cities c WHERE c.kingdom_id = k.id) AS city_count,
+                   (SELECT COALESCE(SUM(c.population), 0) FROM cities c WHERE c.kingdom_id = k.id) AS total_population
+            FROM kingdoms k
+            LEFT JOIN cities cap ON cap.id = k.capital_city_id
+            LEFT JOIN npcs r ON r.id = k.ruler_id
+            WHERE k.id = ?
+            """, (kingdom_id,)
+        ).fetchone()
+        return {"kingdom": kingdom}
+
+    def city_buildings(self, city_id: int) -> list[sqlite3.Row]:
+        return self.connection.execute(
+            """
+            SELECT b.type, COUNT(*) AS count,
+                   MIN(b.id) AS sample_building_id,
+                   SUM((SELECT COUNT(*) FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1)) AS workers,
+                   SUM((SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1)) AS residents
+            FROM buildings b
+            WHERE b.city_id = ?
+            GROUP BY b.type
+            ORDER BY count DESC
+            """, (city_id,)
+        ).fetchall()
+
+    def building_details(self, building_id: int) -> dict[str, object]:
+        building = self.connection.execute(
+            """
+            SELECT b.*, c.name AS city_name,
+                   (SELECT COUNT(*) FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1) AS workers,
+                   (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) AS residents
+            FROM buildings b JOIN cities c ON c.id = b.city_id
+            WHERE b.id = ?
+            """, (building_id,)
+        ).fetchone()
+        return {"building": building}
+
+    def npc_details(self, npc_id: int) -> dict[str, object]:
+        npc = self.connection.execute(
+            """
+            SELECT n.*, c.name AS city_name
+            FROM npcs n JOIN cities c ON c.id = n.city_id
+            WHERE n.id = ?
+            """, (npc_id,)
+        ).fetchone()
+        return {"npc": npc}
+
+    def search(self, query: str, limit_per_category: int = 4) -> dict[str, list[sqlite3.Row]]:
+        pattern = f"%{query}%"
+        kingdoms = self.connection.execute(
+            "SELECT id, name FROM kingdoms WHERE world_id = ? AND name LIKE ? LIMIT ?",
+            (self.world_id, pattern, limit_per_category)
+        ).fetchall()
+        cities = self.connection.execute(
+            """
+            SELECT c.id, c.name, c.type, k.name AS kingdom_name
+            FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+            WHERE k.world_id = ? AND c.name LIKE ? LIMIT ?
+            """, (self.world_id, pattern, limit_per_category)
+        ).fetchall()
+        buildings = self.connection.execute(
+            """
+            SELECT b.id, b.name, b.type, c.name AS city_name
+            FROM buildings b JOIN cities c ON c.id = b.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+            WHERE k.world_id = ? AND (b.name LIKE ? OR b.type LIKE ?) LIMIT ?
+            """, (self.world_id, pattern, pattern, limit_per_category)
+        ).fetchall()
+        npcs = self.connection.execute(
+            """
+            SELECT n.id, n.name, n.profession, c.name AS city_name
+            FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+            WHERE k.world_id = ? AND n.name LIKE ? AND n.alive = 1 LIMIT ?
+            """, (self.world_id, pattern, limit_per_category)
+        ).fetchall()
+        return {"kingdoms": kingdoms, "cities": cities, "buildings": buildings, "npcs": npcs}
 
     def close(self) -> None:
         self.map_store.close()
@@ -149,8 +238,23 @@ def build_terrain(layout: MapLayout) -> pygame.Surface:
     return surface
 
 
+# How far a kingdom's claimed territory extends from its cluster of
+# cities. A kingdom's own cities never spread much past ~250 units from
+# its center (see map_data.ensure_city_positions), so this comfortably
+# covers a kingdom's real territory with some margin, while staying
+# well short of the typical distance between two different kingdoms'
+# centers -- the gap in between is what stays unclaimed.
+MAX_CLAIM_RADIUS = 330
+MAX_CLAIM_RADIUS_SQUARED = MAX_CLAIM_RADIUS ** 2
+
+
 def build_kingdom_overlay(data: WorldData) -> tuple[pygame.Surface, dict[int, pygame.Vector2]]:
-    """A coarse Voronoi political layer, anchored to capital cities."""
+    """A coarse Voronoi political layer, anchored to capital cities.
+
+    Tiles beyond MAX_CLAIM_RADIUS of every kingdom's anchor are left
+    unclaimed (no fill), leaving a band of neutral wilderness between
+    territories instead of borders always touching edge-to-edge.
+    """
     layout = data.layout
     surface = pygame.Surface((layout.width, layout.height), pygame.SRCALPHA)
     anchors: dict[int, pygame.Vector2] = {}
@@ -158,19 +262,26 @@ def build_kingdom_overlay(data: WorldData) -> tuple[pygame.Surface, dict[int, py
         if city.is_capital or city.kingdom_id not in anchors:
             anchors[city.kingdom_id] = pygame.Vector2(city.x, city.y)
     tile = 24
-    previous_row: list[int] | None = None
+    previous_row: list[int | None] | None = None
     for y in range(0, layout.height, tile):
-        row: list[int] = []
+        row: list[int | None] = []
         for x in range(0, layout.width, tile):
             center = pygame.Vector2(x + tile / 2, y + tile / 2)
-            kingdom_id = min(anchors, key=lambda key: center.distance_squared_to(anchors[key]))
+            nearest_id = min(anchors, key=lambda key: center.distance_squared_to(anchors[key]))
+            in_range = center.distance_squared_to(anchors[nearest_id]) <= MAX_CLAIM_RADIUS_SQUARED
+            kingdom_id = nearest_id if in_range else None
             row.append(kingdom_id)
-            color = data.kingdom_colors[kingdom_id]
-            pygame.draw.rect(surface, (*color, 46), (x, y, tile, tile))
+            if kingdom_id is not None:
+                color = data.kingdom_colors[kingdom_id]
+                pygame.draw.rect(surface, (*color, 46), (x, y, tile, tile))
             if len(row) > 1 and row[-2] != kingdom_id:
-                pygame.draw.line(surface, (*data.kingdom_colors[kingdom_id], 205), (x, y), (x, y + tile), 2)
+                border_side = kingdom_id if kingdom_id is not None else row[-2]
+                if border_side is not None:
+                    pygame.draw.line(surface, (*data.kingdom_colors[border_side], 205), (x, y), (x, y + tile), 2)
             if previous_row is not None and previous_row[len(row) - 1] != kingdom_id:
-                pygame.draw.line(surface, (*data.kingdom_colors[kingdom_id], 205), (x, y), (x + tile, y), 2)
+                border_side = kingdom_id if kingdom_id is not None else previous_row[len(row) - 1]
+                if border_side is not None:
+                    pygame.draw.line(surface, (*data.kingdom_colors[border_side], 205), (x, y), (x + tile, y), 2)
         previous_row = row
     return surface, anchors
 
@@ -219,6 +330,11 @@ class Camera:
         self.target_zoom = 0.72
         self.clamp_target(viewport)
 
+    def center_on(self, x: float, y: float, viewport: pygame.Rect, zoom: float = 1.1) -> None:
+        self.target_center.update(x, y)
+        self.target_zoom = max(self.target_zoom, zoom)
+        self.clamp_target(viewport)
+
     def world_to_screen(self, world: pygame.Vector2, viewport: pygame.Rect) -> pygame.Vector2:
         return pygame.Vector2(viewport.center) + (world - self.center) * self.zoom
 
@@ -250,10 +366,20 @@ class MapViewer:
         self.small = pygame.font.SysFont("segoeui", 15)
         self.title = pygame.font.SysFont("segoeui", 26, bold=True)
         self.camera = Camera(data.layout)
-        self.selected: City | None = None
+        self.selection: Selection | None = None
         self.dragging = False
         self.terrain_cache: tuple[tuple[int, int], pygame.Surface] | None = None
         self.overlay_cache: tuple[tuple[int, int], pygame.Surface] | None = None
+        # Populated fresh each frame while drawing, then consulted on click --
+        # avoids computing text-layout bounds twice (once to draw, once to
+        # hit-test) by reusing the rects drawing already produced.
+        self.kingdom_label_rects: dict[int, pygame.Rect] = {}
+        self.building_row_rects: list[tuple[pygame.Rect, int]] = []
+        self.search_query = ""
+        self.search_active = False
+        self.search_results: dict[str, list[sqlite3.Row]] = {}
+        self.search_box_rect = pygame.Rect(0, 0, 0, 0)  # positioned each frame in draw_sidebar
+        self.search_result_rects: list[tuple[pygame.Rect, str, int, float, float]] = []
         self.running = True
 
     @property
@@ -269,8 +395,10 @@ class MapViewer:
     def city_radius(self, city: City) -> int:
         return max(5, min(12, 4 + int(math.log10(max(city.population, 1)) * 3)))
 
-    def draw_text(self, text: str, pos: tuple[int, int], color=TEXT, font=None) -> None:
-        self.screen.blit((font or self.font).render(text, True, color), pos)
+    def draw_text(self, text: str, pos: tuple[int, int], color=TEXT, font=None) -> pygame.Rect:
+        surface = (font or self.font).render(text, True, color)
+        self.screen.blit(surface, pos)
+        return pygame.Rect(pos[0], pos[1], surface.get_width(), surface.get_height())
 
     def draw_settlement_icon(self, city: City, pos: pygame.Vector2) -> None:
         """Draw a readable, code-native icon instead of a generic dot."""
@@ -307,7 +435,8 @@ class MapViewer:
             pygame.draw.polygon(self.screen, (55, 43, 18), crown, 1)
 
     def should_label_city(self, city: City, pos: pygame.Vector2) -> bool:
-        if city == self.selected or pos.distance_to(pygame.mouse.get_pos()) < self.city_radius(city) + 9:
+        is_selected = self.selection is not None and self.selection.kind == "city" and self.selection.id == city.id
+        if is_selected or pos.distance_to(pygame.mouse.get_pos()) < self.city_radius(city) + 9:
             return True
         if city.is_capital:
             return True
@@ -329,13 +458,23 @@ class MapViewer:
         self.screen.set_clip(rect)
         self.screen.blit(terrain, destination)
         self.screen.blit(overlay, destination)
+        self.kingdom_label_rects = {}
         for kingdom_id, anchor in self.kingdom_anchors.items():
             pos = self.world_to_screen(anchor.x, anchor.y)
-            self.draw_text(self.data.kingdom_names[kingdom_id], (int(pos.x + 14), int(pos.y - 32)), self.data.kingdom_colors[kingdom_id], self.small)
+            is_selected = self.selection is not None and self.selection.kind == "kingdom" and self.selection.id == kingdom_id
+            color = GOLD if is_selected else self.data.kingdom_colors[kingdom_id]
+            label_pos = (int(pos.x + 14), int(pos.y - 32))
+            self.kingdom_label_rects[kingdom_id] = self.draw_text(
+                self.data.kingdom_names[kingdom_id], label_pos, color, self.small
+            )
         for city in self.data.cities:
             pos, radius = self.world_to_screen(city.x, city.y), self.city_radius(city)
-            if city == self.selected:
+            city_selected = self.selection is not None and self.selection.kind == "city" and self.selection.id == city.id
+            kingdom_selected = self.selection is not None and self.selection.kind == "kingdom" and self.selection.id == city.kingdom_id
+            if city_selected:
                 pygame.draw.circle(self.screen, GOLD, pos, radius + 7, 2)
+            elif kingdom_selected and city.is_capital:
+                pygame.draw.circle(self.screen, GOLD, pos, radius + 5, 1)
             self.draw_settlement_icon(city, pos)
             if self.should_label_city(city, pos):
                 self.draw_text(city.name, (int(pos.x + radius + 5), int(pos.y - 10)), TEXT, self.small)
@@ -347,8 +486,66 @@ class MapViewer:
         rect = pygame.Rect(self.map_rect.right, 0, SIDEBAR_WIDTH, self.screen.get_height())
         pygame.draw.rect(self.screen, PANEL, rect)
         pygame.draw.line(self.screen, PANEL_EDGE, rect.topleft, rect.bottomleft, 2)
-        x, y = rect.left + 24, 28
-        if self.selected is None:
+        x = rect.left + 24
+        self.building_row_rects = []
+        self.search_result_rects = []
+
+        self.search_box_rect = pygame.Rect(x, 18, SIDEBAR_WIDTH - 48, 34)
+        box_color = GOLD if self.search_active else PANEL_EDGE
+        pygame.draw.rect(self.screen, box_color, self.search_box_rect, 2, border_radius=5)
+        if self.search_query:
+            label, label_color = self.search_query, TEXT
+        elif self.search_active:
+            label, label_color = "", TEXT
+        else:
+            label, label_color = "Search kingdoms, cities, buildings, NPCs...", MUTED
+        if self.search_active:
+            label += "|"
+        self.draw_text(label, (self.search_box_rect.left + 10, self.search_box_rect.top + 8), label_color, self.small)
+
+        y = 76
+
+        if self.search_query:
+            categories = [
+                ("Kingdoms", "kingdom", self.search_results.get("kingdoms", [])),
+                ("Cities", "city", self.search_results.get("cities", [])),
+                ("Buildings", "building", self.search_results.get("buildings", [])),
+                ("NPCs", "npc", self.search_results.get("npcs", [])),
+            ]
+            any_results = any(rows for _, _, rows in categories)
+            if not any_results:
+                self.draw_text("No matches.", (x, y), MUTED, self.small)
+                return
+            for heading, kind, rows in categories:
+                if not rows:
+                    continue
+                self.draw_text(heading, (x, y), TEXT, self.font)
+                y += 30
+                for row in rows:
+                    row_rect = pygame.Rect(x - 6, y - 3, SIDEBAR_WIDTH - 36, 24)
+                    if row_rect.collidepoint(pygame.mouse.get_pos()):
+                        pygame.draw.rect(self.screen, PANEL_EDGE, row_rect, border_radius=3)
+                    if kind == "kingdom":
+                        self.draw_text(row["name"], (x, y), MUTED, self.small)
+                        world_x, world_y = self.kingdom_anchors[row["id"]].x, self.kingdom_anchors[row["id"]].y
+                    elif kind == "city":
+                        self.draw_text(f"{row['name']}  ({row['kingdom_name']})", (x, y), MUTED, self.small)
+                        city_match = next(c for c in self.data.cities if c.id == row["id"])
+                        world_x, world_y = city_match.x, city_match.y
+                    elif kind == "building":
+                        self.draw_text(f"{row['name']}  —  {row['city_name']}", (x, y), MUTED, self.small)
+                        city_match = next(c for c in self.data.cities if c.name == row["city_name"])
+                        world_x, world_y = city_match.x, city_match.y
+                    else:  # npc
+                        self.draw_text(f"{row['name']}  ({row['profession']})  —  {row['city_name']}", (x, y), MUTED, self.small)
+                        city_match = next(c for c in self.data.cities if c.name == row["city_name"])
+                        world_x, world_y = city_match.x, city_match.y
+                    self.search_result_rects.append((row_rect, kind, row["id"], world_x, world_y))
+                    y += 26
+                y += 14
+            return
+
+        if self.selection is None:
             self.draw_text("World atlas", (x, y), TEXT, self.title)
             self.draw_text("Terrain and map positions are stored", (x, y + 54), MUTED, self.small)
             self.draw_text("separately from the simulation database.", (x, y + 76), MUTED, self.small)
@@ -359,8 +556,70 @@ class MapViewer:
                 y += 28
                 pygame.draw.rect(self.screen, CITY_COLORS[kind], (x, y + 2, 13, 13), border_radius=2)
                 self.draw_text(kind, (x + 23, y), MUTED, self.small)
+            y += 46
+            self.draw_text("Click a kingdom's name label", (x, y), MUTED, self.small)
+            self.draw_text("on the map to select it.", (x, y + 20), MUTED, self.small)
             return
-        details = self.data.city_details(self.selected.id)
+
+        if self.selection.kind == "kingdom":
+            details = self.data.kingdom_details(self.selection.id)
+            kingdom: sqlite3.Row = details["kingdom"]  # type: ignore[assignment]
+            self.draw_text(kingdom["name"], (x, y), TEXT, self.title)
+            self.draw_text("Kingdom", (x, y + 38), GOLD, self.font)
+            values = [
+                ("Capital", kingdom["capital_name"] or "None"),
+                ("Ruler", kingdom["ruler_name"] or "Unassigned"),
+                ("Cities", kingdom["city_count"]),
+                ("Total population", kingdom["total_population"]),
+            ]
+            y += 86
+            for label, value in values:
+                self.draw_text(label, (x, y), MUTED, self.small)
+                self.draw_text(str(value), (x + 164, y), TEXT, self.small)
+                y += 27
+            return
+
+        if self.selection.kind == "building":
+            details = self.data.building_details(self.selection.id)
+            building: sqlite3.Row = details["building"]  # type: ignore[assignment]
+            self.draw_text(building["name"], (x, y), TEXT, self.title)
+            self.draw_text(f"{building['type']}  •  {building['city_name']}", (x, y + 38), GOLD, self.font)
+            values = [
+                ("Category", building["category"]),
+                ("Capacity", building["capacity"]),
+                ("Workers", building["workers"]),
+                ("Residents", building["residents"]),
+                ("Condition", f"{building['condition']}%"),
+            ]
+            y += 86
+            for label, value in values:
+                self.draw_text(label, (x, y), MUTED, self.small)
+                self.draw_text(str(value), (x + 164, y), TEXT, self.small)
+                y += 27
+            return
+
+        if self.selection.kind == "npc":
+            details = self.data.npc_details(self.selection.id)
+            npc: sqlite3.Row = details["npc"]  # type: ignore[assignment]
+            self.draw_text(npc["name"], (x, y), TEXT, self.title)
+            self.draw_text(f"{npc['title'] or npc['profession']}  •  {npc['city_name']}", (x, y + 38), GOLD, self.font)
+            values = [
+                ("Class", npc["class"]),
+                ("Age", npc["age"]),
+                ("Gender", npc["gender"]),
+                ("Gold", f"{npc['gold']:g}"),
+                ("Health", f"{npc['health']}/100"),
+                ("Status", "Alive" if npc["alive"] else "Deceased"),
+            ]
+            y += 86
+            for label, value in values:
+                self.draw_text(label, (x, y), MUTED, self.small)
+                self.draw_text(str(value), (x + 164, y), TEXT, self.small)
+                y += 27
+            return
+
+        # kind == "city"
+        details = self.data.city_details(self.selection.id)
         city: sqlite3.Row = details["city"]  # type: ignore[assignment]
         self.draw_text(city["name"], (x, y), TEXT, self.title)
         self.draw_text(f"{city['type']}  •  {city['kingdom_name']}", (x, y + 38), GOLD, self.font)
@@ -379,6 +638,21 @@ class MapViewer:
             self.draw_text(resource["resource_name"], (x, y), MUTED, self.small)
             self.draw_text(f"{resource['amount']:g}", (x + 220, y), TEXT, self.small)
             y += 23
+        y += 30
+        self.draw_text("Buildings (click a type to inspect one)", (x, y), TEXT, self.font)
+        y += 32
+        buildings = self.data.city_buildings(self.selection.id)
+        if not buildings:
+            self.draw_text("No recorded buildings", (x, y), MUTED, self.small)
+        for building in buildings[:10]:
+            row_rect = pygame.Rect(x - 6, y - 3, SIDEBAR_WIDTH - 36, 22)
+            if row_rect.collidepoint(pygame.mouse.get_pos()):
+                pygame.draw.rect(self.screen, PANEL_EDGE, row_rect, border_radius=3)
+            self.draw_text(f"{building['type']}", (x, y), MUTED, self.small)
+            occupants = building["workers"] + building["residents"]
+            self.draw_text(f"x{building['count']}  ({occupants} there)", (x + 220, y), TEXT, self.small)
+            self.building_row_rects.append((row_rect, building["sample_building_id"]))
+            y += 25
 
     def city_at(self, point: tuple[int, int]) -> City | None:
         for city in reversed(self.data.cities):
@@ -386,19 +660,105 @@ class MapViewer:
                 return city
         return None
 
+    def kingdom_label_at(self, point: tuple[int, int]) -> int | None:
+        for kingdom_id, label_rect in self.kingdom_label_rects.items():
+            if label_rect.collidepoint(point):
+                return kingdom_id
+        return None
+
+    def building_row_at(self, point: tuple[int, int]) -> int | None:
+        for row_rect, building_id in self.building_row_rects:
+            if row_rect.collidepoint(point):
+                return building_id
+        return None
+
+    def search_result_at(self, point: tuple[int, int]) -> tuple[str, int, float, float] | None:
+        for row_rect, kind, entity_id, world_x, world_y in self.search_result_rects:
+            if row_rect.collidepoint(point):
+                return kind, entity_id, world_x, world_y
+        return None
+
+    def run_search(self) -> None:
+        self.search_results = self.data.search(self.search_query) if len(self.search_query) >= 2 else {}
+
+    def select(self, kind: str, entity_id: int) -> None:
+        # Clears any active search whenever a selection is made, so the
+        # sidebar shows the new selection instead of getting stuck on
+        # stale search results.
+        self.selection = Selection(kind, entity_id)
+        self.search_query = ""
+        self.search_active = False
+        pygame.key.stop_text_input()
+
+    def blur_search(self) -> None:
+        self.search_active = False
+        pygame.key.stop_text_input()
+
     def handle_event(self, event: pygame.event.Event) -> None:
-        if event.type == pygame.QUIT or (event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q)):
+        if event.type == pygame.QUIT:
+            self.running = False
+            return
+
+        # Keyboard input, while actively typing in the search box, takes
+        # priority over every other keyboard shortcut -- so typing "r"
+        # doesn't reset the camera and Escape clears the search instead
+        # of quitting. Mouse clicks are NOT gated here; they're handled
+        # by the unified logic below regardless of focus state, so
+        # clicking a search result works whether or not the box still
+        # has focus.
+        if self.search_active and event.type == pygame.KEYDOWN and event.key == pygame.K_ESCAPE:
+            self.search_query = ""
+            self.search_results = {}
+            self.blur_search()
+            return
+        if self.search_active and event.type == pygame.KEYDOWN and event.key == pygame.K_BACKSPACE:
+            self.search_query = self.search_query[:-1]
+            self.run_search()
+            return
+        if self.search_active and event.type == pygame.KEYDOWN and event.key == pygame.K_RETURN:
+            if self.search_result_rects:
+                _, kind, entity_id, world_x, world_y = self.search_result_rects[0]
+                self.select(kind, entity_id)
+                self.camera.center_on(world_x, world_y, self.map_rect)
+            return
+        if self.search_active and event.type == pygame.TEXTINPUT:
+            self.search_query += event.text
+            self.run_search()
+            return
+
+        if event.type == pygame.KEYDOWN and event.key in (pygame.K_ESCAPE, pygame.K_q):
             self.running = False
         elif event.type == pygame.KEYDOWN and event.key == pygame.K_r:
             self.camera.reset(self.map_rect)
         elif event.type == pygame.MOUSEWHEEL and self.map_rect.collidepoint(pygame.mouse.get_pos()):
             self.camera.zoom_at(pygame.mouse.get_pos(), event.y, self.map_rect)
         elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1 and self.map_rect.collidepoint(event.pos):
-            hit = self.city_at(event.pos)
-            if hit:
-                self.selected = hit
-            else:
-                self.dragging = True
+            self.blur_search()
+            city_hit = self.city_at(event.pos)
+            if city_hit:
+                self.select("city", city_hit.id)
+                return
+            kingdom_hit = self.kingdom_label_at(event.pos)
+            if kingdom_hit is not None:
+                self.select("kingdom", kingdom_hit)
+                return
+            self.dragging = True
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            if self.search_box_rect.collidepoint(event.pos):
+                self.search_active = True
+                pygame.key.start_text_input()
+                return
+            result_hit = self.search_result_at(event.pos)
+            if result_hit is not None:
+                kind, entity_id, world_x, world_y = result_hit
+                self.select(kind, entity_id)
+                self.camera.center_on(world_x, world_y, self.map_rect)
+                return
+            building_hit = self.building_row_at(event.pos)
+            if building_hit is not None:
+                self.select("building", building_hit)
+            elif self.search_active:
+                self.blur_search()
         elif event.type == pygame.MOUSEMOTION and self.dragging:
             self.camera.target_center -= pygame.Vector2(event.rel) / self.camera.target_zoom
             self.camera.clamp_target(self.map_rect)

@@ -27,6 +27,7 @@ import ast
 import difflib
 import json
 import os
+import random
 import sqlite3
 import subprocess
 import sys
@@ -1158,7 +1159,7 @@ def _smoke_body(r, holder):
         r.fail(f"could not import the simulation: {type(e).__name__}: {e}")
         return
 
-    world, ok = run_step(r, "generate a fresh world", generate_world)
+    world, ok = run_step(r, "generate a fresh world", lambda: generate_world(kingdoms=random.randint(3, 5)))   # the big map, fewer kingdoms: a quick check
     if not ok:
         return
 
@@ -1389,6 +1390,35 @@ def _smoke_body(r, holder):
 
         run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
 
+        def map_draws():
+            # the map reads the world as it now is: a schema change that breaks it shows up here
+            try:
+                import os as os_module
+                os_module.environ.setdefault("SDL_VIDEODRIVER", "dummy")
+                import pygame, numpy  # noqa: F401
+            except ImportError:
+                print("  --    (map not checked: pygame-ce and numpy are not installed -- see Data/Map/requirements.txt)")
+                return
+            map_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data", "Map")
+            if map_dir not in sys.path:
+                sys.path.insert(0, map_dir)
+            import map_model, map_render
+            from Data.Database import database as database_module
+            pygame.init()
+            view = map_model.load_world(map_model.open_world(database_module.DB_FILE))
+            assert view.regions and view.settlements and view.roads, "the map found no regions, settlements or roads"
+            terrain, territory = map_render.build_terrain(view, 200), map_render.build_territory(view, 200)
+            canvas = pygame.Surface((400, 400))
+            canvas.blit(terrain, (0, 0)); canvas.blit(territory, (0, 0))
+            font = pygame.font.SysFont(None, 14)
+            to_screen = lambda x, y: (int(x * 0.2), int(y * 0.2))
+            map_render.draw_rivers(canvas, view, to_screen, 0.2)
+            map_render.draw_roads(canvas, view, to_screen, 0.2)
+            map_render.draw_settlements(canvas, view, to_screen, 0.2, font, font)
+            map_render.draw_kingdom_names(canvas, view, to_screen, 0.2, font)
+
+        run_step(r, "the map reads the world and draws its land, realms, roads and settlements", map_draws)
+
         def families():
             import Data.NPCS.family as F
             from Data.Database.repository import get_city, set_relationship
@@ -1609,10 +1639,13 @@ def _smoke_body(r, holder):
 
             chance = VL.BANDITRY_CHANCE_PER_MONTH
             VL.BANDITRY_CHANCE_PER_MONTH = 1.0          # make banditry certain for this test
+            import Data.World.slums as SL_module
+            refugee_bandits, SL_module.BANDIT_CHANCE = SL_module.BANDIT_CHANCE, 0.0   # every fleeing family arrives whole (refugees' banditry is tested with the slums)
             try:
                 report = VL.village_hardship(conn, world_id)
             finally:
                 VL.BANDITRY_CHANCE_PER_MONTH = chance
+                SL_module.BANDIT_CHANCE = refugee_bandits
 
             fled, bandits = report["households_fled"], report["bandits"]
             after = conn.execute("SELECT households FROM cities WHERE id = ?", (village["id"],)).fetchone()[0]
@@ -2243,13 +2276,17 @@ def _smoke_body(r, holder):
         from Data.Database.repository import get_city, get_kingdom
 
         crown_id = conn.execute(           # a crown: a republic's Doge has no heirs
-            "SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id DESC LIMIT 1", (world_id,)).fetchone()[0]
+            "SELECT id FROM kingdoms k WHERE world_id = ? AND type = 'Crown' AND status != 'Fallen' AND EXISTS (SELECT 1 FROM provinces p WHERE p.kingdom_id = k.id) ORDER BY id DESC LIMIT 1", (world_id,)).fetchone()[0]
         kingdom = get_kingdom(conn, crown_id)
         monarch = conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (kingdom["capital"],)).fetchone()[0]
         child = conn.execute(           # someone of the crown's own capital, not of another realm
             "SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND id != ? AND city_id = ? ORDER BY id LIMIT 1 OFFSET 7",
             (monarch, kingdom["capital"])
         ).fetchone()[0]
+        # worlds start with families, so the monarch may have children of their own: set them aside, so this
+        # child really is the only one (an older real child would rightly inherit first)
+        conn.execute("UPDATE npcs SET parent_a_id = NULL WHERE parent_a_id = ?", (monarch,))
+        conn.execute("UPDATE npcs SET parent_b_id = NULL WHERE parent_b_id = ?", (monarch,))
         conn.execute("UPDATE npcs SET age = 9, parent_a_id = ? WHERE id = ?", (monarch, child))
         conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (monarch,))
         conn.commit()
@@ -2666,9 +2703,7 @@ def _smoke_body(r, holder):
         assert family and slums, "a family fleeing to a town with no free house did not come (or the town has no slums)"
         homes = {conn.execute("SELECT home_id FROM npcs WHERE id = ?", (m["id"],)).fetchone()[0] for m in family}
         assert homes == slums, "refugees with no house free do not live in the slums"
-        levels = CT.life_levels(conn, world_id, today(conn, world_id))
-        housed = conn.execute("SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND home_id IN (SELECT id FROM buildings WHERE type = 'House') LIMIT 1", (town,)).fetchone()[0]
-        assert levels[family[0]["id"]] < levels[housed] + CT.SLUMS - CT.HOUSED + 15, "life in the slums is no worse than in a house"
+        in_slums = CT.life_levels(conn, world_id, today(conn, world_id))[family[1]["id"]]     # the same person, before and after
         adults = [m["id"] for m in family if m["age"] >= 16]
         conn.execute(f"UPDATE npcs SET gold = 500 WHERE id IN ({','.join(map(str, adults))})")
         conn.execute("UPDATE npcs SET home_id = NULL WHERE home_id = (SELECT id FROM buildings WHERE city_id = ? AND type = 'House' ORDER BY id LIMIT 1)", (town,))
@@ -2676,6 +2711,8 @@ def _smoke_body(r, holder):
         SL.rehouse(conn, world_id)
         homes = {conn.execute("SELECT home_id FROM npcs WHERE id = ?", (m["id"],)).fetchone()[0] for m in family}
         assert len(homes) == 1 and not homes & slums, "a slum family able to pay did not move into a house together"
+        housed = CT.life_levels(conn, world_id, today(conn, world_id))[family[1]["id"]]
+        assert housed - in_slums >= (CT.HOUSED - CT.SLUMS) - 1, f"moving out of the slums did not make life better ({in_slums:.0f} -> {housed:.0f})"
 
     run_step(r, "refugees with no house free live in the slums, and move into a house together once they can pay", refugees_and_slums)
 
