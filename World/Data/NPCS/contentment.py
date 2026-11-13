@@ -8,7 +8,7 @@
 BASE = 50
 DRIFT = 0.10
 FED_WEIGHT = 30                 # from -15 (unfed) to +15 (fully fed)
-HOUSED, HOMELESS, CROWDED = 5, -15, -10
+HOUSED, HOMELESS, CROWDED, SLUMS = 5, -15, -10, -12
 WORKING, LABORING = 10, 3
 MARRIED, PARENT = 10, 5
 BEREAVED, BEREAVED_DAYS = -15, 90
@@ -30,6 +30,7 @@ def life_levels(conn, world_id, day):
            (SELECT COUNT(*) FROM npcs x WHERE x.home_id = b.id AND x.alive = 1 AND x.age >= ?) > b.capacity""", (ADULT_AGE,))}
     parents = {r[0] for r in conn.execute(
         "SELECT parent_a_id FROM npcs WHERE alive = 1 AND parent_a_id IS NOT NULL UNION SELECT parent_b_id FROM npcs WHERE alive = 1 AND parent_b_id IS NOT NULL")}
+    slums = {r[0] for r in conn.execute("SELECT id FROM buildings WHERE type = 'Slums'")}
     bereaved = set()
     for dead in conn.execute("SELECT id, spouse_id, parent_a_id, parent_b_id FROM npcs WHERE alive = 0 AND died_day >= ?",
                              (day - BEREAVED_DAYS,)).fetchall():
@@ -43,6 +44,8 @@ def life_levels(conn, world_id, day):
         level = BASE + FED_WEIGHT * ((p["fed"] if p["fed"] is not None else 1.0) - 0.5)
         if p["home_id"] is None:
             level += HOMELESS
+        elif p["home_id"] in slums:
+            level += SLUMS
         else:
             level += CROWDED if p["home_id"] in crowded else HOUSED
         if ADULT_AGE <= p["age"] < OLD_AGE and p["profession"] != "Child":

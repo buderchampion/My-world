@@ -82,14 +82,14 @@ def make_individual(conn, village_id, city_id=None, profession="Farmer", age=Non
 
 def _move_family(conn, village, town_id):
     """One household leaves the village for the town: a married couple and
-    up to three children, all sharing one house. Returns them (None if the
-    town has no free house)."""
+    up to three children, sharing one house -- or, with no house free, the
+    town's Slums, though a young man among them may turn bandit
+    (Data.World.slums). Returns them."""
 
     from Data.Database.repository import find_open_building, save_npc, set_relationship, set_npc_parents
     from Data.NPCS.family import marry, SPOUSE_REPUTATION_RANGE
 
-    if not find_open_building(conn, town_id, "House", "home_id"):
-        return None
+    house_free = find_open_building(conn, town_id, "House", "home_id") is not None
 
     husband = make_individual(conn, village["id"], town_id, "Laborer", age=random.randint(20, 45), gender="Male")
     wife = make_individual(conn, village["id"], town_id, "Laborer", age=max(18, husband["age"] + random.randint(-6, 3)), gender="Female")
@@ -106,6 +106,18 @@ def _move_family(conn, village, town_id):
         save_npc(conn, child)
         set_npc_parents(conn, child["id"], husband["id"], wife["id"])
         family.append(child)
+
+    # they arrive as one family, under one family name (Data.NPCS.family_names)
+    from Data.NPCS.family_names import new_family, join_family
+    world_id = conn.execute("SELECT k.world_id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE c.id = ?", (town_id,)).fetchone()[0]
+    family_id = new_family(conn, world_id)
+    for member in family:
+        join_family(conn, member["id"], family_id)
+        member["name"] = conn.execute("SELECT name FROM npcs WHERE id = ?", (member["id"],)).fetchone()["name"]
+
+    if not house_free:                         # no roof for them: the slums, or banditry
+        from Data.World.slums import shelter
+        shelter(conn, family, town_id)
 
     return family
 

@@ -565,6 +565,12 @@ FEATURES = [
                   "Data/Government/republic.py": ["besieging_army(conn, republic"]},
     },
     {
+        "name": "Refugees and slums: with no house free they live in the slums or turn bandit, and move into a house once they can afford one",
+        "functions": {"Data/World/slums.py": ["shelter", "rehouse", "slums_of", "slum_ids"]},
+        "wired": {"Data/World/villagers.py": ["shelter(conn, family, town_id)"], "Data/Simulation/simulation_manager.py": ["rehouse(self.conn"],
+                  "Data/Buildings/upgrades.py": ["type = 'Slums'"], "Data/NPCS/contentment.py": ["SLUMS"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2636,6 +2642,42 @@ def _smoke_body(r, holder):
             conn.commit()
 
     run_step(r, "caravans and sieges: none sets out for a besieged town, and one arriving there is seized by the besiegers", caravans_meet_sieges)
+
+    def refugees_and_slums():
+        import Data.World.slums as SL
+        import Data.World.villagers as V
+        import Data.NPCS.contentment as CT
+        from Data.Government.edicts import today
+        village = dict(conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND k.status != 'Fallen'
+                                       AND c.type = 'Village' AND c.households > 10 ORDER BY c.id LIMIT 1""", (world_id,)).fetchone())
+        town = conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND type != 'Village' ORDER BY id LIMIT 1", (village["kingdom_id"],)).fetchone()[0]
+        for house in conn.execute("SELECT id, capacity FROM buildings WHERE city_id = ? AND type = 'House'", (town,)).fetchall():
+            have = conn.execute("SELECT COUNT(*) FROM npcs WHERE home_id = ? AND alive = 1", (house["id"],)).fetchone()[0]
+            for _ in range(house["capacity"] - have):
+                V.make_individual(conn, village["id"], town, "Laborer")         # every house in town full
+        conn.commit()
+        saved = SL.BANDIT_CHANCE
+        SL.BANDIT_CHANCE = 0.0
+        try:
+            family = V._move_family(conn, village, town)
+        finally:
+            SL.BANDIT_CHANCE = saved
+        slums = SL.slum_ids(conn, town)
+        assert family and slums, "a family fleeing to a town with no free house did not come (or the town has no slums)"
+        homes = {conn.execute("SELECT home_id FROM npcs WHERE id = ?", (m["id"],)).fetchone()[0] for m in family}
+        assert homes == slums, "refugees with no house free do not live in the slums"
+        levels = CT.life_levels(conn, world_id, today(conn, world_id))
+        housed = conn.execute("SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND home_id IN (SELECT id FROM buildings WHERE type = 'House') LIMIT 1", (town,)).fetchone()[0]
+        assert levels[family[0]["id"]] < levels[housed] + CT.SLUMS - CT.HOUSED + 15, "life in the slums is no worse than in a house"
+        adults = [m["id"] for m in family if m["age"] >= 16]
+        conn.execute(f"UPDATE npcs SET gold = 500 WHERE id IN ({','.join(map(str, adults))})")
+        conn.execute("UPDATE npcs SET home_id = NULL WHERE home_id = (SELECT id FROM buildings WHERE city_id = ? AND type = 'House' ORDER BY id LIMIT 1)", (town,))
+        conn.commit()
+        SL.rehouse(conn, world_id)
+        homes = {conn.execute("SELECT home_id FROM npcs WHERE id = ?", (m["id"],)).fetchone()[0] for m in family}
+        assert len(homes) == 1 and not homes & slums, "a slum family able to pay did not move into a house together"
+
+    run_step(r, "refugees with no house free live in the slums, and move into a house together once they can pay", refugees_and_slums)
 
     def armor_protects():
         import random as random_module

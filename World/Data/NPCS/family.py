@@ -39,8 +39,10 @@ def room_in(conn, house_id, needed):
     """Does this house have room for `needed` more?"""
     if not house_id:
         return False
-    capacity = conn.execute("SELECT capacity FROM buildings WHERE id = ?", (house_id,)).fetchone()
-    return bool(capacity) and residents(conn, house_id) + needed <= capacity[0]
+    row = conn.execute("SELECT capacity, type FROM buildings WHERE id = ?", (house_id,)).fetchone()
+    if not row or row["type"] != "House":
+        return False                          # the slums are no home with room (Data.World.slums)
+    return residents(conn, house_id) + needed <= row["capacity"]
 
 
 def marry(npc_a, npc_b, conn=None):
@@ -66,7 +68,12 @@ def marry(npc_a, npc_b, conn=None):
             """SELECT b.id FROM buildings b WHERE b.city_id = ? AND b.type = 'House'
                AND b.capacity - (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) >= 2
                ORDER BY b.id LIMIT 1""", (npc_a["city_id"],)).fetchone()
-        npc_a["home"] = npc_b["home"] = house[0] if house else npc_a["home"]
+        if house:
+            npc_a["home"] = npc_b["home"] = house[0]
+        else:                                  # crowd into whichever of their homes is a House, never the slums
+            is_house = lambda h: bool(h) and conn.execute("SELECT type FROM buildings WHERE id = ?", (h,)).fetchone()["type"] == "House"
+            shared = npc_a["home"] if is_house(npc_a["home"]) else npc_b["home"] if is_house(npc_b["home"]) else npc_a["home"]
+            npc_a["home"] = npc_b["home"] = shared
 
 
 def create_child(conn, parent_a, parent_b, city_type):

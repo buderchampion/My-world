@@ -21,5 +21,6 @@
     "Hunter Lodge":       {"category": "Civillian",   "capacity": 6},
     "Thieves Den":        {"category": "Criminal",    "capacity": 6},
     "House":              {"category": "Residential", "capacity": 5},
-    "Bandit Camp":        {"category": "Criminal",    "capacity": 4}
+    "Bandit Camp":        {"category": "Criminal",    "capacity": 4},
+    "Slums":              {"category": "Residential", "capacity": 100000}
 }

@@ -187,8 +187,10 @@ def jobless_count(conn, city_id):
 
 
 def homeless_count(conn, city_id):
-    return conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND home_id IS NULL AND age >= ?",
-                        (city_id, ADULT_AGE)).fetchone()[0]
+    """Adults with no roof: none at all, or only the slums (Data.World.slums)."""
+    return conn.execute(
+        """SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND age >= ?
+           AND (home_id IS NULL OR home_id IN (SELECT id FROM buildings WHERE type = 'Slums'))""", (city_id, ADULT_AGE)).fetchone()[0]
 
 
 def buildable(conn, city_id):
@@ -262,7 +264,8 @@ def build_new(conn, city_id, kingdom, jobless_waiting):
         jobless_waiting -= places
 
     homeless = [r[0] for r in conn.execute(
-        "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND home_id IS NULL AND age >= ? ORDER BY id", (city_id, ADULT_AGE))]
+        """SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND age >= ?
+           AND (home_id IS NULL OR home_id IN (SELECT id FROM buildings WHERE type = 'Slums')) ORDER BY id""", (city_id, ADULT_AGE))]
     homeless += crowded_out(conn, city_id)       # adults beyond their house's places need a roof too
     house = types["House"]["capacity"]
     houses = 0                         # Houses have their own allowance: a roof does not wait behind jobs
