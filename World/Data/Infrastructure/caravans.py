@@ -15,11 +15,49 @@ def get_travel_days(conn, city_a_id, city_b_id):
 def dispatch_caravan(conn, origin_city_id, destination_city_id, resource, amount,
                       buyer_kingdom_id, seller_kingdom_id):
     from Data.Database.repository import create_caravan
+    from Data.Government.campaigns import besieging_army
+    if besieging_army(conn, destination_city_id):
+        # no caravan sets out for a besieged town: the goods stay where they were
+        conn.execute("""INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, ?, ?)
+                        ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = city_resources.amount + excluded.amount""",
+                     (origin_city_id, resource, amount))
+        return None
     travel_days = get_travel_days(conn, origin_city_id, destination_city_id)
     return create_caravan(
         conn, origin_city_id, destination_city_id, resource, amount,
         buyer_kingdom_id, seller_kingdom_id, travel_days
     )
+
+
+# Caravans and sieges (Data.Government.campaigns): a caravan is not sent to a
+# besieged town, and one that arrives at a town besieged since it set out is
+# seized by the besieging army -- what an army carries goes into its wagons,
+# anything else is sold as loot, its worth to the besieging kingdom.
+ARMY_SUPPLIES = {"Food": "food", "Weapons": "weapons", "Potions": "potions", "Armor": "armor", "Tools": "tools"}
+
+
+def seize_at_siege(conn, caravan):
+    """If the caravan's destination is besieged, the besiegers take its goods. Returns True if they did."""
+    from Data.Government.campaigns import besieging_army
+    from Data.Database.repository import set_caravan_status, get_city, create_event
+    from Data.Economy.economy import get_price
+    siege = besieging_army(conn, caravan["destination_city_id"])
+    if siege is None:
+        return False
+    resource, amount = caravan["resource"], caravan["amount"]
+    town = get_city(conn, caravan["destination_city_id"])
+    if resource in ARMY_SUPPLIES:
+        column = ARMY_SUPPLIES[resource]
+        conn.execute(f"UPDATE armies SET {column} = {column} + ? WHERE id = ?", (amount, siege["id"]))
+        taken = f"{amount:.0f} {resource} into its wagons"
+    else:
+        worth = round(amount * get_price(resource, town), 2)
+        conn.execute("UPDATE kingdoms SET treasury = treasury + ? WHERE id = ?", (worth, siege["attacker_kingdom_id"]))
+        taken = f"{amount:.0f} {resource}, sold as loot for {worth:.0f} gold"
+    set_caravan_status(conn, caravan["id"], "Seized")
+    create_event(conn, "Seized", f"A caravan bound for besieged {town['name']} was seized by {siege['name']}: {taken}.",
+                 city_id=town["id"], kingdom_id=siege["attacker_kingdom_id"])
+    return True
 
 
 def advance_caravans(conn, world_id):
@@ -30,6 +68,7 @@ def advance_caravans(conn, world_id):
 
     delivered = []
     raided = []
+    seized = []
 
     for caravan in get_active_caravans(conn, world_id):
 
@@ -43,6 +82,10 @@ def advance_caravans(conn, world_id):
 
         remaining = caravan["days_remaining"] - 1
 
+        if remaining <= 0 and seize_at_siege(conn, caravan):
+            seized.append(caravan)              # arrived at a besieged town: the besiegers took it
+            continue
+
         if remaining <= 0:
             destination = get_city(conn, caravan["destination_city_id"])
             destination["resources"][caravan["resource"]] = round(
@@ -54,4 +97,4 @@ def advance_caravans(conn, world_id):
         else:
             decrement_caravan_days(conn, caravan["id"], remaining)
 
-    return {"delivered": delivered, "raided": raided}
+    return {"delivered": delivered, "raided": raided, "seized": seized}

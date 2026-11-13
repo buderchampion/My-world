@@ -55,7 +55,7 @@ CREATE TABLE IF NOT EXISTS caravans (
     buyer_kingdom_id    INTEGER NOT NULL REFERENCES kingdoms(id),
     seller_kingdom_id   INTEGER NOT NULL REFERENCES kingdoms(id),
     days_remaining      INTEGER NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'En Route'  -- En Route, Delivered, Raided
+    status              TEXT NOT NULL DEFAULT 'En Route'  -- En Route, Delivered, Raided, Seized (by besiegers)
 );
 
 CREATE TABLE IF NOT EXISTS npc_travels (

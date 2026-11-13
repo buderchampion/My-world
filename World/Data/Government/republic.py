@@ -147,6 +147,9 @@ def run_grain_offices(conn, world_id):
     for republic in (k for k in kingdoms if k["type"] == "Republic"):
         if not republic["capital_city_id"]:
             continue
+        from Data.Government.campaigns import besieging_army
+        if besieging_army(conn, republic["capital_city_id"]):
+            continue                         # nothing can reach a besieged capital: the office waits
         townsfolk = conn.execute(
             "SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1",
             (republic["id"],)).fetchone()[0]

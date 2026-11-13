@@ -559,6 +559,12 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["drift_happiness(self.conn"], "Data/Events/events.py": ["died_day"]},
     },
     {
+        "name": "Caravans and sieges: none sets out for a besieged town; one arriving there is seized by the besiegers",
+        "functions": {"Data/Infrastructure/caravans.py": ["seize_at_siege"], "Data/Government/campaigns.py": ["besieging_army"]},
+        "wired": {"Data/Infrastructure/caravans.py": ["seize_at_siege(conn, caravan)", "besieging_army(conn, destination_city_id)"],
+                  "Data/Government/republic.py": ["besieging_army(conn, republic"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2591,6 +2597,46 @@ def _smoke_body(r, holder):
 
     run_step(r, "a campaign musters two thirds of the army, marches on a walled town, besieges it, and storms it when the walls fall", campaign_marches_and_fights)
 
+    def caravans_meet_sieges():
+        import Data.Infrastructure.caravans as CV
+        import Data.Government.armies as A
+        from Data.Database.repository import get_kingdom, get_city, save_city
+
+        k_att, k_def = [get_kingdom(conn, row[0]) for row in conn.execute(
+            "SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id LIMIT 2", (world_id,))]
+        town = conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND id != ? ORDER BY id LIMIT 1", (k_def["id"], k_def["capital"])).fetchone()[0]
+        capital = get_city(conn, k_att["capital"])
+        capital["resources"]["Food"] = capital["resources"].get("Food", 0) + 10000
+        save_city(conn, capital)
+        conn.commit()
+        army = A.raise_army(conn, k_att, get_city(conn, k_att["capital"]), size=3)
+        saved_raids = CV.CARAVAN_RAID_CHANCE_PER_DAY
+        CV.CARAVAN_RAID_CHANCE_PER_DAY = 0.0
+        try:
+            caravan = CV.dispatch_caravan(conn, k_def["capital"], town, "Food", 400, k_def["id"], k_def["id"])
+            assert caravan, "(setup) the caravan did not set out"
+            conn.execute("""INSERT INTO campaigns (attacker_kingdom_id, defender_kingdom_id, army_id, target_city_id, status, started_day, siege_day)
+                            VALUES (?, ?, ?, ?, 'Besieging', 0, 0)""", (k_att["id"], k_def["id"], army["id"], town))
+            conn.commit()
+            wagons = conn.execute("SELECT food FROM armies WHERE id = ?", (army["id"],)).fetchone()[0]
+            for _ in range(60):
+                CV.advance_caravans(conn, world_id)
+                if conn.execute("SELECT status FROM caravans WHERE id = ?", (caravan["id"],)).fetchone()[0] != "En Route":
+                    break
+            assert conn.execute("SELECT status FROM caravans WHERE id = ?", (caravan["id"],)).fetchone()[0] == "Seized", \
+                "a caravan that reached a besieged town was not seized"
+            assert abs(conn.execute("SELECT food FROM armies WHERE id = ?", (army["id"],)).fetchone()[0] - wagons - 400) < 0.01, \
+                "the seized Food did not go into the besiegers' wagons"
+            assert CV.dispatch_caravan(conn, k_def["capital"], town, "Food", 100, k_def["id"], k_def["id"]) is None, \
+                "a caravan set out for a besieged town"
+        finally:
+            CV.CARAVAN_RAID_CHANCE_PER_DAY = saved_raids
+            conn.execute("UPDATE campaigns SET status = 'Over' WHERE army_id = ?", (army["id"],))
+            A.disband_army(conn, army["id"])
+            conn.commit()
+
+    run_step(r, "caravans and sieges: none sets out for a besieged town, and one arriving there is seized by the besiegers", caravans_meet_sieges)
+
     def armor_protects():
         import random as random_module
         import Data.Combat.combat as C
@@ -3246,7 +3292,8 @@ def _smoke_body(r, holder):
         crowns = [k["id"] for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' AND status != 'Fallen' ORDER BY id", (world_id,))]
         living = [k["id"] for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id", (world_id,))]
         attacker = get_kingdom(conn, crowns[0])
-        defender = get_kingdom(conn, next(k for k in living if k != attacker["id"]))
+        defender = get_kingdom(conn, next(k for k in living if k != attacker["id"] and conn.execute(   # one with a town besides its capital
+        "SELECT COUNT(*) FROM cities WHERE kingdom_id = ? AND id != (SELECT capital_city_id FROM kingdoms WHERE id = ?)", (k, k)).fetchone()[0]))
         others = conn.execute("SELECT COUNT(*) FROM cities WHERE kingdom_id = ? AND id != ?", (defender["id"], defender["capital"])).fetchone()[0]
         assert others, "(setup) the defender has no town but its capital"
 

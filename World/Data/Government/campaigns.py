@@ -68,6 +68,14 @@ def besieged_city_ids(conn, world_id):
            WHERE k.world_id = ? AND c.status = 'Besieging'""", (world_id,))}
 
 
+def besieging_army(conn, city_id):
+    """The army besieging this town right now (with its kingdom), or None."""
+    row = conn.execute(
+        """SELECT a.id, a.name, c.attacker_kingdom_id FROM campaigns c JOIN armies a ON a.id = c.army_id
+           WHERE c.target_city_id = ? AND c.status = 'Besieging' AND a.status != 'Disbanded' LIMIT 1""", (city_id,)).fetchone()
+    return dict(row) if row else None
+
+
 def active_campaign(conn, kingdom_id):
     row = conn.execute("SELECT * FROM campaigns WHERE attacker_kingdom_id = ? AND status != 'Over'", (kingdom_id,)).fetchone()
     return dict(row) if row else None
