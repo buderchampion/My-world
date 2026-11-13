@@ -1,0 +1,1 @@
+"""The world map (a Pygame window): run world_map.py from this folder. See README.md."""

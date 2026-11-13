@@ -1399,10 +1399,7 @@ def _smoke_body(r, holder):
             except ImportError:
                 print("  --    (map not checked: pygame-ce and numpy are not installed -- see Data/Map/requirements.txt)")
                 return
-            map_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "Data", "Map")
-            if map_dir not in sys.path:
-                sys.path.insert(0, map_dir)
-            import map_model, map_render
+            from Data.Map import map_model, map_render       # a package import, so editors (Pylance) can follow it
             from Data.Database import database as database_module
             pygame.init()
             view = map_model.load_world(map_model.open_world(database_module.DB_FILE))
@@ -1416,8 +1413,11 @@ def _smoke_body(r, holder):
             map_render.draw_roads(canvas, view, to_screen, 0.2)
             map_render.draw_settlements(canvas, view, to_screen, 0.2, font, font)
             map_render.draw_kingdom_names(canvas, view, to_screen, 0.2, font)
+            moving = map_model.load_movement(map_model.open_world(database_module.DB_FILE), view)   # armies, sieges, caravans
+            map_render.draw_movement(canvas, view, moving, to_screen, 0.2, font)
+            map_render.draw_legend(canvas, font, (0, 0))
 
-        run_step(r, "the map reads the world and draws its land, realms, roads and settlements", map_draws)
+        run_step(r, "the map reads the world and draws its land, realms, roads, settlements, armies, sieges and caravans", map_draws)
 
         def families():
             import Data.NPCS.family as F
@@ -1483,7 +1483,7 @@ def _smoke_body(r, holder):
             lonely = conn.execute("SELECT id FROM npcs WHERE alive = 1 AND age BETWEEN 25 AND 50 AND spouse_id IS NULL AND id != ? LIMIT 1", (spouse,)).fetchone()[0]
             smith = conn.execute("SELECT profession FROM npcs WHERE alive = 1 AND workplace_id IS NOT NULL AND profession NOT IN ('Laborer', 'Child') LIMIT 1").fetchone()[0]
             conn.execute("UPDATE npcs SET fed = 1, gold = 500, needs_stress = 0, needs_happiness = 100, profession = ? WHERE id = ?", (smith, content))
-            conn.execute("UPDATE npcs SET fed = 0, gold = 0, needs_stress = 60, needs_happiness = 100, profession = 'Laborer', home_id = NULL WHERE id = ?", (lonely,))
+            conn.execute("UPDATE npcs SET fed = 0, gold = 0, needs_stress = 60, needs_happiness = 100, profession = 'Laborer', workplace_id = NULL, home_id = NULL WHERE id = ?", (lonely,))
             conn.commit()
             for _ in range(30):
                 CT.drift_happiness(conn, world_id, today(conn, world_id))
@@ -2139,11 +2139,16 @@ def _smoke_body(r, holder):
                  AND (SELECT COUNT(*) FROM npcs n WHERE n.city_id = b.city_id AND n.alive = 1 AND n.profession = 'Laborer' AND n.age >= 16) >= 2
                ORDER BY b.id LIMIT 1""", (world_id,)).fetchone()
         assert row, "(setup) no full workplace in a town with jobless people"
-        trade = conn.execute("SELECT profession FROM npcs WHERE workplace_id = ? AND alive = 1 LIMIT 1", (row["id"],)).fetchone()[0]
+        trade = conn.execute(          # what most of its workers do: one odd worker must not mislead the check
+            "SELECT profession FROM npcs WHERE workplace_id = ? AND alive = 1 GROUP BY profession ORDER BY COUNT(*) DESC LIMIT 1",
+            (row["id"],)).fetchone()[0]
         for npc in conn.execute("SELECT id FROM npcs WHERE workplace_id = ? AND alive = 1 AND title IS NULL LIMIT 2", (row["id"],)).fetchall():   # never a ruler
             conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (npc["id"],))
         conn.commit()
-        vacancy.update(building=row["id"], capacity=row["capacity"], trade=trade)
+        town = conn.execute("SELECT city_id FROM buildings WHERE id = ?", (row["id"],)).fetchone()[0]
+        jobless = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND age >= 16",
+                               (town,)).fetchone()[0]
+        vacancy.update(building=row["id"], capacity=row["capacity"], trade=trade, town=town, jobless_before=jobless)
 
     run_step(r, "(setup) two workers die in a full workplace just before the month tick", prepare_vacancies)
 
@@ -2184,8 +2189,14 @@ def _smoke_body(r, holder):
             return
         filled = conn.execute("SELECT COUNT(*) FROM npcs WHERE workplace_id = ? AND alive = 1 AND profession = ?",
                               (vacancy["building"], vacancy["trade"])).fetchone()[0]
-        assert filled == vacancy["capacity"], \
-            f"the month tick did not fill the dead workers' places with jobless townsfolk ({filled} of {vacancy['capacity']} {vacancy['trade']}s)"
+        if filled != vacancy["capacity"]:          # explain the shortfall: too few jobless, or the hired left or died
+            left = conn.execute("SELECT COUNT(*) FROM npcs WHERE profession = ? AND city_id != ? AND alive = 1 AND workplace_id IS NULL",
+                                (vacancy["trade"], vacancy["town"])).fetchone()[0]
+            places = conn.execute("SELECT capacity FROM buildings WHERE id = ?", (vacancy["building"],)).fetchone()[0]
+            raise AssertionError(
+                f"the month tick did not fill the dead workers' places with jobless townsfolk ({filled} of {vacancy['capacity']} "
+                f"{vacancy['trade']}s; the town had {vacancy['jobless_before']} Laborers before the tick; the building now has "
+                f"{places} places; {left} {vacancy['trade']}(s) without a workplace now live elsewhere)")
 
     run_step(r, "the month tick's job market fills the places of the dead with jobless townsfolk of that trade", month_tick_fills_vacancies)
 

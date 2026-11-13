@@ -129,3 +129,116 @@ def load_world(conn: sqlite3.Connection) -> WorldView:
     view.roads = [Road(r["city_a_id"], r["city_b_id"], r["kind"]) for r in conn.execute("SELECT * FROM roads")
                   if r["city_a_id"] in view.settlements and r["city_b_id"] in view.settlements]
     return view
+
+
+# --- things on the move (part 2) ----------------------------------------------------------
+WALL_STRENGTH = 1000                  # siege works that breach a town's walls (Data.Government.campaigns)
+DISTANCE_PER_TRAVEL_DAY = 90          # road speed (Data.Infrastructure.roads)
+
+
+@dataclass
+class ArmyMark:
+    id: int
+    name: str
+    kingdom_id: int
+    soldiers: int
+    status: str                       # Mustered, Marching or Encamped
+    x: float
+    y: float
+    path: list                        # the road still ahead, as map points (empty unless marching)
+
+
+@dataclass
+class SiegeMark:
+    city_id: int
+    attacker_id: int
+    progress: float                   # 0..1: how far the siege works have risen against the walls
+    hungry_days: int
+
+
+@dataclass
+class CaravanMark:
+    x: float
+    y: float
+    kind: str                         # Trade or Supply
+    kingdom_id: int
+    resource: str
+
+
+@dataclass
+class Movement:
+    armies: list = field(default_factory=list)
+    sieges: list = field(default_factory=list)
+    caravans: list = field(default_factory=list)
+    occupied: dict = field(default_factory=dict)          # city id -> occupier kingdom id
+
+
+def _road_days(conn):
+    days = {}
+    for r in conn.execute("SELECT city_a_id, city_b_id, travel_days FROM roads"):
+        days[(r[0], r[1])] = days[(r[1], r[0])] = max(1, r[2] or 1)
+    return days
+
+
+def _along(view, road_days, from_id, to_id, days_left):
+    """Where a traveller is on the road from one settlement to the next, `days_left` days from arriving."""
+    a, b = view.settlements.get(from_id), view.settlements.get(to_id)
+    if a is None:
+        return None
+    if b is None:
+        return a.x, a.y
+    total = road_days.get((from_id, to_id)) or max(1, round(math.dist((a.x, a.y), (b.x, b.y)) / DISTANCE_PER_TRAVEL_DAY))
+    done = max(0.0, min(1.0, 1 - days_left / total))
+    return a.x + (b.x - a.x) * done, a.y + (b.y - a.y) * done
+
+
+def _has(conn, table):
+    return conn.execute("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = ?", (table,)).fetchone() is not None
+
+
+def load_movement(conn, view) -> Movement:
+    """Armies (where they are, the road ahead), sieges, caravans on the roads, and occupied towns."""
+    import json
+    moving = Movement()
+    road_days = _road_days(conn)
+    if _has(conn, "armies"):
+        sizes = dict(conn.execute("SELECT army_id, COUNT(*) FROM army_members GROUP BY army_id").fetchall()) \
+            if _has(conn, "army_members") else {}
+        for a in conn.execute("SELECT * FROM armies WHERE status != 'Disbanded'"):
+            if a["status"] == "Marching" and a["next_city_id"]:
+                pos = _along(view, road_days, a["location_city_id"], a["next_city_id"], a["leg_days_remaining"])
+                ahead = [a["next_city_id"]] + [c for c in json.loads(a["route"] or "[]")]
+                path = [pos] + [(view.settlements[c].x, view.settlements[c].y) for c in ahead if c in view.settlements]
+            else:
+                here = view.settlements.get(a["location_city_id"])
+                pos, path = ((here.x, here.y) if here else None), []
+            if pos:
+                moving.armies.append(ArmyMark(a["id"], a["name"], a["kingdom_id"], sizes.get(a["id"], 0), a["status"], pos[0], pos[1], path))
+    if _has(conn, "campaigns"):
+        for c in conn.execute("SELECT * FROM campaigns WHERE status = 'Besieging'"):
+            keys = c.keys()
+            moving.sieges.append(SiegeMark(c["target_city_id"], c["attacker_kingdom_id"],
+                                           min(1.0, (c["siege_progress"] if "siege_progress" in keys else 0) / WALL_STRENGTH),
+                                           c["starving_days"] if "starving_days" in keys else 0))
+    for c in conn.execute("SELECT * FROM caravans WHERE status = 'En Route'"):
+        a, b = view.settlements.get(c["origin_city_id"]), view.settlements.get(c["destination_city_id"])
+        if a and b:
+            total = road_days.get((a.id, b.id)) or max(1, round(math.dist((a.x, a.y), (b.x, b.y)) / DISTANCE_PER_TRAVEL_DAY))
+            done = max(0.0, min(1.0, 1 - c["days_remaining"] / total))
+            moving.caravans.append(CaravanMark(a.x + (b.x - a.x) * done, a.y + (b.y - a.y) * done, "Trade", c["seller_kingdom_id"], c["resource"]))
+    if _has(conn, "supply_caravans"):
+        kingdom_of = dict(conn.execute("SELECT id, kingdom_id FROM armies").fetchall())
+        for s in conn.execute("SELECT * FROM supply_caravans WHERE status IN ('En Route', 'Returning')"):
+            pos = _along(view, road_days, s["location_city_id"], s["next_city_id"], s["leg_days_remaining"]) if s["next_city_id"] \
+                else ((view.settlements[s["location_city_id"]].x, view.settlements[s["location_city_id"]].y) if s["location_city_id"] in view.settlements else None)
+            if pos:
+                moving.caravans.append(CaravanMark(pos[0], pos[1], "Supply", kingdom_of.get(s["army_id"], 0), "supplies"))
+    if _has(conn, "occupations"):
+        moving.occupied = dict(conn.execute("SELECT city_id, occupier_kingdom_id FROM occupations WHERE status = 'Occupied'").fetchall())
+    return moving
+
+
+def realm_signature(view):
+    """What decides the realm layer: which kingdom and county each settlement belongs to. If it changes, redraw."""
+    return tuple(sorted((s.id, s.kingdom_id, s.province_id) for s in view.settlements.values())) + \
+        tuple(sorted((k.id, k.fallen) for k in view.kingdoms.values()))

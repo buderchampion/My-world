@@ -5,18 +5,22 @@ never changes your world).
     py world_map.py                 the world in Data/Database/world.db
     py world_map.py <path to .db>   another world (a save, say)
 
-Drag to pan, mouse wheel (or + and -) to zoom, R to reset the view, F5 to
-reload the world, Esc or Q to quit.
+Drag to pan, mouse wheel (or + and -) to zoom, R to reset the view, L to
+show or hide the legend, F5 to reload the world, Esc or Q to quit. While
+the world runs, the map follows it: every REFRESH_SECONDS it looks for
+changes and redraws armies, sieges and caravans where they now are.
 """
 
 from __future__ import annotations
 
+import os
 import sys
+import time
 from pathlib import Path
 
 import pygame
 
-from map_model import open_world, load_world
+from map_model import open_world, load_world, load_movement, realm_signature
 import map_render as R
 
 WINDOW_SIZE = (1280, 800)
@@ -25,6 +29,7 @@ UNITS_PER_PIXEL = 4                  # detail of the land and realm layers: one 
 MAX_LAYER = 2000                     # ...but never more than this many pixels a side
 ZOOM_MIN, ZOOM_MAX = 0.2, 6.0        # screen pixels per map unit
 WORLD_DATABASE = Path(__file__).resolve().parents[1] / "Database" / "world.db"
+REFRESH_SECONDS = 2                  # how often the map looks for changes while the world runs
 BACKGROUND = (24, 30, 36)
 PANEL = (19, 29, 39)
 
@@ -87,19 +92,49 @@ class MapWindow:
         self.small = pygame.font.SysFont(None, 14)
         self.big = pygame.font.SysFont(None, 26)
         self.title = pygame.font.SysFont(None, 22)
+        self.show_legend = True
+        self.terrain = self.territory = None
+        self.signature = None
+        self.stamp = None
+        self.next_check = 0.0
         self.load()
         self.camera = Camera((size[0], size[1] - TOP_BAR), self.view.size)
 
-    def load(self):
-        """Reads the world afresh and rebuilds the land and realm layers."""
+    def _file_stamp(self):
+        """When the world last changed on disk (the database and its write-ahead log)."""
+        return tuple(os.path.getmtime(p) if os.path.exists(p) else 0
+                     for p in (str(self.database), str(self.database) + "-wal"))
+
+    def load(self, force=False):
+        """Reads the world afresh: the land layer once, the realm layer only when towns change hands
+        (or when forced), and everything on the move every time."""
         conn = open_world(self.database)
         try:
             self.view = load_world(conn)
+            self.moving = load_movement(conn, self.view)
         finally:
             conn.close()
         resolution = min(MAX_LAYER, int(self.view.size / UNITS_PER_PIXEL))
-        self.terrain = R.build_terrain(self.view, resolution)
-        self.territory = R.build_territory(self.view, resolution)
+        if self.terrain is None or force:
+            self.terrain = R.build_terrain(self.view, resolution)
+        signature = realm_signature(self.view)
+        if signature != self.signature or force:
+            self.territory = R.build_territory(self.view, resolution)
+            self.signature = signature
+        self.stamp = self._file_stamp()
+        self.refreshed = time.strftime("%H:%M:%S")
+
+    def follow(self):
+        """While the world runs: every REFRESH_SECONDS, reload if the world has changed."""
+        now = time.monotonic()
+        if now < self.next_check:
+            return
+        self.next_check = now + REFRESH_SECONDS
+        if self._file_stamp() != self.stamp:
+            try:
+                self.load()
+            except Exception:              # caught mid-write: try again next time
+                pass
 
     def draw(self):
         self.screen.fill(BACKGROUND)
@@ -110,12 +145,16 @@ class MapWindow:
         R.draw_roads(self.screen, self.view, self.camera.to_screen, zoom)
         placed = []
         R.draw_settlements(self.screen, self.view, self.camera.to_screen, zoom, self.font, self.small, placed)
+        R.draw_movement(self.screen, self.view, self.moving, self.camera.to_screen, zoom, self.small)
         R.draw_kingdom_names(self.screen, self.view, self.camera.to_screen, zoom, self.big)
+        if self.show_legend:
+            R.draw_legend(self.screen, self.small, (10, self.screen.get_height() - 22 * len(R.LEGEND) - 24))
         pygame.draw.rect(self.screen, PANEL, (0, 0, self.screen.get_width(), TOP_BAR))
         seed = f"   seed {self.view.seed}" if self.view.seed is not None else ""
-        text = f"{self.view.world_name}  --  {self.view.date}{seed}"
+        moving = f"   |   {len(self.moving.armies)} armies, {len(self.moving.sieges)} sieges, {len(self.moving.caravans)} caravans   (updated {self.refreshed})"
+        text = f"{self.view.world_name}  --  {self.view.date}{seed}{moving}"
         self.screen.blit(self.title.render(text, True, R.TEXT), (12, 9))
-        hint = self.small.render("drag: pan   wheel: zoom   R: reset   F5: reload   Esc: quit", True, (160, 170, 175))
+        hint = self.small.render("drag: pan   wheel: zoom   R: reset   L: legend   F5: reload   Esc: quit", True, (160, 170, 175))
         self.screen.blit(hint, (self.screen.get_width() - hint.get_width() - 12, 12))
 
     def handle(self, event):
@@ -128,7 +167,9 @@ class MapWindow:
             if event.key == pygame.K_r:
                 self.camera.reset()
             elif event.key == pygame.K_F5:
-                self.load()
+                self.load(force=True)
+            elif event.key == pygame.K_l:
+                self.show_legend = not self.show_legend
             elif event.key in (pygame.K_PLUS, pygame.K_EQUALS, pygame.K_KP_PLUS):
                 self.camera.zoom_at(1.25, self.camera.view_w / 2, TOP_BAR + self.camera.view_h / 2)
             elif event.key in (pygame.K_MINUS, pygame.K_KP_MINUS):
@@ -148,6 +189,7 @@ class MapWindow:
         while running:
             for event in pygame.event.get():
                 running = self.handle(event) and running
+            self.follow()
             self.draw()
             pygame.display.flip()
             clock.tick(60)

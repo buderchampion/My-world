@@ -12,7 +12,10 @@ import math
 import numpy as np
 import pygame
 
-from map_model import REGION_SIZE
+try:                                   # as part of the Data.Map package (check_project.py)...
+    from .map_model import REGION_SIZE
+except ImportError:                    # ...or run from this folder (py world_map.py)
+    from map_model import REGION_SIZE
 
 # --- the land --------------------------------------------------------------
 TERRAIN_COLORS = {
@@ -246,3 +249,112 @@ def draw_kingdom_names(surface, view, to_screen, zoom, font):
         cap = view.settlements[kingdom.capital_id]
         x, y = to_screen(cap.x, cap.y)
         draw_label(surface, font, kingdom.name.upper(), (x, y - 34), tuple(min(255, int(c * 1.25) + 30) for c in kingdom.color))
+
+
+# --- things on the move (part 2) ----------------------------------------------------------
+SIEGE = (214, 54, 46)
+TRADE_CART = (236, 200, 96)
+FLAG_POLE = (40, 34, 30)
+
+
+def _dashed(surface, color, points, width, dash=9):
+    """A dashed line through `points` (screen positions)."""
+    carry = 0.0
+    for (x0, y0), (x1, y1) in zip(points, points[1:]):
+        length = math.dist((x0, y0), (x1, y1))
+        t = carry
+        while t < length:
+            a, b = t / max(length, 1e-9), min(1.0, (t + dash) / max(length, 1e-9))
+            pygame.draw.line(surface, color, (x0 + (x1 - x0) * a, y0 + (y1 - y0) * a), (x0 + (x1 - x0) * b, y0 + (y1 - y0) * b), width)
+            t += dash * 2
+        carry = t - length
+
+
+def draw_shield(surface, center, size, color, outline=(250, 246, 236)):
+    x, y = center
+    points = [(x - size, y - size), (x + size, y - size), (x + size, y + size * 0.3), (x, y + size * 1.25), (x - size, y + size * 0.3)]
+    pygame.draw.polygon(surface, color, points)
+    pygame.draw.polygon(surface, outline, points, 2)
+
+
+def army_size(soldiers, zoom):
+    return max(5, min(18, (4 + math.sqrt(max(1, soldiers)) * 0.9) * max(0.8, min(1.6, zoom * 1.5))))
+
+
+def draw_movement(surface, view, moving, to_screen, zoom, font):
+    """Marches (the road ahead), sieges, occupied towns, caravans and armies -- in that order, so markers sit on top."""
+    for army in moving.armies:                                     # the road still ahead, beneath everything
+        if army.path:
+            color = view.kingdoms[army.kingdom_id].color if army.kingdom_id in view.kingdoms else (200, 200, 200)
+            points = [to_screen(x, y) for x, y in [(army.x, army.y)] + army.path[1:]]
+            _dashed(surface, color, points, max(2, int(zoom * 2)))
+            end = points[-1]
+            pygame.draw.circle(surface, color, end, max(4, int(zoom * 4)), 2)
+    for siege in moving.sieges:                                    # a red ring, filling as the works rise
+        town = view.settlements.get(siege.city_id)
+        if not town:
+            continue
+        x, y = to_screen(town.x, town.y)
+        r = max(14, int(settlement_radius(town, zoom) + 10))      # a siege stands out at any distance
+        rect = pygame.Rect(x - r, y - r, r * 2, r * 2)
+        pygame.draw.circle(surface, (90, 26, 22), (x, y), r, 4)
+        if siege.progress > 0:
+            pygame.draw.arc(surface, SIEGE, rect, math.pi / 2, math.pi / 2 + math.tau * siege.progress, 6)
+        text = f"siege {siege.progress:.0%}" + (", hungry" if siege.hungry_days else "") if zoom >= 0.3 else "siege"
+        draw_label(surface, font, text, (x, y - r - 15), (255, 120, 104))
+    for city_id, occupier in moving.occupied.items():             # a little flag in the occupier's colour
+        town, kingdom = view.settlements.get(city_id), view.kingdoms.get(occupier)
+        if town and kingdom:
+            x, y = to_screen(town.x, town.y)
+            top = y - int(settlement_radius(town, zoom)) - 20
+            pygame.draw.line(surface, FLAG_POLE, (x, y), (x, top), 3)
+            flag = [(x, top), (x + 15, top + 5), (x, top + 11)]
+            pygame.draw.polygon(surface, kingdom.color, flag)
+            pygame.draw.polygon(surface, (250, 246, 236), flag, 1)
+    for cart in moving.caravans:                                   # small carts on the roads
+        x, y = to_screen(cart.x, cart.y)
+        color = TRADE_CART if cart.kind == "Trade" else view.kingdoms[cart.kingdom_id].color if cart.kingdom_id in view.kingdoms else TRADE_CART
+        size = 3 if zoom < 0.6 else 4
+        pygame.draw.rect(surface, SHADOW, (x - size, y - size + 1, size * 2 + 1, size * 2))
+        pygame.draw.rect(surface, color, (x - size, y - size, size * 2, size * 2 - 1))
+    besieged = {siege.city_id for siege in moving.sieges}
+    for army in moving.armies:                                     # armies on top
+        color = view.kingdoms[army.kingdom_id].color if army.kingdom_id in view.kingdoms else (200, 200, 200)
+        x, y = to_screen(army.x, army.y)
+        size = army_size(army.soldiers, zoom)
+        here = next((t for t in view.settlements.values() if t.id in besieged and (t.x, t.y) == (army.x, army.y)), None)
+        if here is not None and not army.path:                     # besiegers camp outside the walls, beside the ring
+            ring = max(14, int(settlement_radius(here, zoom) + 10))
+            x -= ring + size + 4
+        draw_shield(surface, (x, y - size * 0.4), size, color)
+        if zoom >= 0.45:
+            draw_label(surface, font, f"{army.soldiers}", (x, y + size * 0.9))
+
+
+LEGEND = [("shield", "an army (number: its soldiers)"), ("march", "its march: the road still ahead"),
+          ("siege", "a siege: the ring fills as the works rise"), ("flag", "an occupied town, in the occupier's colour"),
+          ("trade", "a trade caravan"), ("supply", "a supply caravan, in its army's colour")]
+
+
+def draw_legend(surface, font, corner):
+    """What the symbols mean, in a small panel."""
+    x0, y0 = corner
+    panel = pygame.Surface((300, 22 * len(LEGEND) + 14), pygame.SRCALPHA)
+    panel.fill((18, 24, 30, 215))
+    surface.blit(panel, (x0, y0))
+    for i, (kind, text) in enumerate(LEGEND):
+        cx, cy = x0 + 20, y0 + 18 + i * 22
+        if kind == "shield":
+            draw_shield(surface, (cx, cy - 2), 7, (180, 60, 60))
+        elif kind == "march":
+            _dashed(surface, (180, 60, 60), [(cx - 10, cy), (cx + 10, cy)], 2, dash=5)
+        elif kind == "siege":
+            pygame.draw.circle(surface, (80, 24, 20), (cx, cy), 8, 3)
+            pygame.draw.arc(surface, SIEGE, pygame.Rect(cx - 8, cy - 8, 16, 16), math.pi / 2, math.pi * 1.6, 4)
+        elif kind == "flag":
+            pygame.draw.line(surface, FLAG_POLE, (cx, cy + 7), (cx, cy - 8), 2)
+            pygame.draw.polygon(surface, (90, 110, 200), [(cx, cy - 8), (cx + 10, cy - 4), (cx, cy)])
+        else:
+            color = TRADE_CART if kind == "trade" else (90, 110, 200)
+            pygame.draw.rect(surface, color, (cx - 4, cy - 4, 8, 7))
+        surface.blit(font.render(text, True, TEXT), (x0 + 40, cy - 7))
