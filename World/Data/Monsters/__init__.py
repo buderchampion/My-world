@@ -1,0 +1,1 @@
+"""Monsters: the imported Monster Manual (Monsters.json) and the bestiary that sorts them for this world."""

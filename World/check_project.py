@@ -572,6 +572,10 @@ FEATURES = [
                   "Data/Buildings/upgrades.py": ["type = 'Slums'"], "Data/NPCS/contentment.py": ["SLUMS"]},
     },
     {
+        "name": "The bestiary: the Monster Manual's monsters, sorted into raiders, beasts and peaceful ones, with their habitats",
+        "functions": {"Data/Monsters/bestiary.py": ["bestiary", "of_this_world", "classify", "habitat_of"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1389,6 +1393,19 @@ def _smoke_body(r, holder):
             assert gap >= 100, f"two founding kingdoms' settlements are only {gap:.0f} apart -- kingdoms are not keeping neutral ground"
 
         run_step(r, "founding kingdoms start apart, with neutral ground between them", kingdoms_start_apart)
+
+        def the_bestiary():
+            from Data.Monsters.bestiary import bestiary, of_this_world, by_name
+            kinds = {m["kind"] for m in bestiary()}
+            assert {"raider", "beast", "peaceful", "aquatic", "planar"} <= kinds, f"the bestiary is missing kinds of monster: {kinds}"
+            assert len(of_this_world()) >= 200, f"only {len(of_this_world())} monsters live in this world"
+            for name, kind in (("Orc", "raider"), ("Frost Giant", "raider"), ("Troll", "raider"), ("Wolf", "beast"), ("Owlbear", "beast"),
+                               ("Unicorn", "peaceful"), ("Shark", "aquatic"), ("Demon, Type I (Vrock)", "planar")):
+                m = by_name(name)
+                assert m and m["kind"] == kind, f"{name} is sorted as {m and m['kind']}, not {kind}"
+            assert all(m["stats"]["ac"] is not None for m in of_this_world()), "a monster of this world has no armor class"
+
+        run_step(r, "the bestiary sorts the Monster Manual into raiders, beasts and peaceful monsters, with habitats", the_bestiary)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
