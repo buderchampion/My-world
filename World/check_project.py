@@ -1416,8 +1416,16 @@ def _smoke_body(r, holder):
             moving = map_model.load_movement(map_model.open_world(database_module.DB_FILE), view)   # armies, sieges, caravans
             map_render.draw_movement(canvas, view, moving, to_screen, 0.2, font)
             map_render.draw_legend(canvas, font, (0, 0))
+            # a click's details panel: a town, a kingdom and (if any) an army
+            panel_conn = map_model.open_world(database_module.DB_FILE)
+            town_id = next(s.id for s in view.settlements.values() if s.kind != 'Village')
+            for details in (map_model.town_details(panel_conn, town_id), map_model.kingdom_details(panel_conn, next(iter(view.kingdoms))),
+                            *[map_model.army_details(panel_conn, a.id) for a in moving.armies[:1]]):
+                assert details and details['title'] and details['rows'], 'a details panel came back empty'
+                map_render.draw_panel(canvas, details, (font, font, font), 0)
+            panel_conn.close()
 
-        run_step(r, "the map reads the world and draws its land, realms, roads, settlements, armies, sieges and caravans", map_draws)
+        run_step(r, "the map reads the world and draws its land, realms, roads, settlements, armies, sieges, caravans, and a click's details", map_draws)
 
         def families():
             import Data.NPCS.family as F

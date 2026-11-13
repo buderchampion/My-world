@@ -212,13 +212,15 @@ def draw_label(surface, font, text, pos, color=TEXT, placed=None):
     return True
 
 
-def draw_settlements(surface, view, to_screen, zoom, font, small_font, placed=None):
+def draw_settlements(surface, view, to_screen, zoom, font, small_font, placed=None, hits=None):
     order = {"Village": 0, "Town": 1, "City": 2, "Capital": 3}
     labels = []
     for s in sorted(view.settlements.values(), key=lambda s: order.get(s.kind, 0)):
         kingdom = view.kingdoms.get(s.kingdom_id)
         x, y = to_screen(s.x, s.y)
         r = settlement_radius(s, zoom)
+        if hits is not None:
+            hits.append(("town", s.id, (x, y), r + 3))
         ring = kingdom.color if kingdom else (90, 90, 90)
         if s.kind == "Capital":                                    # a capital: a crowned diamond
             points = [(x, y - r * 1.3), (x + r * 1.1, y), (x, y + r * 1.3), (x - r * 1.1, y)]
@@ -281,7 +283,7 @@ def army_size(soldiers, zoom):
     return max(5, min(18, (4 + math.sqrt(max(1, soldiers)) * 0.9) * max(0.8, min(1.6, zoom * 1.5))))
 
 
-def draw_movement(surface, view, moving, to_screen, zoom, font):
+def draw_movement(surface, view, moving, to_screen, zoom, font, hits=None):
     """Marches (the road ahead), sieges, occupied towns, caravans and armies -- in that order, so markers sit on top."""
     for army in moving.armies:                                     # the road still ahead, beneath everything
         if army.path:
@@ -327,6 +329,8 @@ def draw_movement(surface, view, moving, to_screen, zoom, font):
             ring = max(14, int(settlement_radius(here, zoom) + 10))
             x -= ring + size + 4
         draw_shield(surface, (x, y - size * 0.4), size, color)
+        if hits is not None:
+            hits.append(("army", army.id, (x, y - size * 0.4), size + 3))
         if zoom >= 0.45:
             draw_label(surface, font, f"{army.soldiers}", (x, y + size * 0.9))
 
@@ -358,3 +362,65 @@ def draw_legend(surface, font, corner):
             color = TRADE_CART if kind == "trade" else (90, 110, 200)
             pygame.draw.rect(surface, color, (cx - 4, cy - 4, 8, 7))
         surface.blit(font.render(text, True, TEXT), (x0 + 40, cy - 7))
+
+
+# --- the details panel (part 3) -----------------------------------------------------------
+PANEL_WIDTH = 400
+PANEL_BG = (16, 22, 28, 236)
+LABEL = (150, 170, 182)
+HEADING = (236, 206, 128)
+
+
+def wrap(text, font, width):
+    """Splits text into lines that fit `width` pixels."""
+    words, lines, line = str(text).split(), [], ""
+    for word in words:
+        trial = f"{line} {word}".strip()
+        if font.size(trial)[0] <= width or not line:
+            line = trial
+        else:
+            lines.append(line)
+            line = word
+    return lines + ([line] if line else [])
+
+
+def draw_panel(surface, details, fonts, top):
+    """The details of a clicked town, kingdom or army, in a panel down the right side."""
+    title_font, font, small = fonts
+    height = surface.get_height() - top
+    x0 = surface.get_width() - PANEL_WIDTH
+    sheet = pygame.Surface((PANEL_WIDTH, height), pygame.SRCALPHA)
+    sheet.fill(PANEL_BG)
+    surface.blit(sheet, (x0, top))
+    x, y, inner = x0 + 16, top + 14, PANEL_WIDTH - 32
+    surface.blit(title_font.render(details["title"], True, TEXT), (x, y))
+    y += title_font.get_height() + 2
+    surface.blit(small.render(details.get("subtitle", ""), True, LABEL), (x, y))
+    y += small.get_height() + 12
+    for label, value in details["rows"]:
+        surface.blit(small.render(label.upper(), True, LABEL), (x, y + 2))
+        for line in wrap(value, font, inner - 104):
+            surface.blit(font.render(line, True, TEXT), (x + 104, y))
+            y += font.get_height() + 1
+        y += 5
+    for heading, items in details["lists"]:
+        y += 8
+        surface.blit(small.render(heading.upper(), True, HEADING), (x, y))
+        y += small.get_height() + 6
+        for item in items:
+            lines = wrap(item, small, inner - 10)
+            if y + len(lines) * (small.get_height() + 1) > top + height - 30:
+                surface.blit(small.render("...", True, LABEL), (x, y))
+                return
+            for i, line in enumerate(lines):
+                surface.blit(small.render(("- " if i == 0 else "  ") + line, True, TEXT), (x, y))
+                y += small.get_height() + 1
+            y += 4
+    hint = small.render("click elsewhere or press Esc to close", True, LABEL)
+    surface.blit(hint, (x, top + height - 22))
+
+
+def draw_selection(surface, center, radius):
+    """A ring around what is selected."""
+    pygame.draw.circle(surface, (255, 255, 255), center, int(radius) + 6, 2)
+    pygame.draw.circle(surface, (20, 20, 20), center, int(radius) + 8, 1)

@@ -242,3 +242,110 @@ def realm_signature(view):
     """What decides the realm layer: which kingdom and county each settlement belongs to. If it changes, redraw."""
     return tuple(sorted((s.id, s.kingdom_id, s.province_id) for s in view.settlements.values())) + \
         tuple(sorted((k.id, k.fallen) for k in view.kingdoms.values()))
+
+
+# --- details for a clicked town, kingdom or army (part 3) -----------------------------------
+def _name(conn, npc_id):
+    """'King Joshua Reed, 47' -- a person's title, name and age (or None)."""
+    if not npc_id:
+        return None
+    n = conn.execute("SELECT name, title, age, alive FROM npcs WHERE id = ?", (npc_id,)).fetchone()
+    if n is None:
+        return None
+    return f"{(n['title'] + ' ') if n['title'] else ''}{n['name']}, {n['age']}" + ("" if n["alive"] else " (dead)")
+
+
+def town_details(conn, city_id):
+    c = conn.execute("SELECT * FROM cities WHERE id = ?", (city_id,)).fetchone()
+    if c is None:
+        return None
+    k = conn.execute("SELECT name, type FROM kingdoms WHERE id = ?", (c["kingdom_id"],)).fetchone()
+    rows = [("Kingdom", f"{k['name']} ({k['type']})" if k else "-")]
+    if c["province_id"]:
+        p = conn.execute("SELECT name, lord_id, house FROM provinces WHERE id = ?", (c["province_id"],)).fetchone()
+        if p:
+            rows.append(("County", p["name"] + (f", {p['house']}" if p["house"] else "")))
+            rows.append(("Lord", _name(conn, p["lord_id"]) or "none yet"))
+    else:
+        rows.append(("County", "crown lands"))
+    governor = _name(conn, c["ruler_id"])
+    if governor:
+        rows.append(("Governed by", governor))
+    people = conn.execute("""SELECT COUNT(*), SUM(age < 16), SUM(profession = 'Laborer'), AVG(needs_happiness)
+                             FROM npcs WHERE city_id = ? AND alive = 1""", (city_id,)).fetchone()
+    rows.append(("People", f"{people[0] or 0:,} named ({people[1] or 0:,} children, {people[2] or 0:,} Laborers)"))
+    if c["households"]:
+        rows.append(("Households", f"{c['households']:,.0f} farming families (about {c['households'] * 5:,.0f} people)"))
+    if people[3] is not None:
+        rows.append(("Happiness", f"{people[3]:.0f} of 100"))
+    stores = dict(conn.execute("SELECT resource_name, amount FROM city_resources WHERE city_id = ?", (city_id,)).fetchall())
+    eaters = (people[0] or 0) + (c["households"] or 0) * 5
+    food = stores.get("Food", 0)
+    rows.append(("Food", f"{food:,.0f} ({food / eaters:,.0f} days)" if eaters else f"{food:,.0f}"))
+    others = sorted(((r, a) for r, a in stores.items() if r != "Food" and a >= 1), key=lambda x: -x[1])[:4]
+    if others:
+        rows.append(("Stores", ", ".join(f"{a:,.0f} {r}" for r, a in others)))
+    rows.append(("Purse", f"{c['wealth']:,.0f} gold" if "wealth" in c.keys() else "-"))
+    events = [f"{e['type']}: {e['description']}" for e in conn.execute(
+        "SELECT type, description FROM events WHERE city_id = ? ORDER BY id DESC LIMIT 5", (city_id,))]
+    return {"title": c["name"], "subtitle": c["type"], "rows": rows, "lists": [("Recent events", events or ["none yet"])]}
+
+
+def kingdom_details(conn, kingdom_id):
+    k = conn.execute("SELECT * FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
+    if k is None:
+        return None
+    keys = k.keys()
+    capital = conn.execute("SELECT name, ruler_id FROM cities WHERE id = ?", (k["capital_city_id"],)).fetchone() if k["capital_city_id"] else None
+    rows = [("Ruler", _name(conn, capital["ruler_id"]) if capital else "-")]
+    if "regent_id" in keys and k["regent_id"]:
+        rows.append(("Regent", _name(conn, k["regent_id"])))
+    rows.append(("Capital", capital["name"] if capital else "-"))
+    rows.append(("Treasury", f"{k['treasury']:,.0f} gold"))
+    if "health_loyalty" in keys:
+        rows.append(("Health", f"loyalty {k['health_loyalty']:.0f}, unrest {k['health_unrest']:.0f}, stability {k['health_stability']:.0f}"))
+    towns = conn.execute("SELECT SUM(type != 'Village'), SUM(type = 'Village'), COALESCE(SUM(households), 0) FROM cities WHERE kingdom_id = ?", (kingdom_id,)).fetchone()
+    named = conn.execute("SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1", (kingdom_id,)).fetchone()[0]
+    counties = conn.execute("SELECT COUNT(*) FROM provinces WHERE kingdom_id = ?", (kingdom_id,)).fetchone()[0]
+    rows.append(("Lands", f"{towns[0] or 0} towns, {towns[1] or 0} villages, {counties} counties"))
+    rows.append(("People", f"about {named + towns[2] * 5:,.0f} ({named:,} named)"))
+    if _has(conn, "campaigns"):
+        wars = conn.execute(
+            """SELECT a.name attacker, d.name defender, c.status FROM campaigns c JOIN kingdoms a ON a.id = c.attacker_kingdom_id
+               JOIN kingdoms d ON d.id = c.defender_kingdom_id WHERE c.status NOT IN ('Over') AND ? IN (c.attacker_kingdom_id, c.defender_kingdom_id)""",
+            (kingdom_id,)).fetchall()
+        if wars:
+            rows.append(("At war", "; ".join(f"{w['attacker']} against {w['defender']} ({w['status'].lower()})" for w in wars)))
+    entries = [f"Year {e['year']}, {e['season']}: {e['text']}" for e in conn.execute(
+        "SELECT year, season, text FROM chronicle_entries WHERE kingdom_id = ? ORDER BY id DESC LIMIT 5", (kingdom_id,))] \
+        if _has(conn, "chronicle_entries") else []
+    status = f"{k['type'] if 'type' in keys else 'Crown'}" + (" (fallen)" if "status" in keys and k["status"] == "Fallen" else "")
+    return {"title": k["name"], "subtitle": status, "rows": rows, "lists": [("From its chronicle, latest first", entries or ["nothing written yet"])]}
+
+
+def army_details(conn, army_id):
+    import json
+    a = conn.execute("SELECT * FROM armies WHERE id = ?", (army_id,)).fetchone()
+    if a is None:
+        return None
+    town = lambda i: (conn.execute("SELECT name FROM cities WHERE id = ?", (i,)).fetchone() or ["-"])[0] if i else "-"
+    soldiers = conn.execute("SELECT COUNT(*) FROM army_members WHERE army_id = ?", (army_id,)).fetchone()[0] if _has(conn, "army_members") else 0
+    k = conn.execute("SELECT name FROM kingdoms WHERE id = ?", (a["kingdom_id"],)).fetchone()
+    rows = [("Kingdom", k["name"] if k else "-"), ("Soldiers", f"{soldiers:,}")]
+    if a["status"] == "Marching" and a["next_city_id"]:
+        ahead = len(json.loads(a["route"] or "[]"))
+        rows.append(("Marching", f"from {town(a['location_city_id'])} to {town(a['next_city_id'])}, {a['leg_days_remaining']} day(s) left"
+                                 + (f", then {ahead} more stage(s)" if ahead else "")))
+    else:
+        rows.append(("At", town(a["location_city_id"])))
+    rows.append(("Bound for", town(a["destination_city_id"])))
+    campaign = conn.execute("SELECT * FROM campaigns WHERE army_id = ? AND status != 'Over' ORDER BY id DESC LIMIT 1", (army_id,)).fetchone() \
+        if _has(conn, "campaigns") else None
+    if campaign:
+        siege = f", siege works {min(1, campaign['siege_progress'] / WALL_STRENGTH):.0%}" if campaign["status"] == "Besieging" else ""
+        rows.append(("Campaign", f"{campaign['status']} against {town(campaign['target_city_id'])}{siege}"))
+    rows.append(("Wagons", f"{a['food']:,.0f} Food, {a['weapons']:,.0f} Weapons, {a['potions']:,.0f} Potions"
+                           + (f", {a['armor']:,.0f} Armor, {a['tools']:,.0f} Tools" if "armor" in a.keys() else "")))
+    if a["days_without_food"]:
+        rows.append(("Hungry", f"{a['days_without_food']} day(s) without food"))
+    return {"title": a["name"], "subtitle": a["status"], "rows": rows, "lists": []}

@@ -20,7 +20,8 @@ py world_map.py "..\..\Saves\my-save.db"
 ## Controls
 
 - Drag to pan; mouse wheel (or `+` and `-`) to zoom.
-- `R` resets the view; `F5` reloads the world; `Esc` or `Q` quits.
+- Click a town, an army or a kingdom's land for its details; click elsewhere or press `Esc` to close them.
+- `L` shows or hides the legend; `R` resets the view; `F5` reloads the world; `Esc` or `Q` quits.
 
 ## Files
 

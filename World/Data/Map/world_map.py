@@ -6,7 +6,8 @@ never changes your world).
     py world_map.py <path to .db>   another world (a save, say)
 
 Drag to pan, mouse wheel (or + and -) to zoom, R to reset the view, L to
-show or hide the legend, F5 to reload the world, Esc or Q to quit. While
+show or hide the legend, F5 to reload the world, Esc or Q to quit. Click a
+town, an army or a kingdom's land for its details (Esc closes them). While
 the world runs, the map follows it: every REFRESH_SECONDS it looks for
 changes and redraws armies, sieges and caravans where they now are.
 """
@@ -20,8 +21,12 @@ from pathlib import Path
 
 import pygame
 
-from map_model import open_world, load_world, load_movement, realm_signature
-import map_render as R
+try:                                   # as part of the Data.Map package...
+    from .map_model import open_world, load_world, load_movement, realm_signature, town_details, kingdom_details, army_details
+    from . import map_render as R
+except ImportError:                    # ...or run from this folder (py world_map.py)
+    from map_model import open_world, load_world, load_movement, realm_signature, town_details, kingdom_details, army_details
+    import map_render as R
 
 WINDOW_SIZE = (1280, 800)
 TOP_BAR = 34
@@ -97,6 +102,10 @@ class MapWindow:
         self.signature = None
         self.stamp = None
         self.next_check = 0.0
+        self.selected = None           # ("town" | "army" | "kingdom", id)
+        self.details = None
+        self.hits = []                 # what was drawn where, last frame: (kind, id, (x, y), radius)
+        self.press = None
         self.load()
         self.camera = Camera((size[0], size[1] - TOP_BAR), self.view.size)
 
@@ -123,6 +132,48 @@ class MapWindow:
             self.signature = signature
         self.stamp = self._file_stamp()
         self.refreshed = time.strftime("%H:%M:%S")
+        self.read_details()
+
+    def read_details(self):
+        """The open panel's details, read afresh (they follow the running world too)."""
+        if not getattr(self, "selected", None):
+            self.details = None
+            return
+        kind, ident = self.selected
+        conn = open_world(self.database)
+        try:
+            self.details = {"town": town_details, "army": army_details, "kingdom": kingdom_details}[kind](conn, ident)
+        finally:
+            conn.close()
+        if self.details is None:          # it is gone (an army disbanded, say)
+            self.selected = None
+
+    def kingdom_at(self, mx, my):
+        """The kingdom whose land is at this map point (None for the neutral ground)."""
+        best = None
+        for s in self.view.settlements.values():
+            k = self.view.kingdoms.get(s.kingdom_id)
+            if k is None or k.fallen:
+                continue
+            d = (s.x - mx) ** 2 + (s.y - my) ** 2
+            if d <= R.TERRITORY_REACH ** 2 and (best is None or d < best[0]):
+                best = (d, s.kingdom_id)
+        return best[1] if best else None
+
+    def select_at(self, sx, sy):
+        """What a click lands on: an army, then a town, then a kingdom's land; nothing closes the panel."""
+        if self.details and sx >= self.screen.get_width() - R.PANEL_WIDTH:
+            return                                         # a click inside the panel
+        for kind in ("army", "town"):
+            near = [(abs(complex(sx - x, sy - y)), ident) for k, ident, (x, y), r in self.hits
+                    if k == kind and abs(complex(sx - x, sy - y)) <= r]
+            if near:
+                self.selected = (kind, min(near)[1])
+                self.read_details()
+                return
+        kingdom = self.kingdom_at(*self.camera.to_map(sx, sy)) if sy > TOP_BAR else None
+        self.selected = ("kingdom", kingdom) if kingdom else None
+        self.read_details()
 
     def follow(self):
         """While the world runs: every REFRESH_SECONDS, reload if the world has changed."""
@@ -143,12 +194,18 @@ class MapWindow:
         zoom = self.camera.zoom
         R.draw_rivers(self.screen, self.view, self.camera.to_screen, zoom)
         R.draw_roads(self.screen, self.view, self.camera.to_screen, zoom)
-        placed = []
-        R.draw_settlements(self.screen, self.view, self.camera.to_screen, zoom, self.font, self.small, placed)
-        R.draw_movement(self.screen, self.view, self.moving, self.camera.to_screen, zoom, self.small)
+        placed, self.hits = [], []
+        R.draw_settlements(self.screen, self.view, self.camera.to_screen, zoom, self.font, self.small, placed, self.hits)
+        R.draw_movement(self.screen, self.view, self.moving, self.camera.to_screen, zoom, self.small, self.hits)
+        if self.selected and self.selected[0] in ("town", "army"):
+            mark = next(((pos, r) for k, ident, pos, r in self.hits if (k, ident) == self.selected), None)
+            if mark:
+                R.draw_selection(self.screen, *mark)
         R.draw_kingdom_names(self.screen, self.view, self.camera.to_screen, zoom, self.big)
         if self.show_legend:
             R.draw_legend(self.screen, self.small, (10, self.screen.get_height() - 22 * len(R.LEGEND) - 24))
+        if self.details:
+            R.draw_panel(self.screen, self.details, (self.big, self.font, self.small), TOP_BAR)
         pygame.draw.rect(self.screen, PANEL, (0, 0, self.screen.get_width(), TOP_BAR))
         seed = f"   seed {self.view.seed}" if self.view.seed is not None else ""
         moving = f"   |   {len(self.moving.armies)} armies, {len(self.moving.sieges)} sieges, {len(self.moving.caravans)} caravans   (updated {self.refreshed})"
@@ -162,7 +219,9 @@ class MapWindow:
         if event.type == pygame.QUIT:
             return False
         if event.type == pygame.KEYDOWN:
-            if event.key in (pygame.K_ESCAPE, pygame.K_q):
+            if event.key == pygame.K_ESCAPE and self.details:
+                self.selected, self.details = None, None    # Esc closes the panel first
+            elif event.key in (pygame.K_ESCAPE, pygame.K_q):
                 return False
             if event.key == pygame.K_r:
                 self.camera.reset()
@@ -179,6 +238,12 @@ class MapWindow:
             self.camera.zoom_at(1.15 ** event.y, x, y)
         elif event.type == pygame.MOUSEMOTION and event.buttons[0]:
             self.camera.pan(*event.rel)
+        elif event.type == pygame.MOUSEBUTTONDOWN and event.button == 1:
+            self.press = event.pos
+        elif event.type == pygame.MOUSEBUTTONUP and event.button == 1 and self.press:
+            if abs(event.pos[0] - self.press[0]) + abs(event.pos[1] - self.press[1]) < 5:   # a click, not a drag
+                self.select_at(*event.pos)
+            self.press = None
         elif event.type == pygame.VIDEORESIZE:
             self.camera.view_w, self.camera.view_h = event.w, event.h - TOP_BAR
         return True
