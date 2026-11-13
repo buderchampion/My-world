@@ -152,8 +152,11 @@ def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
     if regions:
         # Villages hold most of the kingdom's people as households, bigger on
         # better land, each with its named villagers as individual NPCs.
+        # planned for the towns' people once their children are born (Data.NPCS.family), so the
+        # countryside keeps its share of all the people, children included
+        from Data.NPCS.family import FOUNDING_CHILD_SHARE
         plan = countryside.plan_villages(
-            town_dwellers, [countryside.region_at(regions, x, y)["farmland"] for x, y in village_sites],
+            round(town_dwellers * (1 + FOUNDING_CHILD_SHARE)), [countryside.region_at(regions, x, y)["farmland"] for x, y in village_sites],
             **({"rural_share": rural_share} if rural_share else {})
         )
         for (x, y), (households, named) in zip(village_sites, plan):

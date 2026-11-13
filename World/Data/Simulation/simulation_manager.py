@@ -413,6 +413,11 @@ class SimulationManager:
         from Data.Government.rebellion import consider_rebellions
         consider_rebellions(self.conn, self.world_id)
 
+        # Anyone who entered the story without a family name gets one
+        # (Data.NPCS.family_names); births and weddings name people as they happen.
+        from Data.NPCS.family_names import ensure_family_names
+        ensure_family_names(self.conn, self.world_id)
+
         # Old scores: avengers train, hire blades, duel, or set out to find
         # their nemesis (Data.Combat.vendetta).
         from Data.Combat.vendetta import pursue_vendettas

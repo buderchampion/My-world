@@ -71,6 +71,11 @@ def get_or_create_world():
         if given:
             print(f"  (gave {given} people a personality -- this world predates them)")
 
+        from Data.NPCS.family_names import ensure_family_names
+        named = ensure_family_names(connection, world["id"], of_old=True)
+        if named:
+            print(f"  (gave {named} people family names -- this world predates them)")
+
         from Data.World.harvest import ensure_household_stores
         stocked = ensure_household_stores(connection, world["id"])
         if stocked:

@@ -286,6 +286,14 @@ CREATE TABLE IF NOT EXISTS occupation_garrison (
     npc_id         INTEGER NOT NULL REFERENCES npcs(id)
 );
 
+-- Families: a name and the year the line was founded (Data.NPCS.family_names).
+CREATE TABLE IF NOT EXISTS families (
+    id            INTEGER PRIMARY KEY,
+    world_id      INTEGER NOT NULL REFERENCES worlds(id),
+    name          TEXT NOT NULL,
+    founded_year  INTEGER NOT NULL
+);
+
 -- Courtships: close friends growing closer before they marry (Data.NPCS.family).
 CREATE TABLE IF NOT EXISTS courtships (
     npc_a_id   INTEGER NOT NULL REFERENCES npcs(id),

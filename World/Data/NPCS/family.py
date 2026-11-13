@@ -19,6 +19,8 @@ BIRTH_CHANCE = 0.02         # each month, for a married couple of whom one is of
 FOUNDING_AGE = 25           # at generation, about FOUNDING_SHARE of adults this old start married
 FOUNDING_SHARE = 0.5
 FOUNDING_AGE_GAP = 10
+FOUNDING_CHILD_SHARE = 0.5  # children at generation: half as many as everyone else, so about a third of all
+GROWN_AGE = 16
 
 SPOUSE_REPUTATION_RANGE = (70, 95)
 FERTILE_AGE_MIN = 18
@@ -45,6 +47,10 @@ def marry(npc_a, npc_b, conn=None):
 
     npc_a["spouse"] = npc_b["id"]
     npc_b["spouse"] = npc_a["id"]
+
+    if conn is not None:                       # the couple takes the older family's name (Data.NPCS.family_names)
+        from Data.NPCS.family_names import marry_names
+        marry_names(conn, npc_a, npc_b)
 
     # The couple lives together, where there is room: npc_a's home, else
     # npc_b's, else any house in town with room for both. Only if the whole
@@ -75,6 +81,9 @@ def create_child(conn, parent_a, parent_b, city_type):
                        traits=inherited_traits(parent_a, parent_b))      # takes after both parents
 
     set_npc_parents(conn, child["id"], parent_a["id"], parent_b["id"])
+
+    from Data.NPCS.family_names import name_child      # the name their family uses
+    name_child(conn, child, parent_a, parent_b)
 
     child["home"] = parent_a["home"]
 
@@ -240,21 +249,25 @@ def found_families(conn, world_id):
             town_couples.append((a, b))
         couples += len(town_couples)
 
-        # the town's children, each to a couple old enough to be their parents
-        children = [dict(r) for r in conn.execute(
-            "SELECT id, age FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Child' AND parent_a_id IS NULL", (city["id"],))]
+        # children: on top of the town's people, about a third of all (half as many as everyone else),
+        # each born to a couple old enough to be their parents, living with them
+        from Data.Database.repository import get_npc
+        city_type = conn.execute("SELECT type FROM cities WHERE id = ?", (city["id"],)).fetchone()[0]
+        people = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1", (city["id"],)).fetchone()[0]
         count = {}
-        for child in children:
-            fits = [c for c in town_couples if min(c[0]["age"], c[1]["age"]) >= child["age"] + FERTILE_AGE_MIN
-                    and min(c[0]["age"], c[1]["age"]) <= child["age"] + FERTILE_AGE_MAX and count.get(c[0]["id"], 0) < MAX_CHILDREN]
+        for _ in range(round(people * FOUNDING_CHILD_SHARE)):
+            age = random.randint(0, GROWN_AGE - 1)
+            fits = [c for c in town_couples if c[0]["age"] - age >= FERTILE_AGE_MIN and c[1]["age"] - age >= FERTILE_AGE_MIN
+                    and min(c[0]["age"], c[1]["age"]) - age <= FERTILE_AGE_MAX and count.get(c[0]["id"], 0) < MAX_CHILDREN]
             if not fits:
                 continue
             a, b = random.choice(fits)
             count[a["id"]] = count.get(a["id"], 0) + 1
-            set_npc_parents(conn, child["id"], a["id"], b["id"])
-            home = conn.execute("SELECT home_id FROM npcs WHERE id = ?", (a["id"],)).fetchone()[0]
-            if home:
-                _swap_into(conn, child["id"], home, keep={a["id"], b["id"], child["id"]})
+            child = create_child(conn, get_npc(conn, a["id"]), get_npc(conn, b["id"]), city_type)
+            conn.execute("UPDATE npcs SET age = ? WHERE id = ?", (age, child["id"]))
             placed += 1
+    # every town and village now counts its people, children included
+    conn.execute("""UPDATE cities SET population = (SELECT COUNT(*) FROM npcs n WHERE n.city_id = cities.id AND n.alive = 1)
+                    WHERE kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?)""", (world_id,))
     conn.commit()
     return couples, placed

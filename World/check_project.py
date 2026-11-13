@@ -1307,8 +1307,9 @@ def _smoke_body(r, holder):
 
             villages = [c for c in cities if c["type"] == "Village"]
             assert villages and all(v["households"] >= C.MIN_HOUSEHOLDS for v in villages), "a village has too few households (or none)"
-            assert all(v["population"] == C.named_villagers(v["households"]) for v in villages), \
-                "a village's named villagers do not match its size"
+            adults = {row["city_id"]: row["n"] for row in conn.execute("SELECT city_id, COUNT(*) n FROM npcs WHERE age >= 16 GROUP BY city_id")}
+            assert all(adults.get(v["id"], 0) == C.named_villagers(v["households"]) for v in villages), \
+                "a village's adult named villagers do not match its size (their children come on top)"
             living = {row["city_id"]: row["n"] for row in conn.execute("SELECT city_id, COUNT(*) n FROM npcs GROUP BY city_id")}
             assert all(living.get(v["id"], 0) == v["population"] for v in villages), \
                 "a village does not have exactly as many individual NPCs as named villagers"
@@ -1316,9 +1317,9 @@ def _smoke_body(r, holder):
 
             land = conn.execute("SELECT AVG(farmland) FROM regions WHERE world_id = ?", (world_id,)).fetchone()[0]
             settled = statistics.mean(c["farmland"] for c in cities)
-            # (0.08, not more: kingdoms also keep neutral ground between them, which costs a little of the
-            # best land -- one world measured exactly +0.15. Placement blind to land would score about 0.)
-            assert settled > land + 0.08, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
+            # Measured over ten worlds: +0.18 to +0.50 (typically +0.25), with a rare crowded world as low as
+            # +0.06. Placement blind to land would score about 0, so +0.03 still catches it without false alarms.
+            assert settled > land + 0.03, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
             assert all(c["terrain"] != "Mountains" for c in cities if c["type"] == "Capital"), \
                 "a capital was placed in the mountains: " + ", ".join(c["name"] for c in cities if c["type"] == "Capital" and c["terrain"] == "Mountains")
 
@@ -1333,10 +1334,12 @@ def _smoke_body(r, holder):
             missing = conn.execute("SELECT COUNT(*) FROM npcs WHERE generosity IS NULL OR mercy IS NULL OR boldness IS NULL").fetchone()[0]
             assert missing == 0, f"{missing} NPCs have no personality"
             a, b = [row[0] for row in conn.execute("SELECT id FROM npcs WHERE profession != 'Child' ORDER BY id LIMIT 2")]
-            conn.execute("UPDATE npcs SET generosity = -90, mercy = 90, boldness = 0 WHERE id IN (?, ?)", (a, b))
+            # parents at -60 / +60, well inside the -100..+100 bounds: at +-90 the cap pulls children's
+            # average about 7 points toward the middle, and chance then failed the check now and then
+            conn.execute("UPDATE npcs SET generosity = -60, mercy = 60, boldness = 0 WHERE id IN (?, ?)", (a, b))
             conn.commit()
-            kids = [create_child(conn, get_npc(conn, a), get_npc(conn, b), "Town") for _ in range(30)]
-            assert abs(statistics.mean(k["generosity"] for k in kids) + 90) < 15 and abs(statistics.mean(k["mercy"] for k in kids) - 90) < 15, \
+            kids = [create_child(conn, get_npc(conn, a), get_npc(conn, b), "Town") for _ in range(60)]   # enough that chance cannot fail it
+            assert abs(statistics.mean(k["generosity"] for k in kids) + 60) < 15 and abs(statistics.mean(k["mercy"] for k in kids) - 60) < 15, \
                 "children do not take after their parents' personalities"
             conn.execute(f"DELETE FROM npcs WHERE id IN ({','.join(str(k['id']) for k in kids)})")
             conn.commit()
@@ -2231,8 +2234,9 @@ def _smoke_body(r, holder):
             "SELECT id FROM kingdoms WHERE world_id = ? AND type = 'Crown' ORDER BY id DESC LIMIT 1", (world_id,)).fetchone()[0]
         kingdom = get_kingdom(conn, crown_id)
         monarch = conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (kingdom["capital"],)).fetchone()[0]
-        child = conn.execute(
-            "SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND id != ? ORDER BY id LIMIT 1 OFFSET 7", (monarch,)
+        child = conn.execute(           # someone of the crown's own capital, not of another realm
+            "SELECT id FROM npcs WHERE alive = 1 AND title IS NULL AND id != ? AND city_id = ? ORDER BY id LIMIT 1 OFFSET 7",
+            (monarch, kingdom["capital"])
         ).fetchone()[0]
         conn.execute("UPDATE npcs SET age = 9, parent_a_id = ? WHERE id = ?", (monarch, child))
         conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (monarch,))
@@ -3301,7 +3305,11 @@ def _smoke_body(r, holder):
             founded = EX.consider_settlement(conn, world_id)
         finally:
             EX.CROWDED, EX.SETTLE_CHANCE, EX.REALM_CHANCE = saved
-        assert founded, "no kingdom sent settlers to found a village"
+        if not founded:                   # legitimate when no free land keeps the neutral ground (late in a crowded world)
+            could = [k["name"] for k in conn.execute("SELECT id, name FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall()
+            if EX.find_site(conn, k["id"], world_id)]
+            assert not could, f"no kingdom sent settlers, though {', '.join(could)} had free land to settle"
+            return
         assert abs(people() - population) < 0.01, "settling made people appear from nowhere (or lose them)"
         for village_id in founded:
             v = conn.execute("SELECT * FROM cities WHERE id = ?", (village_id,)).fetchone()

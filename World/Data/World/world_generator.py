@@ -51,6 +51,16 @@ def generate_world(seed=None):
     from Data.Government.provinces import ensure_provinces
     ensure_provinces(conn, world["id"])
 
+    # Families come first, so storehouses, village stores and savings are
+    # made for everyone, children included. About half the adults over 25 start married, and the children have
+    # parents, so families are there from the first day (Data.NPCS.family).
+    from Data.NPCS.family import found_families
+    found_families(conn, world["id"])
+
+    # Everyone belongs to a family, founded at some time in the past (Data.NPCS.family_names).
+    from Data.NPCS.family_names import ensure_family_names
+    ensure_family_names(conn, world["id"], of_old=True)
+
     # Cities open with stocked storehouses, not empty ones -- see
     # Data.Economy.economy.stock_starting_supplies.
     from Data.Economy.economy import stock_starting_supplies
@@ -64,10 +74,6 @@ def generate_world(seed=None):
     from Data.Economy.food_market import give_starting_savings
     give_starting_savings(conn, world["id"])
 
-    # About half the adults over 25 start married, and the children have
-    # parents, so families are there from the first day (Data.NPCS.family).
-    from Data.NPCS.family import found_families
-    found_families(conn, world["id"])
 
     conn.commit()
 

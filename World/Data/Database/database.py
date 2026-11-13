@@ -64,6 +64,9 @@ def init_database():
     connection.execute("UPDATE npcs SET class = 'Rogue' WHERE class = 'Rouge'")
     connection.commit()
 
+    # given names and families (Data.NPCS.family_names)
+    _add_missing_columns(connection, "npcs", {"given_name": "TEXT", "family_id": "INTEGER"})
+
     # the day each person died, so grief can last while a loss is recent (Data.NPCS.contentment)
     _add_missing_columns(connection, "npcs", {"died_day": "INTEGER"})
 

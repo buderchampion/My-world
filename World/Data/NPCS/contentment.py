@@ -67,8 +67,14 @@ def drift_happiness(conn, world_id, day):
     levels = life_levels(conn, world_id, day)
     now = dict(conn.execute(
         f"SELECT id, needs_happiness FROM npcs WHERE id IN ({','.join(str(i) for i in levels) or '0'})").fetchall())
-    updates = [(round(now[i] + (level - now[i]) * DRIFT), i) for i, level in levels.items()
-               if round(now[i] + (level - now[i]) * DRIFT) != now[i]]
+    def step(current, level):
+        """DRIFT of the way toward the level -- but at least a whole point, or rounding would leave anyone
+        within five points of their level stuck where they are forever."""
+        move = (level - current) * DRIFT
+        if 0 < abs(move) < 1:
+            move = 1 if move > 0 else -1
+        return round(current + move) if abs(level - current) >= 1 else current
+    updates = [(step(now[i], level), i) for i, level in levels.items() if step(now[i], level) != now[i]]
     conn.executemany("UPDATE npcs SET needs_happiness = ? WHERE id = ?", updates)
     conn.commit()
     return len(updates)

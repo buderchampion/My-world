@@ -10,6 +10,13 @@ import random
 LORD_TITLES = ("Count", "Countess")
 
 
+
+
+def house_name(conn, lord):
+    """A lord's house bears their family's name ("House Reed"); someone without one founds "House of <name>"."""
+    row = conn.execute("SELECT f.name FROM npcs n JOIN families f ON f.id = n.family_id WHERE n.id = ?", (lord["id"],)).fetchone()
+    return f"House {row[0]}" if row else f"House of {lord['name']}"
+
 def lord_title(npc):
     return "Count" if npc["gender"] == "Male" else "Countess"
 
@@ -55,7 +62,7 @@ def ensure_provinces(conn, world_id):
             if lord and lord["alive"]:
                 lord["title"] = lord_title(lord)
                 save_npc(conn, lord)
-                house = f"House of {lord['name']}"
+                house = house_name(conn, lord)
             cursor = conn.execute(
                 "INSERT INTO provinces (kingdom_id, name, seat_city_id, lord_id, house) VALUES (?, ?, ?, ?, ?)",
                 (kingdom["id"], f"County of {seat['name']}", seat["id"], lord["id"] if lord and lord["alive"] else None, house)
@@ -98,7 +105,7 @@ def install_lord(conn, province, seat_city, lord, inherited_from=None, regent=No
     lord["title"] = lord_title(lord)
     save_npc(conn, lord)
 
-    house = province["house"] if inherited_from and province["house"] else f"House of {lord['name']}"
+    house = province["house"] if inherited_from and province["house"] else house_name(conn, lord)
     conn.execute("UPDATE provinces SET lord_id = ?, house = ?, regent_id = ? WHERE id = ?",
                  (lord["id"], house, regent["id"] if regent else None, province["id"]))
     if not inherited_from:          # a new house starts afresh with the crown; an heir inherits the family's standing
