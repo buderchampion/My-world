@@ -259,6 +259,19 @@ def _name(conn, npc_id):
     return f"{(n['title'] + ' ') if n['title'] else ''}{n['name']}, {n['age']}" + ("" if n["alive"] else " (dead)")
 
 
+def _peoples(conn, where, args):
+    """'dwarves 81%, gnomes 9%, humans 6%' (worlds from before the peoples: None)."""
+    try:
+        rows = conn.execute(f"""SELECT n.race, COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id
+                                WHERE n.alive = 1 AND {where} GROUP BY n.race ORDER BY COUNT(*) DESC""", args).fetchall()
+    except Exception:
+        return None
+    total = sum(r[1] for r in rows)
+    if not total:
+        return None
+    return ", ".join(f"{r[0] or 'Human'} {r[1] / total:.0%}" for r in rows[:4])
+
+
 def town_details(conn, city_id):
     c = conn.execute("SELECT * FROM cities WHERE id = ?", (city_id,)).fetchone()
     if c is None:
@@ -278,6 +291,9 @@ def town_details(conn, city_id):
     people = conn.execute("""SELECT COUNT(*), SUM(age < 16), SUM(profession = 'Laborer'), AVG(needs_happiness)
                              FROM npcs WHERE city_id = ? AND alive = 1""", (city_id,)).fetchone()
     rows.append(("People", f"{people[0] or 0:,} named ({people[1] or 0:,} children, {people[2] or 0:,} Laborers)"))
+    peoples = _peoples(conn, "n.city_id = ?", (city_id,))
+    if peoples:
+        rows.append(("Peoples", peoples))
     if c["households"]:
         rows.append(("Households", f"{c['households']:,.0f} farming families (about {c['households'] * 5:,.0f} people)"))
     if people[3] is not None:
@@ -313,6 +329,9 @@ def kingdom_details(conn, kingdom_id):
     counties = conn.execute("SELECT COUNT(*) FROM provinces WHERE kingdom_id = ?", (kingdom_id,)).fetchone()[0]
     rows.append(("Lands", f"{towns[0] or 0} towns, {towns[1] or 0} villages, {counties} counties"))
     rows.append(("People", f"about {named + towns[2] * 5:,.0f} ({named:,} named)"))
+    peoples = _peoples(conn, "c.kingdom_id = ?", (kingdom_id,))
+    if peoples:
+        rows.append(("Peoples", peoples))
     if _has(conn, "campaigns"):
         wars = conn.execute(
             """SELECT a.name attacker, d.name defender, c.status FROM campaigns c JOIN kingdoms a ON a.id = c.attacker_kingdom_id

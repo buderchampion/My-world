@@ -33,9 +33,14 @@ def apply_aging(npc: dict) -> bool:
     if not npc["alive"]:
         return False
 
-    npc["age"] += 1
+    # A year of their life passes. How far it moves them on depends on their
+    # people (Data.NPCS.races): an elf's stage of life moves only every 7.5
+    # years, so old age is weighed only when it does.
+    from Data.NPCS.races import grow_older
+    start = npc["age"]
+    steps = grow_older(npc)
 
-    if random.random() < natural_death_chance(npc["age"]):
+    if any(random.random() < natural_death_chance(start + i + 1) for i in range(steps)):
         npc["alive"] = False
         npc["health"] = 0
         npc["workplace"] = None

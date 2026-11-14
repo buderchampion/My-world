@@ -132,7 +132,7 @@ def ambush(conn, world_id, lair, kind, ident, row):
     if left <= 0:
         text += f" The lair of the {plural(monster['name'])} is no more."
     create_event(conn, "Beast Attack", text, city_id=city_id)
-    return {"kind": kind, "id": ident, "monster": monster["name"], "pack": pack, "beasts_won": beasts_won,
+    return {"kind": kind, "id": ident, "lair": lair["id"], "monster": monster["name"], "pack": pack, "beasts_won": beasts_won,
             "beasts_fallen": fallen, "cleared": left <= 0, "text": text}
 
 

@@ -61,14 +61,22 @@ def random_point_near(center_x, center_y, max_radius):
 BIAS_RANGE = (0.5, 2.0)
 
 
-def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
+def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown", race=None):
 
-    # a name no other kingdom in this world bears (two realms of one name would confuse every chronicle)
+    # its people (Data.NPCS.races): about half of all kingdoms are human
+    from Data.NPCS import races
+    race = race or races.choose_kingdom_race()
+
+    # a name no other kingdom in this world bears (two realms of one name would confuse every chronicle),
+    # in its people's tongue
     taken = {row[0] for row in conn.execute("SELECT name FROM kingdoms WHERE world_id = ?", (world_id,))}
-    name = next((n for n in (generate_kingdom_name() for _ in range(200)) if n not in taken), None)
+    name = next((n for n in ((races.place_name(race) or generate_kingdom_name()) for _ in range(200)) if n not in taken), None)
     if name is None:
         name = f"{generate_kingdom_name()} {len(taken) + 1}"
     kingdom = create_kingdom(conn, world_id, name, color)
+    conn.execute("UPDATE kingdoms SET race = ? WHERE id = ?", (race, kingdom["id"]))
+    kingdom["race"] = race
+    homeland = set(races.homelands(race))           # dwarves in the hills, elves in the forests (none: anywhere)
 
     # a Crown or a merchant Republic (Data.Government.republic)
     conn.execute("UPDATE kingdoms SET type = ? WHERE id = ?", (kingdom_type, kingdom["id"]))
@@ -118,15 +126,20 @@ def generate_kingdom(conn, world_id, color="#808080", kingdom_type="Crown"):
         # decent land first (a kingdom is not founded on a mountain), then room from the others
         pool = [(random.randint(MAP_MARGIN, MAP_WIDTH - MAP_MARGIN), random.randint(MAP_MARGIN, MAP_HEIGHT - MAP_MARGIN))
                 for _ in range(countryside.KINGDOM_CANDIDATES * (8 if foreign_capitals else 1))]   # more to choose from, to find room
-        decent = [p for p in pool if countryside.region_at(regions, *p)["terrain"] != "Mountains"
+        decent = [p for p in pool if countryside.region_at(regions, *p)["terrain"] not in ({"Mountains"} - homeland)
                   and countryside.region_at(regions, *p)["farmland"] > 0] or pool
+        if homeland:                       # its people's homelands, where the map has room for them
+            decent = [p for p in decent if countryside.region_at(regions, *p)["terrain"] in homeland] or decent
         center_x, center_y = countryside.choose_site(regions, keep_clear(decent, foreign_capitals, KINGDOM_SPACING), best=True)
 
         def site(radius, river=False, best=False, lowland=False):
             count = countryside.SITE_CANDIDATES * (3 if foreign_settlements else 1)              # more to choose from, to find room
             candidates = [on_map(random_point_near(center_x, center_y, radius)) for _ in range(count)]
-            if lowland:                    # a capital is not built on a mountain, even near one
-                candidates = [p for p in candidates if countryside.region_at(regions, *p)["terrain"] != "Mountains"] or candidates
+            if lowland:                    # a capital is not built on a mountain, even near one (unless dwarves build it)
+                candidates = [p for p in candidates if countryside.region_at(regions, *p)["terrain"] not in ({"Mountains"} - homeland)] \
+                    or candidates
+            if homeland and river:         # a people's capital and towns stand on their homelands where they can
+                candidates = [p for p in candidates if countryside.region_at(regions, *p)["terrain"] in homeland] or candidates
             candidates = keep_clear(candidates, foreign_settlements, NEUTRAL_GROUND)
             return countryside.choose_site(regions, candidates, prefer_river=river, best=best)
     else:

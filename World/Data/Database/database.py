@@ -94,6 +94,12 @@ def init_database():
         "starving_days": "INTEGER NOT NULL DEFAULT 0",
     })
 
+    # the peoples of the world (Data.NPCS.races): a person's people and the years they have really
+    # lived (`age` is their stage of life); a kingdom's people. Older worlds were all human.
+    _add_missing_columns(connection, "npcs", {"race": "TEXT NOT NULL DEFAULT 'Human'", "years": "INTEGER"})
+    _add_missing_columns(connection, "kingdoms", {"race": "TEXT NOT NULL DEFAULT 'Human'"})
+    connection.execute("UPDATE npcs SET years = age WHERE years IS NULL AND race = 'Human'")
+
     # How well each NPC ate today, 0-1 (Data.Economy.food_market): meals restore
     # only this share of their hunger.
     _add_missing_columns(connection, "npcs", {"fed": "REAL NOT NULL DEFAULT 1"})

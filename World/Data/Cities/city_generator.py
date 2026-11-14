@@ -18,12 +18,31 @@ def load_json(file):
         return json.load(f)
 
 
-def generate_city_name():
+def generate_city_name(conn=None, kingdom_id=None):
+    """A town's name: in its kingdom's people's tongue (Data.NPCS.races), and -- given the
+    kingdom -- one no other town in the world already bears, while any are left."""
+
+    taken, race = set(), "Human"
+    if conn is not None and kingdom_id is not None:
+        from Data.NPCS.races import kingdom_race
+        race = kingdom_race(conn, kingdom_id)
+        taken = {r[0] for r in conn.execute(
+            """SELECT c.name FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = (SELECT world_id FROM kingdoms WHERE id = ?)""", (kingdom_id,))}
+
+    from Data.NPCS.races import place_name
+    name = place_name(race, taken)
+    if name:
+        return name
 
     prefixes = load_json(PREFIXES)
     suffixes = load_json(SUFFIXES)
 
-    return random.choice(prefixes) + random.choice(suffixes)
+    for _ in range(100):
+        name = random.choice(prefixes) + random.choice(suffixes)
+        if name not in taken:
+            break
+    return name
 
 
 def generate_city(conn, kingdom_id, city_type, map_x=0, map_y=0, biases=None, population=None):
@@ -38,7 +57,7 @@ def generate_city(conn, kingdom_id, city_type, map_x=0, map_y=0, biases=None, po
             population_data[city_type]["max"]
         )
 
-    city = create_city(conn, kingdom_id, generate_city_name(), city_type, population, map_x, map_y)
+    city = create_city(conn, kingdom_id, generate_city_name(conn, kingdom_id), city_type, population, map_x, map_y)
 
     # Buildings are rolled first so employment can be checked against
     # their real capacity as NPCs are generated.

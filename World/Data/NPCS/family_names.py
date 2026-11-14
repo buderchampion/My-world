@@ -30,13 +30,13 @@ def _current_year(conn, world_id):
     return conn.execute("SELECT clock_year FROM worlds WHERE id = ?", (world_id,)).fetchone()[0]
 
 
-def new_family(conn, world_id, of_old=False):
+def new_family(conn, world_id, of_old=False, race="Human"):
     """A new family: a name no family in this world bears yet, while any are left -- after that,
-    unrelated families share names, as in life (many Smiths, no kin). `of_old`: founded in the past."""
-    names = json.load(open(FAMILY_NAMES, encoding="utf-8"))
+    unrelated families share names, as in life (many Smiths, no kin). `of_old`: founded in the past.
+    Named in its founder's people's tongue (Data.NPCS.races): dwarves found the Ironfists."""
+    from Data.NPCS.races import family_name
     taken = {r[0] for r in conn.execute("SELECT name FROM families WHERE world_id = ?", (world_id,))}
-    free = [n for n in names if n not in taken]
-    name = random.choice(free or names)
+    name = family_name(race, taken)
     year = _current_year(conn, world_id)
     founded = year - random.randint(*FOUNDED_YEARS_AGO) if of_old else year
     return conn.execute("INSERT INTO families (world_id, name, founded_year) VALUES (?, ?, ?)", (world_id, name, founded)).lastrowid
@@ -91,7 +91,7 @@ def ensure_family_names(conn, world_id, of_old=False):
     """
     named = 0
     people = [dict(r) for r in conn.execute(
-        """SELECT n.id, n.spouse_id, n.parent_a_id, n.parent_b_id FROM npcs n JOIN cities c ON c.id = n.city_id
+        """SELECT n.id, n.spouse_id, n.parent_a_id, n.parent_b_id, n.race FROM npcs n JOIN cities c ON c.id = n.city_id
            JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND n.alive = 1 AND n.family_id IS NULL
            ORDER BY (n.parent_a_id IS NOT NULL), n.id""", (world_id,))]
     for person in people:                              # adults (no parents recorded) first, then children
@@ -105,7 +105,7 @@ def ensure_family_names(conn, world_id, of_old=False):
         if family is None and person["spouse_id"]:
             family = family_of(conn, person["spouse_id"])
         if family is None:
-            family = new_family(conn, world_id, of_old)
+            family = new_family(conn, world_id, of_old, person["race"] or "Human")
             if person["spouse_id"]:
                 join_family(conn, person["spouse_id"], family)
                 named += 1

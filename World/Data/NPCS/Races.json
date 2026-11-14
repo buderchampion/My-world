@@ -1,0 +1,101 @@
+{
+    "_about": "The peoples of the world. kingdom_weight: how likely a kingdom is to be of this people (humans half of all). age_rate: real years per year of life stage (an elf of 120 is in the prime of youth, like a human of 16). homelands: the land its kingdoms settle by choice. minority_share and minorities: who else lives in its kingdoms. Names are built from syllables, so they never run out; family names and place names too.",
+
+    "Human": {
+        "kingdom_weight": 7, "age_rate": 1.0, "homelands": [],
+        "minority_share": 0.2,
+        "minorities": {"Halfling": 3, "Half-Elf": 2, "Dwarf": 2, "Elf": 1, "Gnome": 1, "Half-Orc": 1, "Tiefling": 1, "Dragonborn": 1}
+    },
+    "Elf": {
+        "kingdom_weight": 1, "age_rate": 7.5, "homelands": ["Forest"],
+        "minority_share": 0.15, "minorities": {"Half-Elf": 3, "Human": 2, "Halfling": 1},
+        "given": {"start": ["Ael", "Cael", "Thal", "Ery", "Ilan", "Fen", "Sil", "Lor", "Ith", "Vae", "Nar", "Elo", "Syl", "Ara", "Mir"],
+                  "male": ["ion", "andor", "ith", "ar", "evar", "orin", "ael", "athas", "en", "ros"],
+                  "female": ["wyn", "iel", "ara", "ira", "yth", "essa", "ielle", "aya", "ilia", "eth"]},
+        "family": {"start": ["Moon", "Star", "Silver", "Leaf", "Dawn", "Mist", "Wind", "Night", "Gold", "Sun"],
+                   "end": ["whisper", "bough", "song", "brook", "shade", "glade", "river", "bloom", "petal", "light"]},
+        "places": {"start": ["Sil", "Ael", "Lor", "Ith", "Cael", "Mith", "Ery", "Fal", "Thal", "Nim", "Eld", "Aer"],
+                   "end": ["andel", "thalas", "orien", "wood", "glade", "vale", "ost", "iel", "aris", "lond", "ithil", "enor"]}
+    },
+    "Half-Elf": {
+        "kingdom_weight": 0, "age_rate": 2.0, "homelands": ["Forest", "Plains"],
+        "minority_share": 0.2, "minorities": {"Human": 2, "Elf": 1},
+        "names_of": ["Human", "Elf"], "family_of": ["Human", "Elf"]
+    },
+    "Dwarf": {
+        "kingdom_weight": 1, "age_rate": 3.5, "homelands": ["Hills", "Mountains"],
+        "minority_share": 0.15, "minorities": {"Gnome": 3, "Human": 2, "Halfling": 1},
+        "given": {"start": ["Thor", "Bal", "Dur", "Gim", "Har", "Brom", "Kil", "Dag", "Grun", "Mor", "Rur", "Tor", "Bof", "Vond"],
+                  "male": ["in", "ek", "dar", "rik", "grim", "ur", "ak", "gar", "nar", "bek"],
+                  "female": ["a", "dis", "hild", "ra", "wyn", "ella", "ga", "unn", "ris", "dra"]},
+        "family": {"start": ["Iron", "Stone", "Copper", "Granite", "Anvil", "Forge", "Deep", "Gold", "Hammer", "Flint", "Coal", "Bronze"],
+                   "end": ["beard", "fist", "helm", "delver", "shield", "heart", "hand", "brow", "mantle", "axe", "vein", "hold"]},
+        "places": {"start": ["Khaz", "Dur", "Kar", "Thar", "Bar", "Gund", "Mor", "Zhul", "Kel", "Dun", "Grim", "Bel"],
+                   "end": ["dum", "hold", "garak", "deep", "forge", "duin", "karak", "rock", "helm", "gate", "heim", "drum"]}
+    },
+    "Halfling": {
+        "kingdom_weight": 1, "age_rate": 1.75, "homelands": ["Plains", "Hills"],
+        "minority_share": 0.2, "minorities": {"Human": 3, "Gnome": 1, "Dwarf": 1},
+        "given": {"start": ["Pip", "Mer", "Wil", "Bram", "Cob", "Ned", "Rol", "Tam", "Per", "Mil", "Lot", "Fen", "Dob", "Hal"],
+                  "male": ["o", "in", "bert", "ry", "wick", "ock", "an", "wise", "fred", "mund"],
+                  "female": ["ie", "a", "ella", "y", "ina", "sy", "linda", "ly", "rose", "bell"]},
+        "family": {"start": ["Under", "Tall", "Green", "Brush", "Thistle", "Good", "Hill", "Apple", "Honey", "Tea", "Warm", "Bramble"],
+                   "end": ["hill", "foot", "bottle", "barrel", "leaf", "bank", "dale", "brook", "gather", "cup", "burrow", "field"]},
+        "places": {"start": ["Hob", "Green", "Brandy", "Little", "Under", "Bramble", "Honey", "Tuck", "Apple", "Mossy", "Bywater", "Mead"],
+                   "end": ["bottom", "burrow", "hollow", "by", "ton", "field", "combe", "meadow", "bank", "end", "brook", "well"]}
+    },
+    "Gnome": {
+        "kingdom_weight": 1, "age_rate": 3.5, "homelands": ["Hills", "Forest"],
+        "minority_share": 0.2, "minorities": {"Dwarf": 3, "Halfling": 2, "Human": 2},
+        "given": {"start": ["Bim", "Fon", "Zook", "Wren", "Nack", "Glim", "Orr", "Bod", "Ell", "Jeb", "Frug", "Dim", "Tib", "Quil"],
+                  "male": ["ble", "kin", "nik", "wick", "dle", "o", "by", "ix", "pock", "bur"],
+                  "female": ["a", "ina", "bella", "ywyn", "i", "etta", "ri", "lyn", "abee", "ippa"]},
+        "family": {"start": ["Gear", "Spark", "Tinker", "Copper", "Bright", "Fizz", "Cog", "Nimble", "Quick", "Glitter", "Pebble", "Twist"],
+                   "end": ["wick", "spinner", "bottom", "knob", "whistle", "fiddle", "pocket", "sprocket", "nose", "dabble", "gleam", "toggle"]},
+        "places": {"start": ["Tink", "Glim", "Fizz", "Cog", "Bright", "Whirl", "Pebble", "Gem", "Dabble", "Spark", "Burrow", "Nook"],
+                   "end": ["warren", "hollow", "works", "dell", "nook", "spindle", "glen", "cove", "tumble", "barrow", "wick", "spring"]}
+    },
+    "Half-Orc": {
+        "kingdom_weight": 0, "age_rate": 0.85, "homelands": [],
+        "minority_share": 0.2, "minorities": {"Human": 2, "Orc": 1},
+        "names_of": ["Human", "Orc"], "family_of": ["Human", "Orc"]
+    },
+    "Dragonborn": {
+        "kingdom_weight": 1, "age_rate": 0.9, "homelands": ["Hills", "Steppe", "Mountains"],
+        "minority_share": 0.2, "minorities": {"Human": 3, "Tiefling": 1, "Half-Orc": 1},
+        "given": {"start": ["Ar", "Bal", "Dor", "Gher", "Kriv", "Med", "Nad", "Pand", "Rhog", "Shed", "Tarh", "Torr", "Vor", "Ush"],
+                  "male": ["jhan", "asar", "rash", "jak", "ash", "ran", "ar", "inn", "esh", "or"],
+                  "female": ["ra", "ith", "ava", "iri", "ora", "esa", "thra", "ys", "inna", "azi"]},
+        "family": {"start": ["Ker", "Dar", "Myas", "Yar", "Fen", "Kim", "Nem", "Pra", "Tur", "Verth", "Zor", "Hask"],
+                   "end": ["rhylon", "ishan", "tric", "jerit", "kathra", "bajit", "athra", "dalan", "vath", "ar", "goth", "onix"]},
+        "places": {"start": ["Arkh", "Drak", "Vor", "Tiam", "Kor", "Zhar", "Rhoth", "Thar", "Sker", "Bahr", "Ixen", "Ghor"],
+                   "end": ["ath", "anar", "oth", "spire", "keth", "irax", "vahr", "esh", "ar", "orrim", "ix", "hold"]}
+    },
+    "Tiefling": {
+        "kingdom_weight": 1, "age_rate": 1.1, "homelands": [],
+        "minority_share": 0.25, "minorities": {"Human": 3, "Half-Elf": 1, "Dragonborn": 1, "Half-Orc": 1},
+        "given": {"start": ["Ak", "Bar", "Dam", "Ekem", "Ia", "Kai", "Leu", "Mor", "Pel", "Ska", "Zar", "Mal", "Cri", "Ner"],
+                  "male": ["menos", "akas", "akos", "ados", "ith", "ron", "ias", "eth", "os", "ael"],
+                  "female": ["ia", "ira", "esha", "eth", "ka", "ix", "lia", "ys", "elle", "ara"]},
+        "family_of": ["Human"],
+        "places": {"start": ["Mal", "Ash", "Cin", "Vex", "Nox", "Sable", "Ember", "Grim", "Hex", "Kara", "Myr", "Scar"],
+                   "end": ["gate", "haven", "spire", "moor", "reach", "vault", "ford", "crest", "mire", "hold", "veil", "fall"]}
+    },
+    "Orc": {
+        "kingdom_weight": 1, "age_rate": 0.7, "homelands": ["Hills", "Steppe", "Mountains"],
+        "minority_share": 0.15, "minorities": {"Half-Orc": 4, "Human": 1},
+        "given": {"start": ["Gor", "Grum", "Kru", "Mug", "Ush", "Thok", "Dren", "Gash", "Rok", "Hol", "Yur", "Bor", "Nar", "Zug"],
+                  "male": ["ash", "ak", "nar", "rog", "uk", "th", "gul", "dak", "mash", "grim"],
+                  "female": ["a", "ka", "gra", "ul", "esh", "oth", "ya", "ra", "zha", "uga"]},
+        "family": {"start": ["Black", "Skull", "Blood", "Iron", "Broken", "Red", "Bone", "Storm", "Grim", "Ash", "Burning", "Rot"],
+                   "end": ["tusk", "fang", "maw", "claw", "eye", "axe", "hand", "spear", "jaw", "hide", "skull", "blade"]},
+        "places": {"start": ["Gor", "Mog", "Grak", "Ugh", "Dush", "Kruk", "Thrak", "Zog", "Bur", "Skar", "Nar", "Grish"],
+                   "end": ["gul", "mak", "nash", "rok", "dun", "gash", "uk", "thar", "lug", "goz", "mog", "har"]}
+    },
+
+    "Children": {
+        "_about": "A child of two peoples: these pairs make the half-peoples; any other pair's child takes one parent's people.",
+        "Elf+Human": "Half-Elf", "Human+Orc": "Half-Orc", "Half-Orc+Orc": "Half-Orc", "Half-Orc+Human": "Half-Orc",
+        "Elf+Half-Elf": "Half-Elf", "Half-Elf+Human": "Half-Elf"
+    }
+}

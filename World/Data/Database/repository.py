@@ -5,20 +5,26 @@ from Data.Database.database import get_connection
 # NPCs
 # ---------------------------------------------------------------------------
 
-def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=None):
+def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=None, race=None):
     """Creates an NPC. Everyone gets a personality (Data.NPCS.personality):
-    `traits` if given -- a child's, inherited -- otherwise their own."""
+    `traits` if given -- a child's, inherited -- otherwise their own. And a people
+    (Data.NPCS.races): `race` if given -- a child's, from their parents -- otherwise one
+    of their kingdom's, most likely its own; anyone not human is named in their people's tongue."""
 
     from Data.NPCS.personality import random_traits
+    from Data.NPCS import races
     traits = traits or random_traits()
+    race = race or races.choose_person_race(races.city_race(conn, city_id))
+    if race != races.HUMAN:
+        name = races.given_name(race, gender)
 
     cursor = conn.execute(
         """
-        INSERT INTO npcs (city_id, name, gender, age, class, profession, generosity, mercy, boldness)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        INSERT INTO npcs (city_id, name, gender, age, class, profession, generosity, mercy, boldness, race, years)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         (city_id, name, gender, age, npc_class, profession,
-         traits["generosity"], traits["mercy"], traits["boldness"])
+         traits["generosity"], traits["mercy"], traits["boldness"], race, races.years_for(race, age))
     )
 
     return get_npc(conn, cursor.lastrowid)
@@ -81,6 +87,13 @@ def get_npc(conn, npc_id):
 
 def save_npc(conn, npc):
 
+    # years lived follow life stage (Data.NPCS.races): anyone whose age was set outright (a child
+    # born before the world began) is given the years that age means for their people
+    from Data.NPCS.races import stage_for, years_for
+    race = npc.get("race") or "Human"
+    if npc.get("years") is None or abs(stage_for(race, npc["years"]) - npc["age"]) > 1:
+        npc["years"] = years_for(race, npc["age"])
+
     conn.execute(
         """
         UPDATE npcs SET
@@ -89,7 +102,7 @@ def save_npc(conn, npc):
             location_id = ?, schedule_json = ?,
             needs_hunger = ?, needs_energy = ?, needs_social = ?,
             needs_happiness = ?, needs_stress = ?,
-            health = ?, alive = ?
+            health = ?, alive = ?, years = COALESCE(?, years)
         WHERE id = ?
         """,
         (
@@ -98,7 +111,7 @@ def save_npc(conn, npc):
             npc["location"], json.dumps(npc.get("schedule", {})),
             npc["needs"]["hunger"], npc["needs"]["energy"], npc["needs"]["social"],
             npc["needs"]["happiness"], npc["needs"]["stress"],
-            npc["health"], int(npc["alive"]),
+            npc["health"], int(npc["alive"]), npc.get("years"),
             npc["id"]
         )
     )

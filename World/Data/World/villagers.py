@@ -30,7 +30,7 @@ BANDITS_AT_MOST = 3
 FIGHTING_AGE = (16, 40)
 
 
-def make_individual(conn, village_id, city_id=None, profession="Farmer", age=None, gender=None, needs_workplace=True):
+def make_individual(conn, village_id, city_id=None, profession="Farmer", age=None, gender=None, needs_workplace=True, race=None):
     """
     Turns one of a village's peasants into an individual NPC: the village
     loses a fifth of a household, and the new NPC lives in city_id (the
@@ -52,7 +52,10 @@ def make_individual(conn, village_id, city_id=None, profession="Farmer", age=Non
     name = random.choice(load_json(MALE_NAMES if gender == "Male" else FEMALE_NAMES))
 
     npc_class = "None" if profession == "Child" else generate_class(profession)
-    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession)
+    if race is None:                           # a villager is of their village's peoples (Data.NPCS.races)
+        from Data.NPCS.races import choose_person_race, city_race
+        race = choose_person_race(city_race(conn, village_id))
+    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession, race=race)
 
     building_type = get_building_type(profession, load_json(PROFESSION_BUILDINGS))
     if building_type:
@@ -91,8 +94,11 @@ def _move_family(conn, village, town_id):
 
     house_free = find_open_building(conn, town_id, "House", "home_id") is not None
 
-    husband = make_individual(conn, village["id"], town_id, "Laborer", age=random.randint(20, 45), gender="Male")
-    wife = make_individual(conn, village["id"], town_id, "Laborer", age=max(18, husband["age"] + random.randint(-6, 3)), gender="Female")
+    from Data.NPCS.races import choose_person_race, city_race      # one household, one people
+    race = choose_person_race(city_race(conn, village["id"]))
+    husband = make_individual(conn, village["id"], town_id, "Laborer", age=random.randint(20, 45), gender="Male", race=race)
+    wife = make_individual(conn, village["id"], town_id, "Laborer", age=max(18, husband["age"] + random.randint(-6, 3)), gender="Female",
+                           race=race)
     wife["home"] = husband["home"]
     marry(husband, wife)
     save_npc(conn, husband)
@@ -101,7 +107,7 @@ def _move_family(conn, village, town_id):
 
     family = [husband, wife]
     for _ in range(FAMILY_SIZE - 2):
-        child = make_individual(conn, village["id"], town_id, "Child", age=random.randint(0, 15))
+        child = make_individual(conn, village["id"], town_id, "Child", age=random.randint(0, 15), race=race)
         child["home"] = husband["home"]
         save_npc(conn, child)
         set_npc_parents(conn, child["id"], husband["id"], wife["id"])
@@ -110,7 +116,7 @@ def _move_family(conn, village, town_id):
     # they arrive as one family, under one family name (Data.NPCS.family_names)
     from Data.NPCS.family_names import new_family, join_family
     world_id = conn.execute("SELECT k.world_id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE c.id = ?", (town_id,)).fetchone()[0]
-    family_id = new_family(conn, world_id)
+    family_id = new_family(conn, world_id, race=race)
     for member in family:
         join_family(conn, member["id"], family_id)
         member["name"] = conn.execute("SELECT name FROM npcs WHERE id = ?", (member["id"],)).fetchone()["name"]

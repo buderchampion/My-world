@@ -619,6 +619,18 @@ FEATURES = [
                   "Data/Monsters/travelers.py": ["calmed(lair, homes)"]},
     },
     {
+        "name": "Peoples: kingdoms of humans, elves, dwarves, halflings, gnomes, dragonborn, tieflings and orcs, with minorities, homelands, their own names and lifespans",
+        "functions": {"Data/NPCS/races.py": ["choose_kingdom_race", "choose_person_race", "child_race", "given_name", "family_name",
+                                            "place_name", "grow_older", "years_for", "peoples_of"]},
+        "wired": {"Data/Database/repository.py": ["races.choose_person_race(", "races.given_name(race, gender)"],
+                  "Data/NPCS/aging.py": ["grow_older(npc)"],
+                  "Data/NPCS/family.py": ["child_race(parent_a.get(\"race\"), parent_b.get(\"race\"))"],
+                  "Data/NPCS/family_names.py": ["family_name(race, taken)"],
+                  "Data/Kingdoms/kingdom_generator.py": ["races.choose_kingdom_race()", "races.homelands(race)"],
+                  "Data/Cities/city_generator.py": ["place_name(race, taken)"],
+                  "Data/Map/map_model.py": ["_peoples(conn,"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1380,8 +1392,12 @@ def _smoke_body(r, holder):
             # Measured over ten worlds: +0.18 to +0.50 (typically +0.25), with a rare crowded world as low as
             # +0.06. Placement blind to land would score about 0, so +0.03 still catches it without false alarms.
             assert settled > land + 0.03, f"settlements do not favor good land (their land {settled:.2f}, the map {land:.2f})"
-            assert all(c["terrain"] != "Mountains" for c in cities if c["type"] == "Capital"), \
-                "a capital was placed in the mountains: " + ", ".join(c["name"] for c in cities if c["type"] == "Capital" and c["terrain"] == "Mountains")
+            from Data.NPCS.races import homelands                    # dwarves (and their like) may build in the mountains
+            highlanders = {row[0] for row in conn.execute("SELECT id, race FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall()
+                           if "Mountains" in homelands(row[1])}
+            lowlanders = [c for c in cities if c["type"] == "Capital" and c["kingdom_id"] not in highlanders]
+            assert all(c["terrain"] != "Mountains" for c in lowlanders), \
+                "a capital was placed in the mountains: " + ", ".join(c["name"] for c in lowlanders if c["terrain"] == "Mountains")
 
             assert C.ensure_households(conn, world_id) == 0, "running the household setup again changed the world"
 
@@ -1574,6 +1590,53 @@ def _smoke_body(r, holder):
             assert not MG.calmed({"map_x": -10 ** 6, "map_y": -10 ** 6}, homes), "a lair far from any druid is calmed"
 
         run_step(r, "magic by the book: casters cast in fights, heal the wounded, bards inspire, druids tend fields and calm beasts", magic_works)
+
+        def peoples():
+            from Data.NPCS import races as RC
+            from Data.NPCS.aging import apply_aging
+            known = set(RC.races())
+            kingdoms_by_race = conn.execute("SELECT id, name, race FROM kingdoms WHERE world_id = ?", (world_id,)).fetchall()
+            assert all(k["race"] in known and RC.races()[k["race"]]["kingdom_weight"] > 0 for k in kingdoms_by_race), \
+                "a kingdom is of no known people (or of a half-people, who found none)"
+            odd = conn.execute("SELECT DISTINCT race FROM npcs").fetchall()
+            assert all(o[0] in known for o in odd), f"someone is of an unknown people: {[o[0] for o in odd if o[0] not in known]}"
+            for k in kingdoms_by_race:                                   # each kingdom mostly its own people, with some others
+                cities = [c[0] for c in conn.execute("SELECT id FROM cities WHERE kingdom_id = ?", (k["id"],))]
+                shares = dict(RC.peoples_of(conn, cities))
+                assert shares.get(k["race"], 0) >= 0.6, f"{k['name']} is a {k['race']} kingdom, but they are only {shares.get(k['race'], 0):.0%} of it"
+                assert len(shares) > 1, f"{k['name']} has no minorities at all"
+            # names in their people's tongue: a dwarf's given name begins as dwarves' do
+            dwarf = conn.execute("SELECT given_name, name FROM npcs WHERE race = 'Dwarf' AND given_name IS NOT NULL LIMIT 1").fetchone()
+            if dwarf:
+                assert any(dwarf[0].startswith(st) for st in RC.races()["Dwarf"]["given"]["start"]), f"a dwarf is named {dwarf[1]}"
+            dup = conn.execute("""SELECT COUNT(*) - COUNT(DISTINCT c.name) FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                                  WHERE k.world_id = ?""", (world_id,)).fetchone()[0]
+            assert dup == 0, f"{dup} towns share a name with another"
+            # children of two peoples
+            assert RC.child_race("Elf", "Human") == "Half-Elf" and RC.child_race("Orc", "Human") == "Half-Orc", "an elf and a human did not have a half-elf"
+            assert RC.child_race("Dwarf", "Dwarf") == "Dwarf", "two dwarves had a child of another people"
+            # lifespans: seven years pass -- a human ages seven, an elf at most one; years always follow
+            human = {"race": "Human", "age": 30, "years": 30, "alive": True, "health": 100, "workplace": None, "home": None}
+            elf = {"race": "Elf", "age": 30, "years": RC.years_for("Elf", 30), "alive": True, "health": 100, "workplace": None, "home": None}
+            for _ in range(7):
+                apply_aging(human); apply_aging(elf)
+            assert human["age"] == 37 and elf["age"] <= 31 and elf["years"] >= 7.5 * 30 + 7, \
+                f"seven years made a human {human['age']} and an elf {elf['age']} (of {elf['years']} years)"
+            young = conn.execute("SELECT race, age, years FROM npcs WHERE alive = 1 AND race = 'Elf' AND age >= 16 LIMIT 1").fetchone()
+            if young:
+                assert young["years"] >= 16 * 7.5, f"a grown elf is only {young['years']} years old"
+            # homelands: dwarves' and elves' capitals stand on their homelands when the map has any near
+            for k in kingdoms_by_race:
+                home = set(RC.homelands(k["race"]))
+                if home:
+                    terrain = conn.execute("""SELECT r.terrain FROM kingdoms k JOIN cities c ON c.id = k.capital_city_id
+                                              JOIN regions r ON r.id = c.region_id WHERE k.id = ?""", (k["id"],)).fetchone()
+                    near = conn.execute("SELECT COUNT(*) FROM regions WHERE world_id = ? AND terrain IN (%s)" % ",".join("?" * len(home)),
+                                        (world_id, *home)).fetchone()[0]
+                    assert terrain is None or near == 0 or terrain[0] in home, \
+                        f"{k['name']}, a {k['race']} kingdom, has its capital on {terrain[0]}, not its homelands ({', '.join(sorted(home))})"
+
+        run_step(r, "peoples: kingdoms of their own people with minorities, homelands, names in their tongue, half-peoples, lifespans", peoples)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
@@ -2429,7 +2492,7 @@ def _smoke_body(r, holder):
         # famine refugees, bandits, levies sent home -- and that is no failure.)
         ruled = {row["id"]: row["ruler_id"] for row in conn.execute(
             "SELECT c.id, c.ruler_id FROM cities c JOIN npcs n ON n.id = c.ruler_id WHERE n.alive = 1")}
-        entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
+        entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type IN ('Coronation', 'Election')").fetchone()[0]
         import Data.Monsters.raids as raids_module                  # a raid is no quiet month: none this time...
         import Data.Government.rebellion as rebellion_module        # ...and nor is a lord's rising
         raids_held, raids_module.RAID_CHANCE = raids_module.RAID_CHANCE, 0.0
@@ -2442,10 +2505,12 @@ def _smoke_body(r, holder):
         replaced = [cid for cid, rid in ruled.items()
                     if conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (cid,)).fetchone()[0] != rid]
         assert not replaced, f"a quiet month replaced {len(replaced)} living rulers (rulers are not being saved)"
-        entries_after = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
+        # the founding coronations are not written again (other stories -- a duel, a vengeance -- may be told)
+        entries_after = conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type IN ('Coronation', 'Election')").fetchone()[0]
         if entries_after != entries_before:
             added = [(row["kingdom_id"], row["event_type"], row["text"][:160]) for row in conn.execute(
-                "SELECT * FROM chronicle_entries ORDER BY id DESC LIMIT ?", (entries_after - entries_before,))]
+                "SELECT * FROM chronicle_entries WHERE event_type IN ('Coronation', 'Election') ORDER BY id DESC LIMIT ?",
+                (entries_after - entries_before,))]
             dead_monarchs = [k["name"] for k in conn.execute(
                 "SELECT k.name FROM kingdoms k JOIN npcs n ON n.id = k.ruler_id WHERE n.alive = 0")]
             raise AssertionError(f"a quiet month added chronicle entries: {added}; monarchs dead now: {dead_monarchs}")
@@ -2875,8 +2940,12 @@ def _smoke_body(r, holder):
         import Data.Government.armies as A
         from Data.Database.repository import get_kingdom, get_city, save_city
 
-        k_att, k_def = [get_kingdom(conn, row[0]) for row in conn.execute(
-            "SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id LIMIT 2", (world_id,))]
+        # two standing kingdoms, the second with a town besides its capital (a rising may have taken the rest)
+        standing = [get_kingdom(conn, row[0]) for row in conn.execute(
+            "SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id", (world_id,))]
+        k_def = next(k for k in standing if conn.execute("SELECT 1 FROM cities WHERE kingdom_id = ? AND id != ?",
+                                                         (k["id"], k["capital"])).fetchone())
+        k_att = next(k for k in standing if k["id"] != k_def["id"])
         town = conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND id != ? ORDER BY id LIMIT 1", (k_def["id"], k_def["capital"])).fetchone()[0]
         capital = get_city(conn, k_att["capital"])
         capital["resources"]["Food"] = capital["resources"].get("Food", 0) + 10000
@@ -3005,7 +3074,8 @@ def _smoke_body(r, holder):
         saved, calm = TV.AMBUSH_CHANCE, MG.CALM_SHARE
         TV.AMBUSH_CHANCE, MG.CALM_SHARE = 1.0, 1.0           # a druid nearby would calm the wolves: not today
         try:
-            reports = [r for r in TV.beasts_on_the_roads(conn, world_id) if r["kind"] == "caravan" and r["id"] == caravan["id"]]
+            everyone = TV.beasts_on_the_roads(conn, world_id)
+            reports = [r for r in everyone if r["kind"] == "caravan" and r["id"] == caravan["id"]]
         finally:
             TV.AMBUSH_CHANCE, MG.CALM_SHARE = saved, calm
         assert reports, "wolves beside a caravan's road did not fall on it"
@@ -3013,7 +3083,8 @@ def _smoke_body(r, holder):
         status = conn.execute("SELECT status FROM caravans WHERE id = ?", (caravan["id"],)).fetchone()[0]
         assert (status == "Raided") == rep["beasts_won"], "a caravan beaten by beasts kept its goods (or lost them though it won)"
         left = conn.execute("SELECT count FROM monster_lairs WHERE id = ?", (lair,)).fetchone()[0]
-        assert left == 60 - rep["beasts_fallen"], "the lair did not lose exactly its fallen"
+        fallen = sum(x["beasts_fallen"] for x in everyone if x.get("lair") == lair)     # it may have fallen on others on that road too
+        assert left == 60 - fallen, f"the lair did not lose exactly its fallen ({60 - left} lost, {fallen} fell)"
         conn.execute("UPDATE monster_lairs SET status = 'Cleared' WHERE id = ?", (lair,))
         conn.execute("UPDATE caravans SET status = 'Delivered' WHERE id = ? AND status = 'En Route'", (caravan["id"],))
         conn.commit()
@@ -3641,7 +3712,7 @@ def _smoke_body(r, holder):
         dead, survivor = pool[0], pool[-1]
         for a, b in ((dead, survivor), (survivor, dead)):
             conn.execute("UPDATE npcs SET spouse_id = ?, needs_stress = 10 WHERE id = ?", (b, a))
-        conn.execute("UPDATE npcs SET age = 200 WHERE id = ?", (dead,))
+        conn.execute("UPDATE npcs SET age = 200, years = 200, race = 'Human' WHERE id = ?", (dead,))   # a human: a year moves them on a year
         conn.commit()
 
         real = aging.natural_death_chance
