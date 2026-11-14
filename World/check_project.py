@@ -583,6 +583,10 @@ FEATURES = [
         "wired": {"Data/World/world_generator.py": ["place_lairs(conn"], "run_world.py": ["ensure_lairs(connection"]},
     },
     {
+        "name": "Fighting by the book: AD&D melee -- to hit by THAC0 against armor class, damage by the monster's ranges, morale",
+        "functions": {"Data/Combat/melee.py": ["monster_thac0", "person_thac0", "monster_fighters", "person_fighter", "attack_all", "battle"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1436,6 +1440,30 @@ def _smoke_body(r, holder):
             assert wild >= 0.8 * len(lairs), f"only {wild} of {len(lairs)} lairs are in the wilds"
 
         run_step(r, "monster lairs fit their habitat and climate, most in the wilds, a few weaker ones within kingdoms", monster_lairs)
+
+        def fighting_by_the_book():
+            import Data.Combat.melee as ML
+            from Data.Monsters.bestiary import by_name
+            from Data.Monsters.lairs import hit_points
+            assert [ML.monster_thac0(hd) for hd in (1, 2, 6, 10, 16)] == [19, 16, 13, 10, 7], "the monsters' to-hit table is wrong"
+            assert [ML.person_thac0(lv) for lv in (0, 1, 3, 9)] == [21, 20, 18, 12], "the fighters' to-hit table is wrong"
+            orc = ML.monster_fighters(by_name("Orc"), 1, 4.5)[0]
+            dummy = ML.Fighter("dummy", "x", 10 ** 9, 7, 20, [(1, 1)])
+            hits = sum(1 for _ in range(4000) if ML.attack_all(orc, dummy) > 0) / 4000
+            assert abs(hits - 0.45) < 0.03, f"an orc hits armor class 7 {hits:.0%} of the time, not 45%"
+            people = lambda n, armored: [ML.person_fighter({"name": "s", "profession": "Soldier", "id": i}, armored=armored,
+                                                           skills={"Swordsmanship": 1}) for i in range(n)]
+            orcs = lambda: ML.monster_fighters(by_name("Orc"), 10, hit_points(by_name("Orc")))
+            plain = sum(ML.battle(orcs(), people(10, False))["winner"] == "b" for _ in range(300))
+            mailed = sum(ML.battle(orcs(), people(10, True))["winner"] == "b" for _ in range(300))
+            assert mailed > plain, f"chain mail did not help soldiers against orcs ({plain} wins without, {mailed} with)"
+            r = ML.battle(ML.monster_fighters(by_name("Wolf"), 30, 1000), people(4, False))
+            assert r["winner"] == "a" and len(r["dead_b"]) >= 2, "a side that lost half its number did not break"
+            skel = by_name("Skeleton")
+            r = ML.battle(ML.monster_fighters(skel, 4, 1), ML.monster_fighters(by_name("Ogre"), 1, 10 ** 6))
+            assert r["fled"] != "a" and not r["a"], "mindless skeletons broke and fled"
+
+        run_step(r, "fighting by the book: to hit by THAC0 against armor class, monsters' own damage, armor helps, morale breaks the living", fighting_by_the_book)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
@@ -2779,6 +2807,9 @@ def _smoke_body(r, holder):
         conn.execute(f"UPDATE npcs SET gold = 500 WHERE id IN ({','.join(map(str, adults))})")
         conn.execute("UPDATE npcs SET home_id = NULL WHERE home_id = (SELECT id FROM buildings WHERE city_id = ? AND type = 'House' ORDER BY id LIMIT 1)", (town,))
         conn.commit()
+        others = [m['id'] for m in family]                     # only this family can pay: earlier refugees in these
+        conn.execute(f"UPDATE npcs SET gold = 0 WHERE home_id IN ({','.join(map(str, slums))}) AND id NOT IN ({','.join(map(str, others))})")
+        conn.commit()                                          # slums would otherwise rightly take the freed house first
         SL.rehouse(conn, world_id)
         homes = {conn.execute("SELECT home_id FROM npcs WHERE id = ?", (m["id"],)).fetchone()[0] for m in family}
         assert len(homes) == 1 and not homes & slums, "a slum family able to pay did not move into a house together"

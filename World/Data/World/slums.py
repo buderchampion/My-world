@@ -100,7 +100,7 @@ def rehouse(conn, world_id):
                    AND b.capacity - (SELECT COUNT(*) FROM npcs n WHERE n.home_id = b.id AND n.alive = 1) >= ? ORDER BY b.id LIMIT 1""",
                 (city["city_id"], len(members))).fetchone()
             if house is None:
-                break                              # no house with room: they wait for the town to grow
+                continue                           # no house with room for them all: they wait -- but smaller families may still fit
             for m in adults:                       # each grown member pays their share of the deposit
                 share = deposit * max(0, m["gold"] or 0) / purse
                 conn.execute("UPDATE npcs SET gold = gold - ? WHERE id = ?", (round(share, 2), m["id"]))
