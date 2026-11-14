@@ -68,7 +68,7 @@ def rank_of(conn, npc):
         return "mayor"
     if npc.get("profession") == "Knight":
         return "knight"
-    if npc.get("profession") == "Captian":
+    if npc.get("profession") == "Captain":
         return "captain"
     if npc.get("id") and renown_of(conn, npc["id"]) >= CHAMPION_RENOWN:
         return "champion"
@@ -170,7 +170,6 @@ def _credit(conn, dead, foes, city_id, context, day, kingdom_id):
                          (killer["id"], victim["id"], day, city_id, context, rank))
             hold_grievances(conn, victim["id"], killer["id"], day)
             title = victim.get("title") or victim.get("profession")
-            title = "Captain" if title == "Captian" else title
             where = f" at {place['name']}" if place else ""
             create_event(conn, "Slaying", f"{display_name(conn, killer['id'])} slew {title} {victim['name']}{where}.",
                          participants=[killer["id"], victim["id"]], city_id=city_id, kingdom_id=kingdom_id)

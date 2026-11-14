@@ -602,6 +602,11 @@ FEATURES = [
         "wired": {"Data/Infrastructure/caravans.py": ["bandit_chance(camps, here)"], "Data/Government/supply.py": ["bandit_chance(camps, here)"]},
     },
     {
+        "name": "Skills in place: adults start with their years of experience; fighting skill alone (two Swordsmanship levels a fighting level) makes a fighter",
+        "functions": {"Data/NPCS/experience.py": ["give_experience", "level_for"], "Data/Combat/melee.py": ["fighting_bonus", "fighting_level"]},
+        "wired": {"Data/World/world_generator.py": ["give_experience(conn"], "Data/Combat/combat.py": ["fighting_bonus(skills)"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1479,6 +1484,28 @@ def _smoke_body(r, holder):
             assert r["fled"] != "a" and not r["a"], "mindless skeletons broke and fled"
 
         run_step(r, "fighting by the book: to hit by THAC0 against armor class, monsters' own damage, armor helps, morale breaks the living", fighting_by_the_book)
+
+        def skills_in_place():
+            import Data.Combat.melee as ML
+            from Data.Combat.combat import get_combat_power
+            from Data.NPCS.experience import level_for, years_of_work, WORKDAYS_PER_YEAR
+            from Data.NPCS.employment import SKILL_XP_PER_DAY
+            young, old = (conn.execute(f"""SELECT AVG(s.level) FROM npc_skills s JOIN npcs n ON n.id = s.npc_id
+                                           WHERE n.alive = 1 AND n.age {cond}""").fetchone()[0] for cond in ("BETWEEN 16 AND 20", ">= 40"))
+            assert young and old and old > young + 2, f"older people do not start more skilled than the young ({young} vs {old})"
+            expected = level_for(years_of_work(30) * WORKDAYS_PER_YEAR * SKILL_XP_PER_DAY)[0]
+            thirty = conn.execute("""SELECT MIN(s.level) FROM npc_skills s JOIN npcs n ON n.id = s.npc_id
+                                     WHERE n.alive = 1 AND n.age = 30""").fetchone()[0]
+            assert thirty is None or thirty >= expected, f"a 30-year-old's skills start at {thirty}, not the {expected} their years of work earned"
+            assert [ML.fighting_bonus({"Swordsmanship": lv}) for lv in (1, 2, 3, 9, 15)] == [0, 0, 1, 4, 7], "Swordsmanship does not give a fighting level per two levels"
+            assert ML.fighting_level(3, {"Swordsmanship": 40}) == ML.MAX_FIGHTING_LEVEL, "fighting level is not capped"
+            farmer = {"profession": "Farmer", "skills": {"Farming": {"level": 15}, "Animal Care": {"level": 15}}}
+            soldier = {"profession": "Soldier", "skills": {"Swordsmanship": {"level": 15}}}
+            assert get_combat_power(farmer) == 1, "a farmer's Farming counted as fighting strength"
+            assert get_combat_power(soldier) > get_combat_power({"profession": "Soldier", "skills": {}}), "a trained soldier is no stronger than a recruit"
+            assert not conn.execute("SELECT 1 FROM npcs WHERE profession = 'Captian'").fetchone(), "the Captain trade is still misspelled"
+
+        run_step(r, "skills in place: adults start with their years of work, and only fighting skill makes a fighter", skills_in_place)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here

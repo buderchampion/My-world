@@ -60,6 +60,9 @@ def init_database():
     # the jobless were once "Unemployed"; they are Laborers, paid a day's labour (Data.Economy.food_market)
     connection.execute("UPDATE npcs SET profession = 'Laborer' WHERE profession = 'Unemployed'")
 
+    # the Captain trade was once spelled "Captian": worlds made before the fix are corrected
+    connection.execute("UPDATE npcs SET profession = 'Captain' WHERE profession = 'Captian'")
+
     # the Rogue class was once spelled "Rouge": worlds made before the fix are corrected
     connection.execute("UPDATE npcs SET class = 'Rogue' WHERE class = 'Rouge'")
     connection.commit()

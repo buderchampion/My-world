@@ -55,6 +55,17 @@ TRADES = {
 COMMONER = (0, 10, (1, 4))         # no armor, a club or a dagger
 ARMORED_AC = 4                     # an Armor suit from the stores: chain mail and shield
 HP_COMMONER = 4                    # about a d6
+SKILL_LEVELS_PER_FIGHTING_LEVEL = 2  # Swordsmanship: every two levels beyond the first add a fighting level...
+MAX_FIGHTING_LEVEL = 12              # ...up to this (the greatest heroes of the world)
+
+
+def fighting_bonus(skills):
+    """Fighting levels earned by training: (Swordsmanship - 1) // 2."""
+    return max(0, ((skills or {}).get("Swordsmanship") or 1) - 1) // SKILL_LEVELS_PER_FIGHTING_LEVEL
+
+
+def fighting_level(trade_level, skills):
+    return min(MAX_FIGHTING_LEVEL, trade_level + fighting_bonus(skills))
 HP_PER_LEVEL = 5.5                 # a fighter's d10, on average
 
 
@@ -95,7 +106,7 @@ def person_fighter(npc, side="people", armored=False, skills=None):
     level, ac, weapon = TRADES.get(npc.get("profession"), COMMONER)
     skills = skills if skills is not None else {k: v.get("level", 1) if isinstance(v, dict) else v
                                                 for k, v in (npc.get("skills") or {}).items()}
-    level += max(0, (skills.get("Swordsmanship") or 1) - 1)        # every level of training beyond the first
+    level = fighting_level(level, skills)                          # training: two Swordsmanship levels per fighting level
     if armored:
         ac = min(ac, ARMORED_AC)
     if skills.get("Shield"):

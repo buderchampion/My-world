@@ -3,7 +3,7 @@ from Data.Database.repository import get_city_npcs, save_npc
 
 # Professions considered notable enough to plausibly rule -- tried
 # first, before falling back to any employed adult in the city.
-RULER_CANDIDATE_PROFESSIONS = ["Knight", "Captian", "Merchant", "Scholar", "Priest"]
+RULER_CANDIDATE_PROFESSIONS = ["Knight", "Captain", "Merchant", "Scholar", "Priest"]
 
 NON_RULER_PROFESSIONS = ("Laborer", "Child")
 

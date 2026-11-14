@@ -7,7 +7,7 @@ DATA_DIR = Path(__file__).resolve().parent.parent
 
 COMBAT_RATES = DATA_DIR / "Combat" / "CombatRates.json"
 
-DEFENDER_PROFESSIONS = ("Guard", "Soldier", "Captian", "Knight")
+DEFENDER_PROFESSIONS = ("Guard", "Soldier", "Captain", "Knight")
 RAIDER_PROFESSION = "Bandit"
 
 # Chance of injury/death per participant, split by which side they're on.
@@ -70,14 +70,19 @@ def load_json(file):
 
 
 def get_combat_power(npc):
+    """A fighter's strength in the older battles (wars, raids, risings): their trade's base (CombatRates.json)
+    and two points for each fighting level their training has earned (Data.Combat.melee.fighting_bonus) --
+    fighting skill only: a farmer's Farming does not make them a warrior."""
+
+    from Data.Combat.melee import fighting_bonus
 
     rates = load_json(COMBAT_RATES)
 
     base = rates.get(npc["profession"], 1)
 
-    skill_bonus = sum(skill["level"] for skill in npc.get("skills", {}).values())
+    skills = {name: (s["level"] if isinstance(s, dict) else s) for name, s in (npc.get("skills") or {}).items()}
 
-    return base + skill_bonus
+    return base + 2 * fighting_bonus(skills)
 
 
 # Armor. A side's armor share is how much of it is equipped, 0-1 (the suits
@@ -165,7 +170,7 @@ def apply_casualties(conn, participants, won, armor_share=0.0):
 def resolve_raid(conn, city, bandit_camp):
     """
     A Bandit Camp's occupants raid this city. Compares raider strength
-    against the city's Guard/Soldier/Captian/Knight defenders, applies
+    against the city's Guard/Soldier/Captain/Knight defenders, applies
     casualties to both sides, and -- if the raiders win -- steals a
     portion of the city's resources, converted to gold at that
     resource's current price and split among surviving raiders.
@@ -312,7 +317,7 @@ def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_citie
                         attacker_military=None, defender_military=None, target_city=None,
                         attacker_armor=None, defender_armor=None, defender_bonus=1.0):
     """
-    Gathers every Guard/Soldier/Captian/Knight across all of each
+    Gathers every Guard/Soldier/Captain/Knight across all of each
     kingdom's cities, resolves one battle between the two militaries,
     applies casualties, and -- if the attacker wins -- captures one of
     the defender's non-capital cities (preferring whichever city holds
@@ -557,7 +562,7 @@ def check_civil_war_eligibility(conn, kingdom, cities, current_year):
 
 def resolve_civil_war(conn, kingdom, cities, current_year):
     """
-    Loyalist military (Guard/Soldier/Captian/Knight) vs. armed rebels
+    Loyalist military (Guard/Soldier/Captain/Knight) vs. armed rebels
     drawn from the rest of the population, armed by whatever Weapons
     are sitting in the kingdom's capital (consumed in the process --
     handing out weapons is a one-way trip). Applies casualties to

@@ -1,4 +1,4 @@
-# Cost per living military-profession NPC (Guard/Soldier/Captian/
+# Cost per living military-profession NPC (Guard/Soldier/Captain/
 # Knight) per day. Gold comes from the kingdom's treasury; Food and
 # Weapons come from the kingdom's capital's stockpile (its central
 # supply depot, the same role capitals already play for cross-kingdom
@@ -13,7 +13,7 @@ UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY = 0.1
 # army that isn't fed, armed, and paid doesn't stay together.
 DESERTION_FRACTION = 0.05
 
-MILITARY_PROFESSIONS = ("Guard", "Soldier", "Captian", "Knight")
+MILITARY_PROFESSIONS = ("Guard", "Soldier", "Captain", "Knight")
 
 
 def apply_military_upkeep(conn, kingdom, military_npcs, capital_city, deployed_ids=frozenset()):
