@@ -592,6 +592,11 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
     },
     {
+        "name": "Beasts and travelers: beasts near the roads fall on caravans and people on journeys; the beaten lose goods or lives",
+        "functions": {"Data/Monsters/travelers.py": ["beasts_on_the_roads", "on_the_road", "ambush"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["beasts_on_the_roads(self.conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2864,6 +2869,40 @@ def _smoke_body(r, holder):
         conn.commit()
 
     run_step(r, "monster raids: the lair loses its fallen, the village its dead (mourned), households and Food; great raids are chronicled", monster_raids)
+
+    def beasts_and_travelers():
+        import Data.Monsters.travelers as TV
+        from Data.Infrastructure.caravans import dispatch_caravan
+        living = [row[0] for row in conn.execute(
+            "SELECT capital_city_id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' AND capital_city_id IS NOT NULL ORDER BY id LIMIT 2", (world_id,))]
+        origin, destination = living
+        kingdom = conn.execute("SELECT kingdom_id FROM cities WHERE id = ?", (origin,)).fetchone()[0]
+        caravan = dispatch_caravan(conn, origin, destination, "Food", 200, kingdom, kingdom)
+        assert caravan, "(setup) the caravan did not set out"
+        conn.commit()
+        spot = next(((x, y) for k, i, x, y, row in TV.on_the_road(conn, world_id) if k == "caravan" and i == caravan["id"]), None)
+        assert spot, "a caravan on the road was not placed along it"
+        conn.execute("UPDATE monster_lairs SET status = 'Cleared' WHERE world_id = ? AND kind = 'beast'", (world_id,))
+        lair = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                              VALUES (?, 'Wolf', 'beast', ?, ?, 60, 9, 'Active')""", (world_id, spot[0] + 10, spot[1])).lastrowid
+        conn.commit()
+        saved = TV.AMBUSH_CHANCE
+        TV.AMBUSH_CHANCE = 1.0
+        try:
+            reports = [r for r in TV.beasts_on_the_roads(conn, world_id) if r["kind"] == "caravan" and r["id"] == caravan["id"]]
+        finally:
+            TV.AMBUSH_CHANCE = saved
+        assert reports, "wolves beside a caravan's road did not fall on it"
+        rep = reports[0]
+        status = conn.execute("SELECT status FROM caravans WHERE id = ?", (caravan["id"],)).fetchone()[0]
+        assert (status == "Raided") == rep["beasts_won"], "a caravan beaten by beasts kept its goods (or lost them though it won)"
+        left = conn.execute("SELECT count FROM monster_lairs WHERE id = ?", (lair,)).fetchone()[0]
+        assert left == 60 - rep["beasts_fallen"], "the lair did not lose exactly its fallen"
+        conn.execute("UPDATE monster_lairs SET status = 'Cleared' WHERE id = ?", (lair,))
+        conn.execute("UPDATE caravans SET status = 'Delivered' WHERE id = ? AND status = 'En Route'", (caravan["id"],))
+        conn.commit()
+
+    run_step(r, "beasts near a road fall on caravans and travelers; the beaten lose their goods or lives, the lair its fallen", beasts_and_travelers)
 
     def armor_protects():
         import random as random_module

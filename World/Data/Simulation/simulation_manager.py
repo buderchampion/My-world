@@ -332,6 +332,10 @@ class SimulationManager:
         from Data.Government.supply import advance_supply_lines
         advance_supply_lines(self.conn, self.world_id)
 
+        # Beasts fall on travelers and caravans near their lairs (Data.Monsters.travelers).
+        from Data.Monsters.travelers import beasts_on_the_roads
+        beasts_on_the_roads(self.conn, self.world_id)
+
         # Campaigns: an army at its target fights; one home again disbands.
         from Data.Government.campaigns import advance_campaigns
         from Data.Government.edicts import today as campaign_day
