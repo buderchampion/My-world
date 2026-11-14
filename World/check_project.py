@@ -587,6 +587,11 @@ FEATURES = [
         "functions": {"Data/Combat/melee.py": ["monster_thac0", "person_thac0", "monster_fighters", "person_fighter", "attack_all", "battle"]},
     },
     {
+        "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
+        "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1515,9 +1520,10 @@ def _smoke_body(r, holder):
             over = conn.execute("SELECT COUNT(*) FROM npcs WHERE alive = 1 AND age >= ?", (F.FOUNDING_AGE,)).fetchone()[0]
             wed = conn.execute("SELECT COUNT(*) FROM npcs WHERE alive = 1 AND age >= ? AND spouse_id IS NOT NULL", (F.FOUNDING_AGE,)).fetchone()[0]
             assert 0.4 <= wed / over <= 0.6, f"{wed / over:.0%} of adults over {F.FOUNDING_AGE} start married, not about half"
-            assert not conn.execute("SELECT 1 FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE b.spouse_id IS NOT a.id").fetchone(), "a marriage is one-sided"
-            couples = conn.execute("SELECT COUNT(*) FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.id < b.id").fetchone()[0]
-            together = conn.execute("SELECT COUNT(*) FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.id < b.id AND a.home_id = b.home_id").fetchone()[0]
+            assert not conn.execute("SELECT 1 FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.alive = 1 AND b.alive = 1 AND b.spouse_id IS NOT a.id").fetchone(), \
+        "a marriage is one-sided"   # living couples: a widow's late spouse still names them, rightly
+            couples = conn.execute("SELECT COUNT(*) FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.id < b.id AND a.alive = 1 AND b.alive = 1").fetchone()[0]
+            together = conn.execute("SELECT COUNT(*) FROM npcs a JOIN npcs b ON b.id = a.spouse_id WHERE a.id < b.id AND a.alive = 1 AND b.alive = 1 AND a.home_id = b.home_id").fetchone()[0]
             assert together >= 0.9 * couples, f"only {together} of {couples} founding couples live together"
 
             town = conn.execute("""SELECT city_id FROM npcs WHERE alive = 1 AND spouse_id IS NULL AND age BETWEEN 20 AND 40
@@ -2312,7 +2318,12 @@ def _smoke_body(r, holder):
         ruled = {row["id"]: row["ruler_id"] for row in conn.execute(
             "SELECT c.id, c.ruler_id FROM cities c JOIN npcs n ON n.id = c.ruler_id WHERE n.alive = 1")}
         entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
-        manager.on_month()
+        import Data.Monsters.raids as raids_module                  # a raid is no quiet month: none this time
+        raids_held, raids_module.RAID_CHANCE = raids_module.RAID_CHANCE, 0.0
+        try:
+            manager.on_month()
+        finally:
+            raids_module.RAID_CHANCE = raids_held
         replaced = [cid for cid, rid in ruled.items()
                     if conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (cid,)).fetchone()[0] != rid]
         assert not replaced, f"a quiet month replaced {len(replaced)} living rulers (rulers are not being saved)"
@@ -2817,6 +2828,42 @@ def _smoke_body(r, holder):
         assert housed - in_slums >= (CT.HOUSED - CT.SLUMS) - 1, f"moving out of the slums did not make life better ({in_slums:.0f} -> {housed:.0f})"
 
     run_step(r, "refugees with no house free live in the slums, and move into a house together once they can pay", refugees_and_slums)
+
+    def monster_raids():
+        import Data.Monsters.raids as RD
+        village = dict(conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?
+                                       AND k.status != 'Fallen' AND c.type = 'Village' AND c.households > 5 ORDER BY c.id LIMIT 1""", (world_id,)).fetchone())
+        lair_id = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                                 VALUES (?, 'Orc', 'raider', ?, ?, 80, 4.5, 'Active')""", (world_id, village["map_x"] + 5, village["map_y"])).lastrowid   # right beside it: no other village nearer
+        conn.execute("UPDATE monster_lairs SET status = 'Cleared' WHERE world_id = ? AND id != ? AND kind = 'raider'", (world_id, lair_id))
+        conn.commit()
+        households = village["households"]
+        food = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE city_id = ? AND resource_name = 'Food'", (village["id"],)).fetchone()[0]
+        saved = RD.RAID_CHANCE
+        RD.RAID_CHANCE = 1.0
+        try:
+            reports = RD.monster_raids(conn, world_id)
+        finally:
+            RD.RAID_CHANCE = saved
+        assert len(reports) == 1 and reports[0]["village"] == village["name"], f"the orcs did not raid the village beside them: {reports}"
+        rep = reports[0]
+        left = conn.execute("SELECT count FROM monster_lairs WHERE id = ?", (lair_id,)).fetchone()[0]
+        assert left == 80 - rep["raiders_fallen"], "the lair did not lose exactly its fallen raiders"
+        dead = conn.execute("SELECT COUNT(*), SUM(died_day IS NOT NULL) FROM npcs WHERE city_id = ? AND alive = 0", (village["id"],)).fetchone()
+        assert dead[0] >= rep["named_dead"] and dead[1] >= rep["named_dead"], "villagers slain in the raid are not dead and dated"
+        now = conn.execute("SELECT households FROM cities WHERE id = ?", (village["id"],)).fetchone()[0]
+        assert abs((households - now) - rep["militia_dead"] / RD.FAMILY_SIZE) < 0.01, "the village did not lose households for its fallen militia"
+        after = conn.execute("SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE city_id = ? AND resource_name = 'Food'", (village["id"],)).fetchone()[0]
+        if rep["raiders_won"]:
+            assert abs(after - food * (1 - RD.FOOD_TAKEN)) < 1, "victorious raiders did not carry off a quarter of the Food"
+        if rep["named_dead"] + rep["militia_dead"] >= RD.CHRONICLED:
+            assert conn.execute("SELECT 1 FROM chronicle_entries WHERE event_type = 'Monster Raid' AND kingdom_id = ?", (village["kingdom_id"],)).fetchone(), \
+                "a great raid was not written into the kingdom's chronicle"
+        assert conn.execute("SELECT 1 FROM events WHERE type = 'Monster Raid' AND city_id = ?", (village["id"],)).fetchone(), "the raid left no event"
+        conn.execute("UPDATE monster_lairs SET status = 'Cleared' WHERE id = ?", (lair_id,))
+        conn.commit()
+
+    run_step(r, "monster raids: the lair loses its fallen, the village its dead (mourned), households and Food; great raids are chronicled", monster_raids)
 
     def armor_protects():
         import random as random_module

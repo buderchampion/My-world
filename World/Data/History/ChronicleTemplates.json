@@ -208,5 +208,13 @@
         "{When}, {avenger} of {kingdom} challenged {nemesis}, who {reason}, in {city} -- and left them dead.",
         "{When}, in {city}, {avenger} called out {nemesis}, who {reason}. They fought, and {nemesis} did not rise.",
         "{When}, {avenger} of {kingdom} had waited long for {nemesis}, who {reason}. In {city} the waiting ended, by the sword."
+    ],
+    "Monster Raid (sacked)": [
+        "{When}, {monsters} came down out of the wilds upon the village of {village} in {kingdom}, and {dead} of its folk were slain and its stores carried off.",
+        "{When}, the village of {village} in {kingdom} was put to fire and sword by {monsters} out of the wild lands; {dead} souls perished."
+    ],
+    "Monster Raid (repelled)": [
+        "{When}, {monsters} fell upon the village of {village} in {kingdom}, but its folk stood and drove them back into the wilds, though {dead} of them fell.",
+        "{When}, the people of {village} in {kingdom} threw back an onslaught of {monsters} out of the wild lands, at the cost of {dead} lives."
     ]
 }

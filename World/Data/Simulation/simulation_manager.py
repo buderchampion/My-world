@@ -462,6 +462,10 @@ class SimulationManager:
         # banditry (Data.World.villagers).
         from Data.World.villagers import village_hardship
         village_hardship(self.conn, self.world_id)
+
+        # Monster raids: raider lairs strike villages near them (Data.Monsters.raids).
+        from Data.Monsters.raids import monster_raids
+        monster_raids(self.conn, self.world_id)
         
         self.conn.commit()
 

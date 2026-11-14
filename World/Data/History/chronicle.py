@@ -9,6 +9,7 @@ TEMPLATES_FILE = Path(__file__).resolve().parent / "ChronicleTemplates.json"
 # deleting or renaming one by accident is caught before it can crash a run.
 REQUIRED_TEMPLATE_KEYS = (
     "Vengeance (duel)",
+    "Monster Raid (sacked)", "Monster Raid (repelled)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -65,7 +66,7 @@ TEMPLATE_FIELDS = (
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
-)
+ "monsters", "village", "dead")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".
