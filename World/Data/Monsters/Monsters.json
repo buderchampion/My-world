@@ -2012,6 +2012,50 @@
   }
  },
  {
+  "name": "Demon, Type IV (Nalfeshnee, etc.)",
+  "page": 20,
+  "frequency": "Uncommon",
+  "number_appearing": "1-3 or 1-6",
+  "armor_class": "-1",
+  "move": "9\"/12\"",
+  "hit_dice": "1 1",
+  "in_lair": "15%",
+  "treasure": "E",
+  "attacks": "3",
+  "damage": "1-4/1-412-8",
+  "special_attacks": "bonus of +2 to hit; also see below",
+  "special_defenses": "+ I or better weapons to hit",
+  "magic_resistance": "65%",
+  "intelligence": "Very",
+  "alignment": "Chaotic evil",
+  "size": "L (IO%'+ tall)",
+  "psionic": "150",
+  "stats": {
+   "ac": -1,
+   "hit_dice": 1,
+   "hit_dice_bonus": 0,
+   "attacks": 3,
+   "damage": [
+    [
+     1,
+     4
+    ],
+    [
+     1,
+     4
+    ],
+    [
+     2,
+     8
+    ]
+   ],
+   "move": 9,
+   "number_appearing": null,
+   "in_lair_percent": 15,
+   "size": "L"
+  }
+ },
+ {
   "name": "Demon, Type V (Marilith, etc.)",
   "page": 20,
   "frequency": "Rore",
@@ -2227,6 +2271,42 @@
    "number_appearing": null,
    "in_lair_percent": 50,
    "size": "M"
+  }
+ },
+ {
+  "name": "Bone (Lesser devil)",
+  "page": 22,
+  "frequency": "Uncommon",
+  "number_appearing": "1-2 or 2-8",
+  "armor_class": "-1",
+  "move": "15\"",
+  "hit_dice": "9",
+  "in_lair": "55%",
+  "treasure": "Nil",
+  "attacks": "1",
+  "damage": "3-12",
+  "special_attacks": "See below",
+  "special_defenses": "See below",
+  "magic_resistance": "40%",
+  "intelligence": "Very",
+  "alignment": "Lawful evil",
+  "size": "L (9!4'taIl)",
+  "psionic": "Nil",
+  "stats": {
+   "ac": -1,
+   "hit_dice": 9,
+   "hit_dice_bonus": 0,
+   "attacks": 1,
+   "damage": [
+    [
+     3,
+     12
+    ]
+   ],
+   "move": 15,
+   "number_appearing": null,
+   "in_lair_percent": 55,
+   "size": "L"
   }
  },
  {
@@ -2773,7 +2853,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Cetiosaurus",
+  "name": "Dinosaur, Cetiosaurus",
   "page": 26,
   "frequency": "Uncommon",
   "number_appearing": "1-4",
@@ -2812,7 +2892,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Dinichtys",
+  "name": "Dinosaur, Dinichtys",
   "page": 26,
   "frequency": "Common",
   "number_appearing": "1-4",
@@ -2850,7 +2930,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Diplodocus",
+  "name": "Dinosaur, Diplodocus",
   "page": 26,
   "frequency": "Common",
   "number_appearing": "1-6",
@@ -3021,7 +3101,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Lambeosaurus",
+  "name": "Dinosaur, Lambeosaurus",
   "page": 27,
   "frequency": "Common",
   "number_appearing": "2-16",
@@ -3060,7 +3140,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Megalosaurus",
+  "name": "Dinosaur, Megalosaurus",
   "page": 27,
   "frequency": "Uncommon",
   "number_appearing": "1-2",
@@ -3098,7 +3178,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Monoclonius",
+  "name": "Dinosaur, Monoclonius",
   "page": 27,
   "frequency": "Common",
   "number_appearing": "2-12",
@@ -3262,7 +3342,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Plateosaurus",
+  "name": "Dinosaur, Plateosaurus",
   "page": 28,
   "frequency": "Common",
   "number_appearing": "5-20",
@@ -3296,7 +3376,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Plesiosaurus",
+  "name": "Dinosaur, Plesiosaurus",
   "page": 28,
   "frequency": "Common *",
   "number_appearing": "1-3",
@@ -3335,7 +3415,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Pteranodon",
+  "name": "Dinosaur, Pteranodon",
   "page": 28,
   "frequency": "Common NO. APFeARING:3- I 8",
   "armor_class": "7",
@@ -3370,7 +3450,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Stegosaurus",
+  "name": "Dinosaur, Stegosaurus",
   "page": 28,
   "frequency": "Common",
   "number_appearing": "2-8",
@@ -3409,7 +3489,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Styracosaurus",
+  "name": "Dinosaur, Styracosaurus",
   "page": 28,
   "frequency": "Common",
   "number_appearing": "2-8",
@@ -3448,7 +3528,7 @@
   }
  },
  {
-  "name": "Dinosa Ur, Teratosaurus",
+  "name": "Dinosaur, Teratosaurus",
   "page": 28,
   "frequency": "Uncommon",
   "number_appearing": "1-3",
@@ -4042,6 +4122,53 @@
   }
  },
  {
+  "name": "Dragon, Copper",
+  "page": 33,
+  "frequency": "Uncommon-rare",
+  "number_appearing": "1-4",
+  "armor_class": "1",
+  "move": "9\"/24\"",
+  "hit_dice": "7-9",
+  "in_lair": "35%",
+  "treasure": "H, S",
+  "attacks": "3",
+  "damage": "1-4/1-4/5-20",
+  "special_attacks": "Breath weapon1 + possible magic use",
+  "special_defenses": "Nil",
+  "magic_resistance": "Standard",
+  "intelligence": "High",
+  "alignment": "Chaotic good",
+  "size": "L (36' long)",
+  "psionic": "Nil",
+  "stats": {
+   "ac": 1,
+   "hit_dice": 7,
+   "hit_dice_bonus": 0,
+   "attacks": 3,
+   "damage": [
+    [
+     1,
+     4
+    ],
+    [
+     1,
+     4
+    ],
+    [
+     5,
+     20
+    ]
+   ],
+   "move": 9,
+   "number_appearing": [
+    1,
+    4
+   ],
+   "in_lair_percent": 35,
+   "size": "L"
+  }
+ },
+ {
   "name": "Dragon, Gold",
   "page": 33,
   "frequency": "Very rare",
@@ -4183,7 +4310,101 @@
   }
  },
  {
-  "name": "Dragonne",
+  "name": "Dragon, Red",
+  "page": 34,
+  "frequency": "Rare",
+  "number_appearing": "1-4",
+  "armor_class": "-1",
+  "move": "9\"/24\"",
+  "hit_dice": "9-1 1",
+  "in_lair": "60%",
+  "treasure": "H, s, r",
+  "attacks": "3",
+  "damage": "1-8/1-8/3-30",
+  "special_attacks": "Breath weapon + possible magic use",
+  "special_defenses": "Nil",
+  "magic_resistance": "Standard",
+  "intelligence": "Exceptional",
+  "alignment": "Chaotic evil",
+  "size": "L (48' long)",
+  "psionic": "Nil",
+  "stats": {
+   "ac": -1,
+   "hit_dice": 9,
+   "hit_dice_bonus": 0,
+   "attacks": 3,
+   "damage": [
+    [
+     1,
+     8
+    ],
+    [
+     1,
+     8
+    ],
+    [
+     3,
+     30
+    ]
+   ],
+   "move": 9,
+   "number_appearing": [
+    1,
+    4
+   ],
+   "in_lair_percent": 60,
+   "size": "L"
+  }
+ },
+ {
+  "name": "Dragon, Silver",
+  "page": 35,
+  "frequency": "Very rare",
+  "number_appearing": "1-4",
+  "armor_class": "-1",
+  "move": "9\"/24\"",
+  "hit_dice": "9-1 1",
+  "in_lair": "55%",
+  "treasure": "H, T",
+  "attacks": "3",
+  "damage": "1-6/1-6/5-30",
+  "special_attacks": "Breath",
+  "special_defenses": "Nil",
+  "magic_resistance": "Standard",
+  "intelligence": "Exceptional",
+  "alignment": "lawful good",
+  "size": "L (48' long)",
+  "psionic": "Nil",
+  "stats": {
+   "ac": -1,
+   "hit_dice": 9,
+   "hit_dice_bonus": 0,
+   "attacks": 3,
+   "damage": [
+    [
+     1,
+     6
+    ],
+    [
+     1,
+     6
+    ],
+    [
+     5,
+     30
+    ]
+   ],
+   "move": 9,
+   "number_appearing": [
+    1,
+    4
+   ],
+   "in_lair_percent": 55,
+   "size": "L"
+  }
+ },
+ {
+  "name": "Dragon, White",
   "page": 35,
   "frequency": "Uncommon",
   "number_appearing": "1-4",
@@ -4198,7 +4419,7 @@
   "special_defenses": "Nil",
   "magic_resistance": "Standard",
   "intelligence": "Average (low)",
-  "alignment": "Choatic evil CHANCE OF: Speaking: 20% Magic Use. 5% Sleeping: 60% DRAGONNE",
+  "alignment": "Choatic evil",
   "size": "",
   "stats": {
    "ac": 3,
@@ -11959,6 +12180,45 @@
    ],
    "in_lair_percent": null,
    "size": "L"
+  }
+ },
+ {
+  "name": "Vampire",
+  "page": 100,
+  "frequency": "Rare",
+  "number_appearing": "1-4",
+  "armor_class": "1",
+  "move": "12”/18“",
+  "hit_dice": "8+3",
+  "in_lair": "25%",
+  "treasure": "F",
+  "attacks": "1",
+  "damage": "5-10",
+  "special_attacks": "Energy drain +",
+  "special_defenses": "I or better weapon to hit",
+  "magic_resistance": "See below",
+  "intelligence": "Exceptional",
+  "alignment": "Chaotic evil",
+  "size": "M",
+  "psionic": "Nil",
+  "stats": {
+   "ac": 1,
+   "hit_dice": 8,
+   "hit_dice_bonus": 3,
+   "attacks": 1,
+   "damage": [
+    [
+     5,
+     10
+    ]
+   ],
+   "move": 12,
+   "number_appearing": [
+    1,
+    4
+   ],
+   "in_lair_percent": 25,
+   "size": "M"
   }
  },
  {

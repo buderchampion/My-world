@@ -65,6 +65,10 @@ def generate_world(seed=None, kingdoms=None):
     from Data.NPCS.family_names import ensure_family_names
     ensure_family_names(conn, world["id"], of_old=True)
 
+    # Monsters den in the wilds, and a few within kingdoms' lands (Data.Monsters.lairs).
+    from Data.Monsters.lairs import place_lairs
+    place_lairs(conn, world["id"])
+
     # Cities open with stocked storehouses, not empty ones -- see
     # Data.Economy.economy.stock_starting_supplies.
     from Data.Economy.economy import stock_starting_supplies

@@ -335,7 +335,23 @@ def draw_movement(surface, view, moving, to_screen, zoom, font, hits=None):
             draw_label(surface, font, f"{army.soldiers}", (x, y + size * 0.9))
 
 
-LEGEND = [("shield", "an army (number: its soldiers)"), ("march", "its march: the road still ahead"),
+LAIR_COLORS = {"raider": (214, 64, 52), "beast": (150, 104, 60), "peaceful": (84, 168, 120)}
+
+
+def draw_lairs(surface, view, to_screen, zoom, hits=None):
+    """Monster lairs: a dark cave mouth ringed in the colour of their kind (raiders red, beasts brown, peaceful green)."""
+    size = max(3, min(7, int(3 + zoom * 3)))
+    for lair_id, monster, kind, x, y, count in view.lairs:
+        sx, sy = to_screen(x, y)
+        color = LAIR_COLORS.get(kind, (160, 160, 160))
+        pygame.draw.circle(surface, (24, 18, 14), (sx, sy), size + 1)
+        pygame.draw.circle(surface, color, (sx, sy), size + 1, 2)
+        pygame.draw.circle(surface, (8, 6, 4), (sx, sy + 1), max(1, size // 2))
+        if hits is not None:
+            hits.append(("lair", lair_id, (sx, sy), size + 4))
+
+
+LEGEND = [("lair", "a monster lair: raiders red, beasts brown, peaceful green"), ("shield", "an army (number: its soldiers)"), ("march", "its march: the road still ahead"),
           ("siege", "a siege: the ring fills as the works rise"), ("flag", "an occupied town, in the occupier's colour"),
           ("trade", "a trade caravan"), ("supply", "a supply caravan, in its army's colour")]
 
@@ -348,7 +364,11 @@ def draw_legend(surface, font, corner):
     surface.blit(panel, (x0, y0))
     for i, (kind, text) in enumerate(LEGEND):
         cx, cy = x0 + 20, y0 + 18 + i * 22
-        if kind == "shield":
+        if kind == "lair":
+            for i, k in enumerate(("raider", "beast", "peaceful")):
+                pygame.draw.circle(surface, (24, 18, 14), (cx - 8 + i * 8, cy), 4)
+                pygame.draw.circle(surface, LAIR_COLORS[k], (cx - 8 + i * 8, cy), 4, 2)
+        elif kind == "shield":
             draw_shield(surface, (cx, cy - 2), 7, (180, 60, 60))
         elif kind == "march":
             _dashed(surface, (180, 60, 60), [(cx - 10, cy), (cx + 10, cy)], 2, dash=5)

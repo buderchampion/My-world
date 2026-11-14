@@ -71,6 +71,11 @@ def get_or_create_world():
         if given:
             print(f"  (gave {given} people a personality -- this world predates them)")
 
+        from Data.Monsters.lairs import ensure_lairs
+        lairs = ensure_lairs(connection, world["id"])
+        if lairs:
+            print(f"  (placed {lairs} monster lairs -- this world predates them)")
+
         from Data.NPCS.family_names import ensure_family_names
         named = ensure_family_names(connection, world["id"], of_old=True)
         if named:

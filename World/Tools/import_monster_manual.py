@@ -189,6 +189,9 @@ EMBEDDED = [("ALIGNMENT", "alignment"), ("INTELLIGENCE", "intelligence"), ("SIZE
 
 def clean(monster):
     out = dict(monster)
+    for key in list(out):                       # the dragons' "CHANCE OF" row is not one we keep
+        if isinstance(out[key], str) and "CHANCE OF" in out[key].upper():
+            out[key] = re.split(r"CHANCE\s*OF", out[key], flags=re.IGNORECASE)[0].strip()
     for key in list(out):                       # a label that lost its colon swallowed the next row: split it out
         if not isinstance(out[key], str):
             continue
@@ -250,7 +253,7 @@ NAME_FIXES = {
 }
 
 
-MISREAD_WORDS = {"Golern": "Golem", "Lguanadon": "Iguanadon", "SHEdu": "Shedu", "Giont": "Giant", "Neutrol": "Neutral"}
+MISREAD_WORDS = {"Dinosa Ur": "Dinosaur", "Golern": "Golem", "Lguanadon": "Iguanadon", "SHEdu": "Shedu", "Giont": "Giant", "Neutrol": "Neutral"}
 
 
 def tidy_name(name):
@@ -269,6 +272,16 @@ def tidy_name(name):
     return ", ".join(collapsed)
 
 
+# Dragons whose blocks the scan interleaves with prose, named by their numbers (each set is unique to one colour):
+# (page, name as imported, armor class) -> name
+NAMES_BY_ARMOR = {
+    (33, "Dragon, Gold", 1): "Dragon, Copper",      # 7-9 hit dice, chaotic good
+    (34, "T, V", -1): "Dragon, Red",                # 9-11 hit dice, chaotic evil
+    (35, "Dragon, Red", -1): "Dragon, Silver",      # 9-11 hit dice, lawful good
+    (35, "Dragonne", 3): "Dragon, White",           # 5-7 hit dice, chaotic evil (the Dragonne itself is armor class 6/2)
+}
+
+
 def monsters_from(blocks):
     """Each column a monster -- except columns of stray marks, with almost none of the main rows."""
     monsters = []
@@ -284,10 +297,12 @@ def monsters_from(blocks):
                     else (sub or heading or f"page {b['page']}"))
             if sum(1 for k in ("armor_class", "hit_dice", "move", "damage", "attacks", "number_appearing") if values.get(k)) < 3:
                 continue
-            if not re.match(r"\s*(-?\d|See|Var|Special|Nil)", values.get("armor_class", "") or "", re.IGNORECASE):
+            if not re.match(r"\s*(-?\s*[\dIl|]|See|Var|Special|Nil)", values.get("armor_class", "") or "", re.IGNORECASE):
                 continue                                       # prose that slipped through, not a stat block
             name = NAME_FIXES.get((b["page"], name.strip()), tidy_name(name.strip()))
-            monsters.append(clean({"name": name, "page": b["page"], **values}))
+            monster = clean({"name": name, "page": b["page"], **values})
+            monster["name"] = NAMES_BY_ARMOR.get((b["page"], name, monster["stats"]["ac"]), name)
+            monsters.append(monster)
     return monsters
 
 

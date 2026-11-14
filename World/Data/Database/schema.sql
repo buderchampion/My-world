@@ -286,6 +286,22 @@ CREATE TABLE IF NOT EXISTS occupation_garrison (
     npc_id         INTEGER NOT NULL REFERENCES npcs(id)
 );
 
+-- Monster lairs: where the Monster Manual's monsters den (Data.Monsters.lairs).
+CREATE TABLE IF NOT EXISTS monster_lairs (
+    id                 INTEGER PRIMARY KEY,
+    world_id           INTEGER NOT NULL REFERENCES worlds(id),
+    region_id          INTEGER REFERENCES regions(id),
+    monster            TEXT NOT NULL,               -- its name in Data/Monsters/Monsters.json
+    kind               TEXT NOT NULL,               -- raider, beast or peaceful (Data.Monsters.bestiary)
+    map_x              REAL NOT NULL,
+    map_y              REAL NOT NULL,
+    count              INTEGER NOT NULL,            -- how many live there
+    hit_points_each    REAL NOT NULL,
+    within_kingdom_id  INTEGER REFERENCES kingdoms(id),   -- lurking within a kingdom's lands (else the wilds)
+    founded_day        INTEGER NOT NULL DEFAULT 0,
+    status             TEXT NOT NULL DEFAULT 'Active'      -- Active or Cleared
+);
+
 -- Families: a name and the year the line was founded (Data.NPCS.family_names).
 CREATE TABLE IF NOT EXISTS families (
     id            INTEGER PRIMARY KEY,

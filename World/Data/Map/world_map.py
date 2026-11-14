@@ -22,10 +22,10 @@ from pathlib import Path
 import pygame
 
 try:                                   # as part of the Data.Map package...
-    from .map_model import open_world, load_world, load_movement, realm_signature, town_details, kingdom_details, army_details
+    from .map_model import open_world, load_world, load_movement, realm_signature, town_details, kingdom_details, army_details, lair_details
     from . import map_render as R
 except ImportError:                    # ...or run from this folder (py world_map.py)
-    from map_model import open_world, load_world, load_movement, realm_signature, town_details, kingdom_details, army_details
+    from map_model import open_world, load_world, load_movement, realm_signature, town_details, kingdom_details, army_details, lair_details
     import map_render as R
 
 WINDOW_SIZE = (1280, 800)
@@ -142,7 +142,7 @@ class MapWindow:
         kind, ident = self.selected
         conn = open_world(self.database)
         try:
-            self.details = {"town": town_details, "army": army_details, "kingdom": kingdom_details}[kind](conn, ident)
+            self.details = {"town": town_details, "army": army_details, "kingdom": kingdom_details, "lair": lair_details}[kind](conn, ident)
         finally:
             conn.close()
         if self.details is None:          # it is gone (an army disbanded, say)
@@ -164,7 +164,7 @@ class MapWindow:
         """What a click lands on: an army, then a town, then a kingdom's land; nothing closes the panel."""
         if self.details and sx >= self.screen.get_width() - R.PANEL_WIDTH:
             return                                         # a click inside the panel
-        for kind in ("army", "town"):
+        for kind in ("army", "town", "lair"):
             near = [(abs(complex(sx - x, sy - y)), ident) for k, ident, (x, y), r in self.hits
                     if k == kind and abs(complex(sx - x, sy - y)) <= r]
             if near:
@@ -195,9 +195,10 @@ class MapWindow:
         R.draw_rivers(self.screen, self.view, self.camera.to_screen, zoom)
         R.draw_roads(self.screen, self.view, self.camera.to_screen, zoom)
         placed, self.hits = [], []
+        R.draw_lairs(self.screen, self.view, self.camera.to_screen, zoom, self.hits)
         R.draw_settlements(self.screen, self.view, self.camera.to_screen, zoom, self.font, self.small, placed, self.hits)
         R.draw_movement(self.screen, self.view, self.moving, self.camera.to_screen, zoom, self.small, self.hits)
-        if self.selected and self.selected[0] in ("town", "army"):
+        if self.selected and self.selected[0] in ("town", "army", "lair"):
             mark = next(((pos, r) for k, ident, pos, r in self.hits if (k, ident) == self.selected), None)
             if mark:
                 R.draw_selection(self.screen, *mark)

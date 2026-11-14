@@ -12,6 +12,7 @@ and how common it is. Kept aside, not placed in this world (yet):
     aquatic   it only swims (in the book, // marks swimming), and this world has no sea
     planar    demons, devils, elementals and other beings of other planes
     people    men, elves, dwarves and the other peoples -- for the races of kingdoms
+    mundane   farm and draught animals: not monsters of the wilds
 
 The book has no terrain row (that came in later editions; habitat is only in
 its prose, which was not imported), so habitats here are this world's own rules.
@@ -34,9 +35,13 @@ PEACEFUL_INTELLIGENCE = 4             # Average or better, and not evil: keeps t
 
 PLANAR = r"\b(Demon|Devil|Elemental|Djinni|Efreeti|Aerial Servant|Invisible Stalker|Night Hag|Nightmare|Xorn|Couatl|Ki-Rin|" \
          r"Titan|Tiamat|Bahamut|Lammasu|Shedu|Hell Hound|Imp|Quasit|Salamander|Mezzoloth|Rakshasa|Barghest|Intellect Devourer|Larva)"
-AQUATIC = r"\b(Shark|Whale|Dolphin|Eel|Barracuda|Lamprey|Octopus|Squid|Kraken|Sea |Merman|Mermen|Sahuagin|Locathah|Ixitxachitl|" \
+AQUATIC = r"\b(Plesiosaurus|Dinichthys|Elasmosaurus|Archelon|Mosasaurus|Nothosaurus|Tylosaurus|Strangle Weed|Weed|Shark|Whale|Dolphin|Eel|Barracuda|Lamprey|Octopus|Squid|Kraken|Sea |Merman|Mermen|Sahuagin|Locathah|Ixitxachitl|" \
           r"Kopoacinth|Triton|Hippocampus|Pike|Gar\b|Ray\b|Ray,|Man-O-War|Crab|Dragon Turtle|Turtle, Sea|Morkoth|Masher|Eye Of The Deep|" \
           r"Water Weird|Nixie|Kuo-Toa|Scrag)"
+DEMON_PAGES = range(17, 24)           # the book's demons and devils: planar, whatever a column is named
+MUNDANE = r"\b(Bull|Mule|Herd Animal|Cattle|Horse|Pony|Camel|Dog, War|Donkey|Ox|Sheep|Goat)\b"     # farm and draught animals
+DINOSAUR_PAGES = range(24, 30)        # the book's dinosaurs, whatever a column is named
+WARM = r"Dinosaur|Iguanadon|Titanothere|Baluchitherium|Mastodon"      # the lost, warm lands of old beasts
 PEOPLE = r"^(Men\b|Man\b|Caveman|Elf|Dwarf|Gnome|Halfling|Half-|Human|Pilgrim|Merchant|Bandit|Berserker|Buccaneer|Dervish|Nomad|" \
          r"Tribesman|Pirate|Brigand)"
 
@@ -96,8 +101,10 @@ def classify(monster):
     out["intelligence_level"] = intelligence_of(monster.get("intelligence"))
     out["evil"] = is_evil(monster.get("alignment"))
     out["weight"] = frequency_weight(monster.get("frequency"))
-    if re.search(PLANAR, name, re.IGNORECASE):
+    if re.search(PLANAR, name, re.IGNORECASE) or monster.get("page") in DEMON_PAGES:
         out["kind"] = "planar"
+    elif re.search(MUNDANE, name, re.IGNORECASE):
+        out["kind"] = "mundane"                        # ordinary animals, not monsters of the wilds
     elif re.search(PEOPLE, name, re.IGNORECASE):
         out["kind"] = "people"
     elif re.search(AQUATIC, name, re.IGNORECASE) or only_swims(monster.get("move")):
@@ -110,6 +117,7 @@ def classify(monster):
         out["kind"] = "peaceful"
     out["terrains"] = habitat_of(name)
     out["cold_only"] = bool(re.search(COLD, name, re.IGNORECASE))
+    out["warm_only"] = bool(re.search(WARM, name, re.IGNORECASE)) or monster.get("page") in DINOSAUR_PAGES
     out["usable"] = out["kind"] in ("raider", "beast", "peaceful") and monster["stats"].get("hit_dice") is not None
     return out
 

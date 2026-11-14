@@ -576,6 +576,13 @@ FEATURES = [
         "functions": {"Data/Monsters/bestiary.py": ["bestiary", "of_this_world", "classify", "habitat_of"]},
     },
     {
+        "name": "Monster lairs: placed by terrain and climate, mostly in the wilds, a few weaker ones within kingdoms; on the map",
+        "tables": ["monster_lairs"],
+        "functions": {"Data/Monsters/lairs.py": ["place_lairs", "ensure_lairs", "candidates"], "Data/Map/map_model.py": ["lair_details"],
+                      "Data/Map/map_render.py": ["draw_lairs"]},
+        "wired": {"Data/World/world_generator.py": ["place_lairs(conn"], "run_world.py": ["ensure_lairs(connection"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1407,6 +1414,29 @@ def _smoke_body(r, holder):
 
         run_step(r, "the bestiary sorts the Monster Manual into raiders, beasts and peaceful monsters, with habitats", the_bestiary)
 
+        def monster_lairs():
+            import math as math_module
+            from Data.Monsters.bestiary import by_name
+            import Data.Monsters.lairs as LR
+            lairs = conn.execute("""SELECT l.*, r.terrain, r.climate FROM monster_lairs l JOIN regions r ON r.id = l.region_id
+                                    WHERE l.world_id = ?""", (world_id,)).fetchall()
+            assert len(lairs) >= 50, f"only {len(lairs)} monster lairs in the world"
+            towns = conn.execute("SELECT map_x, map_y FROM cities").fetchall()
+            for lair in lairs:
+                m = by_name(lair["monster"])
+                assert m and m["kind"] in ("raider", "beast", "peaceful"), f"a lair of {lair['monster']}, which is not a monster of this world"
+                assert lair["terrain"] in m["terrains"], f"{lair['monster']} dens in {lair['terrain']}, not its habitat"
+                assert not (m["cold_only"] and lair["climate"] != "Cold"), f"{lair['monster']}, a creature of the cold, dens in {lair['climate']} lands"
+                if lair["within_kingdom_id"]:
+                    assert (m["stats"]["hit_dice"] or 99) <= LR.WITHIN_MAX_HIT_DICE and m["kind"] != "peaceful", \
+                        f"{lair['monster']} lurks within a kingdom, but is too strong (or peaceful) for that"
+                gap = min(math_module.dist((t[0], t[1]), (lair["map_x"], lair["map_y"])) for t in towns)
+                assert gap >= LR.CLEAR_OF_SETTLEMENTS - 1, f"a lair of {lair['monster']} is only {gap:.0f} from a settlement"
+            wild = sum(1 for lair in lairs if not lair["within_kingdom_id"])
+            assert wild >= 0.8 * len(lairs), f"only {wild} of {len(lairs)} lairs are in the wilds"
+
+        run_step(r, "monster lairs fit their habitat and climate, most in the wilds, a few weaker ones within kingdoms", monster_lairs)
+
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
             try:
@@ -1432,6 +1462,11 @@ def _smoke_body(r, holder):
             map_render.draw_kingdom_names(canvas, view, to_screen, 0.2, font)
             moving = map_model.load_movement(map_model.open_world(database_module.DB_FILE), view)   # armies, sieges, caravans
             map_render.draw_movement(canvas, view, moving, to_screen, 0.2, font)
+            map_render.draw_lairs(canvas, view, to_screen, 0.2)
+            if view.lairs:
+                lair_conn = map_model.open_world(database_module.DB_FILE)
+                assert map_model.lair_details(lair_conn, view.lairs[0][0])['rows'], 'a lair panel came back empty'
+                lair_conn.close()
             map_render.draw_legend(canvas, font, (0, 0))
             # a click's details panel: a town, a kingdom and (if any) an army
             panel_conn = map_model.open_world(database_module.DB_FILE)

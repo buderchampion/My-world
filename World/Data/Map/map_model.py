@@ -72,6 +72,7 @@ class WorldView:
     provinces: dict = field(default_factory=dict)        # id -> (name, kingdom_id, seat_id)
     roads: list = field(default_factory=list)
     rivers: list = field(default_factory=list)           # (from region, to region) segments, flowing downhill
+    lairs: list = field(default_factory=list)            # (id, monster, kind, x, y, count) -- monster lairs
 
 
 def hex_to_rgb(text, fallback=(150, 150, 150)):
@@ -126,6 +127,9 @@ def load_world(conn: sqlite3.Connection) -> WorldView:
                                                c["province_id"], c["population"] or 0, c["households"] or 0)
     for p in conn.execute("SELECT id, name, kingdom_id, seat_city_id FROM provinces"):
         view.provinces[p["id"]] = (p["name"], p["kingdom_id"], p["seat_city_id"])
+    if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'monster_lairs'").fetchone():
+        view.lairs = [tuple(r) for r in conn.execute(
+            "SELECT id, monster, kind, map_x, map_y, count FROM monster_lairs WHERE world_id = ? AND status = 'Active'", (view.world_id,))]
     view.roads = [Road(r["city_a_id"], r["city_b_id"], r["kind"]) for r in conn.execute("SELECT * FROM roads")
                   if r["city_a_id"] in view.settlements and r["city_b_id"] in view.settlements]
     return view
@@ -349,3 +353,29 @@ def army_details(conn, army_id):
     if a["days_without_food"]:
         rows.append(("Hungry", f"{a['days_without_food']} day(s) without food"))
     return {"title": a["name"], "subtitle": a["status"], "rows": rows, "lists": []}
+
+
+def lair_details(conn, lair_id):
+    """A clicked lair: its monster's statistics from the bestiary."""
+    lair = conn.execute("SELECT l.*, r.terrain, r.climate FROM monster_lairs l LEFT JOIN regions r ON r.id = l.region_id WHERE l.id = ?",
+                        (lair_id,)).fetchone()
+    if lair is None:
+        return None
+    try:
+        from Data.Monsters.bestiary import by_name
+    except ImportError:                    # the map run on its own, from its folder
+        import sys
+        from pathlib import Path
+        sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+        from Data.Monsters.bestiary import by_name
+    m = by_name(lair["monster"]) or {}
+    where = f"{lair['terrain'] or '?'} ({lair['climate'] or '?'})" + (", within a kingdom's lands" if lair["within_kingdom_id"] else ", in the wilds")
+    rows = [("Lair of", f"{lair['count']} {lair['monster']}"), ("Kind", {"raider": "raider: raids villages near its lair",
+            "beast": "beast: falls on travelers", "peaceful": "peaceful: keeps to its lair"}.get(lair["kind"], lair["kind"])),
+            ("Where", where), ("Armor class", m.get("armor_class", "-")), ("Hit dice", f"{m.get('hit_dice', '-')}  ({lair['hit_points_each']:.0f} hp each)"),
+            ("Attacks", f"{m.get('attacks', '-')}, damage {m.get('damage', '-')}"), ("Moves", m.get("move", "-"))]
+    for label, key in (("Special attacks", "special_attacks"), ("Special defenses", "special_defenses"), ("Intelligence", "intelligence"),
+                       ("Alignment", "alignment"), ("Size", "size")):
+        if m.get(key) and m.get(key).lower() not in ("nil", "none"):
+            rows.append((label, m[key]))
+    return {"title": lair["monster"], "subtitle": f"Monster lair (Monster Manual, page {m.get('page', '?')})", "rows": rows, "lists": []}
