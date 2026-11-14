@@ -1488,12 +1488,11 @@ def _smoke_body(r, holder):
         def skills_in_place():
             import Data.Combat.melee as ML
             from Data.Combat.combat import get_combat_power
-            from Data.NPCS.experience import level_for, years_of_work, WORKDAYS_PER_YEAR
-            from Data.NPCS.employment import SKILL_XP_PER_DAY
+            from Data.NPCS.experience import level_for, experience_for
             young, old = (conn.execute(f"""SELECT AVG(s.level) FROM npc_skills s JOIN npcs n ON n.id = s.npc_id
                                            WHERE n.alive = 1 AND n.age {cond}""").fetchone()[0] for cond in ("BETWEEN 16 AND 20", ">= 40"))
             assert young and old and old > young + 2, f"older people do not start more skilled than the young ({young} vs {old})"
-            expected = level_for(years_of_work(30) * WORKDAYS_PER_YEAR * SKILL_XP_PER_DAY)[0]
+            expected = level_for(experience_for(30, 1.0))[0]           # at a village's pace, the slowest
             thirty = conn.execute("""SELECT MIN(s.level) FROM npc_skills s JOIN npcs n ON n.id = s.npc_id
                                      WHERE n.alive = 1 AND n.age = 30""").fetchone()[0]
             assert thirty is None or thirty >= expected, f"a 30-year-old's skills start at {thirty}, not the {expected} their years of work earned"
@@ -1502,6 +1501,8 @@ def _smoke_body(r, holder):
             farmer = {"profession": "Farmer", "skills": {"Farming": {"level": 15}, "Animal Care": {"level": 15}}}
             soldier = {"profession": "Soldier", "skills": {"Swordsmanship": {"level": 15}}}
             assert get_combat_power(farmer) == 1, "a farmer's Farming counted as fighting strength"
+            town = 360 * 10 * 1.25
+            assert [level_for(y * town)[0] for y in (1, 10, 40)] == [3, 9, 13], "skills do not rise at the agreed pace (3 after a year, 9 after ten, 13 after forty)"
             assert get_combat_power(soldier) > get_combat_power({"profession": "Soldier", "skills": {}}), "a trained soldier is no stronger than a recruit"
             assert not conn.execute("SELECT 1 FROM npcs WHERE profession = 'Captian'").fetchone(), "the Captain trade is still misspelled"
 
@@ -2999,21 +3000,31 @@ def _smoke_body(r, holder):
         for other in others:
             adjust_kingdom_favor(conn, kingdom["id"], other["id"], 100)
             adjust_kingdom_favor(conn, other["id"], kingdom["id"], 100)
+        from Data.History.chronicle import get_chronicle
+        coronations = lambda: [e for e in get_chronicle(conn, kingdom["id"]) if e["event_type"] == "Coronation"]
+        before = len(coronations())          # earlier steps (the regent's) may already have crowned a successor here
+        rulers_before = {o["id"]: get_kingdom(conn, o["id"])["ruler"] for o in others}
         conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (monarch,))
         conn.commit()
 
         manager.on_month()
 
         assert get_kingdom(conn, kingdom["id"])["ruler"] != monarch, "the dead monarch was not replaced"
-        from Data.History.chronicle import get_chronicle
-        crowned = [e for e in get_chronicle(conn, kingdom["id"]) if e["event_type"] == "Coronation"]
+        crowned = coronations()
         old_name = conn.execute("SELECT name FROM npcs WHERE id = ?", (monarch,)).fetchone()["name"]
-        assert len(crowned) == 2 and old_name in crowned[-1]["text"], \
+        assert len(crowned) == before + 1 and old_name in crowned[-1]["text"], \
             "the successor's crowning was not chronicled, or does not name the monarch it replaced"
         shaken = [get_kingdom_favor(conn, kingdom["id"], o["id"]) for o in others]
         assert all(abs(f - 100) > 1e-6 for f in shaken), "a new monarch was crowned but the kingdom's feelings were not shaken"
-        untouched = [get_kingdom_favor(conn, o["id"], kingdom["id"]) for o in others]
-        assert all(f == 100 for f in untouched), "the neighbors' feelings changed although only this kingdom changed ruler"
+        # (a neighbor whose own monarch also died this month -- a duel, an assassin -- is rightly shaken too)
+        steady = [o for o in others if get_kingdom(conn, o["id"])["ruler"] == rulers_before[o["id"]]]
+        untouched = [get_kingdom_favor(conn, o["id"], kingdom["id"]) for o in steady]
+        if not all(f == 100 for f in untouched):
+            moved = [(o["name"], round(get_kingdom_favor(conn, o["id"], kingdom["id"]), 2)) for o in steady
+                     if get_kingdom_favor(conn, o["id"], kingdom["id"]) != 100]
+            edicts = [tuple(e) for e in conn.execute("SELECT kingdom_id, edict FROM kingdom_edicts ORDER BY rowid DESC LIMIT 4")]
+            raise AssertionError(f"a neighbor's feelings toward {kingdom['name']} changed although only it changed ruler: {moved}; "
+                                 f"latest edicts {edicts}; this kingdom is {kingdom['id']}")
 
         conn.execute("DELETE FROM kingdom_favor")
         conn.commit()

@@ -8,8 +8,8 @@ CITY_PAY_SCALING = DATA_DIR / "Buildings" / "CityPayScaling.json"
 
 # Exponential leveling curve -- easy to retune later without touching
 # any of the logic below. xp needed to go from `level` to `level + 1`.
-BASE_LEVEL_XP = 100
-LEVEL_XP_GROWTH = 1.5
+BASE_LEVEL_XP = 1050     # slow enough that masters stand out: a year's work in a town reaches level 3,
+LEVEL_XP_GROWTH = 1.4    # ten years 9, forty years 13 (a capital's busier work a little more, a village's less)
 
 # Flat xp granted per skill per workday, before the city's xp_multiplier.
 SKILL_XP_PER_DAY = 10
