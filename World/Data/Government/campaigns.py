@@ -229,7 +229,11 @@ def fight(conn, campaign, defender_bonus=1.0, day=None):
         lost = min(army["armor"], result["attacker_deaths"] * attacker_armor)
         conn.execute("UPDATE armies SET armor = armor - ? WHERE id = ?", (round(lost, 2), army["id"]))
 
-    # the wounded drink the army's potions
+    # the army's casters heal its wounded (Data.Magic.magic), then the wounded drink its potions
+    from Data.Magic.magic import casters, heal
+    marching = set(members)
+    healers = [c for c in casters(conn, attacker["world_id"], ("Cleric", "Druid", "Bard")) if c["id"] in marching]
+    heal(conn, sorted(healers, key=lambda h: -h["level"]), list(marching))
     army = get_army(conn, campaign["army_id"])
     potions = army["potions"] if army else 0
     for npc_id in members:

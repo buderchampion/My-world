@@ -2,7 +2,7 @@
 # the level their life sets: fed or hungry, housed or not (or crowded), with a
 # trade or laboring, married, a parent, recently bereaved, living under an
 # occupier, stressed, penniless. Happiness no longer climbs from where people
-# spend their hours (that pinned everyone at 100); a festival or a grief
+# spend their hours (that pinned everyone at 100); a bard's songs lift a town; a festival or a grief
 # still moves it at once, and it then drifts back to what life is like.
 
 BASE = 50
@@ -13,6 +13,7 @@ WORKING, LABORING = 10, 3
 MARRIED, PARENT = 10, 5
 BEREAVED, BEREAVED_DAYS = -15, 90
 OCCUPIED = -10
+INSPIRED = 3                    # a town with a bard: for each step of the best bard's song (a master bard's is two)
 STRESS_WEIGHT = 0.2
 POOR, POOR_BELOW = -5, 10
 ADULT_AGE, OLD_AGE = 16, 60
@@ -39,6 +40,9 @@ def life_levels(conn, world_id, day):
     occupied = {r[0] for r in conn.execute("SELECT city_id FROM occupations WHERE status = 'Occupied'")} \
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'occupations'").fetchone() else set()
 
+    from Data.Magic.magic import bard_towns
+    songs = bard_towns(conn, world_id)
+
     levels = {}
     for p in people:
         level = BASE + FED_WEIGHT * ((p["fed"] if p["fed"] is not None else 1.0) - 0.5)
@@ -58,6 +62,7 @@ def life_levels(conn, world_id, day):
             level += BEREAVED
         if p["city_id"] in occupied:
             level += OCCUPIED
+        level += INSPIRED * songs.get(p["city_id"], 0)
         level -= STRESS_WEIGHT * (p["needs_stress"] or 0)
         if p["age"] >= ADULT_AGE and (p["gold"] or 0) < POOR_BELOW:
             level += POOR

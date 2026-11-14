@@ -1,0 +1,1 @@
+# Magic: spells by the AD&D Player's Handbook (see magic.py).

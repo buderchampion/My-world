@@ -10,7 +10,9 @@ pack, at least one beast, and the fight is by the book (Data.Combat.melee):
     a traveler       alone, by their trade and training; beaten, they die
                      on the road, and are mourned
 
-Either way the lair loses its fallen; with none left, it is cleared.
+Either way the lair loses its fallen; with none left, it is cleared. Beasts
+near a druid's home are calmer: they attack CALM_SHARE as often
+(Data.Magic.magic).
 """
 
 from __future__ import annotations
@@ -140,13 +142,16 @@ def beasts_on_the_roads(conn, world_id):
         "SELECT * FROM monster_lairs WHERE world_id = ? AND status = 'Active' AND kind = 'beast' AND count > 0", (world_id,))]
     if not lairs:
         return []
+    from Data.Magic.magic import druid_homes, calmed, CALM_SHARE
+    homes = druid_homes(conn, world_id)
+    chance = {lair["id"]: AMBUSH_CHANCE * (CALM_SHARE if calmed(lair, homes) else 1) for lair in lairs}
     reports = []
     reach2 = AMBUSH_REACH ** 2
     for kind, ident, x, y, row in on_the_road(conn, world_id):
         for lair in lairs:
             if lair["count"] <= 0 or (lair["map_x"] - x) ** 2 + (lair["map_y"] - y) ** 2 > reach2:
                 continue
-            if random.random() >= AMBUSH_CHANCE or by_name(lair["monster"]) is None:
+            if random.random() >= chance[lair["id"]] or by_name(lair["monster"]) is None:
                 continue
             report = ambush(conn, world_id, lair, kind, ident, row)
             if report:

@@ -607,6 +607,18 @@ FEATURES = [
         "wired": {"Data/World/world_generator.py": ["give_experience(conn"], "Data/Combat/combat.py": ["fighting_bonus(skills)"]},
     },
     {
+        "name": "Magic by the Player's Handbook: casters cast in fights, heal the wounded, bards inspire, druids tend the land and calm beasts",
+        "functions": {"Data/Magic/magic.py": ["casting_level", "prepare", "cast_in_battle", "inspire", "heal", "heal_the_wounded",
+                                              "bard_towns", "druid_harvest_bonus", "druid_homes", "calmed"]},
+        "wired": {"Data/Combat/melee.py": ["cast_in_battle(fighter", "arm_caster(fighter"],
+                  "Data/Combat/combat.py": ["CASTING_POWER * casting_level("],
+                  "Data/Simulation/simulation_manager.py": ["heal_the_wounded(self.conn"],
+                  "Data/Government/campaigns.py": ["heal(conn, sorted(healers"],
+                  "Data/NPCS/contentment.py": ["INSPIRED * songs.get("],
+                  "Data/World/harvest.py": ["druid_harvest_bonus(conn, world_id)"],
+                  "Data/Monsters/travelers.py": ["calmed(lair, homes)"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1508,6 +1520,61 @@ def _smoke_body(r, holder):
 
         run_step(r, "skills in place: adults start with their years of work, and only fighting skill makes a fighter", skills_in_place)
 
+        def magic_works():
+            import Data.Combat.melee as ML
+            from Data.Magic import magic as MG
+            from Data.Monsters.bestiary import by_name
+            # who casts: two skill levels a casting level, hedge casters at half, no class no magic
+            assert MG.casting_level("Wizard", "Mage", {"Arcane Knowledge": 13}) == 7, "a master mage does not cast at level 7"
+            assert MG.casting_level("Druid", "Farmer", {"Healing": 13}) == 3, "a farmer-druid does not cast as a hedge caster (half)"
+            assert MG.casting_level("Fighter", "Mage", {"Arcane Knowledge": 13}) == 0, "a fighter cast spells"
+            assert MG.per_day("Wizard", 5) == [4, 2, 1] and MG.per_day("Sorcerer", 5) == [5, 3, 2], "spells a day do not follow the book"
+            assert MG.known("Sorcerer", 7) == MG.known("Sorcerer", 7), "a sorcerer forgot their spells overnight"
+            assert all(len(v) <= MG.SORCERER_KINDS for v in MG.known("Sorcerer", 7).values()), "a sorcerer knows the whole wizard list"
+            # in fights: a master wizard turns a fight soldiers would lose
+            mage = lambda: ML.person_fighter({"id": 9, "name": "w", "profession": "Mage", "class": "Wizard"}, skills={"Arcane Knowledge": 13})
+            assert mage().spells and mage().caster_level == 7, "a mage came to the fight without spells"
+            soldiers = lambda n: [ML.person_fighter({"id": i, "name": "s", "profession": "Soldier", "class": "None"},
+                                                    skills={"Swordsmanship": 9}) for i in range(n)]
+            orcs = lambda: ML.monster_fighters(by_name("Orc"), 20, 5)
+            plain = sum(ML.battle(orcs(), soldiers(6))["winner"] == "b" for _ in range(200))
+            magic = sum(ML.battle(orcs(), soldiers(5) + [mage()])["winner"] == "b" for _ in range(200))
+            assert magic > plain + 60, f"a master wizard did not turn the fight ({plain} wins without, {magic} with)"
+            sleepy = ML.monster_fighters(by_name("Orc"), 4, 5)
+            MG.cast(mage(), "Sleep", {"effect": "sleep", "hit_dice": [16, 16], "max_hit_dice_each": 4}, [], sleepy, {}, {})
+            assert all(o.held for o in sleepy), "Sleep did not put four orcs to sleep"
+            # bards sing, clerics heal in the fight
+            bard = ML.person_fighter({"id": 8, "name": "b", "profession": "Mage", "class": "Bard"}, skills={"Charisma": 13})
+            side = soldiers(3) + [bard]
+            state = {"morale": 0.5, "blessed": set()}
+            assert MG.inspire(side, state) == 2 and state["morale"] > 0.5 and side[0].to_hit == 2, "a master bard's song did nothing"
+            # healing in town: a cleric heals the worst wounded
+            from Data.Infrastructure.travel import get_traveling_npc_ids
+            from Data.Government.armies import get_army_npc_ids
+            away = set(get_traveling_npc_ids(conn, world_id)) | set(get_army_npc_ids(conn, world_id))   # healers heal at home
+            healer = next((h for h in conn.execute(
+                """SELECT n.id, n.city_id FROM npcs n WHERE n.alive = 1 AND n.class = 'Cleric' AND n.age >= 16
+                   AND (SELECT level FROM npc_skills s WHERE s.npc_id = n.id AND s.skill_name = 'Religion') >= 3""")
+                           if h[0] not in away), None)
+            patient = healer and next((p[0] for p in conn.execute("SELECT id FROM npcs WHERE alive = 1 AND city_id = ? AND id != ?",
+                                                                  (healer[1], healer[0])) if p[0] not in away), None)
+            if patient:
+                conn.execute("UPDATE npcs SET health = 100 WHERE city_id = ?", (healer[1],))
+                conn.execute("UPDATE npcs SET health = 30 WHERE id = ?", (patient,))
+                done = MG.heal_the_wounded(conn, world_id)
+                after = conn.execute("SELECT health FROM npcs WHERE id = ?", (patient,)).fetchone()[0]
+                assert after > 30 and done.get(healer[1]), f"a town's cleric did not heal its wounded (health {after})"
+            # druids tend fields (never more than Plant Growth's share) and calm beasts near them
+            bonus = MG.druid_harvest_bonus(conn, world_id)
+            assert all(0 < b <= MG.PLANT_GROWTH_HARVEST for b in bonus.values()), "a druid's harvest bonus is out of bounds"
+            homes = MG.druid_homes(conn, world_id)
+            if homes:
+                x, y = homes[0]
+                assert MG.calmed({"map_x": x + 10, "map_y": y}, homes), "a lair beside a druid's home is not calmed"
+            assert not MG.calmed({"map_x": -10 ** 6, "map_y": -10 ** 6}, homes), "a lair far from any druid is calmed"
+
+        run_step(r, "magic by the book: casters cast in fights, heal the wounded, bards inspire, druids tend fields and calm beasts", magic_works)
+
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
             try:
@@ -1617,8 +1684,12 @@ def _smoke_body(r, holder):
             conn.execute("UPDATE npcs SET fed = 1, gold = 500, needs_stress = 0, needs_happiness = 100, profession = ? WHERE id = ?", (smith, content))
             conn.execute("UPDATE npcs SET fed = 0, gold = 0, needs_stress = 60, needs_happiness = 100, profession = 'Laborer', workplace_id = NULL, home_id = NULL WHERE id = ?", (lonely,))
             conn.commit()
-            for _ in range(30):
-                CT.drift_happiness(conn, world_id, today(conn, world_id))
+            songs, CT.INSPIRED = CT.INSPIRED, 0                      # a bard in town would lift both: this step weighs life alone
+            try:
+                for _ in range(30):
+                    CT.drift_happiness(conn, world_id, today(conn, world_id))
+            finally:
+                CT.INSPIRED = songs
             happy = lambda i: conn.execute("SELECT needs_happiness FROM npcs WHERE id = ?", (i,)).fetchone()[0]
             assert 70 <= happy(content) < 100, f"a fed, housed, married tradesman's happiness did not settle where life puts it ({happy(content)})"
             assert happy(lonely) <= 40, f"a hungry, homeless, penniless laborer is still at {happy(lonely)} after a month"
@@ -1713,9 +1784,12 @@ def _smoke_body(r, holder):
 
             farmland = {r["id"]: r["farmland"] for r in regions}
             from Data.Government.feudal import LORD_SHARE
+            from Data.Magic.magic import druid_harvest_bonus
+            tended = druid_harvest_bonus(conn, world_id)               # druids tend some villages' fields
             tax = {}
             for v in villages:
-                reaped = v["households"] * H.HARVEST_PER_HOUSEHOLD * farmland[v["region_id"]] * weather[v["region_id"]]
+                reaped = (v["households"] * H.HARVEST_PER_HOUSEHOLD * farmland[v["region_id"]] * weather[v["region_id"]]
+                          * (1 + tended.get(v["id"], 0)))
                 crowns_share = 1.0 if v["province_id"] is None else 1.0 - LORD_SHARE   # counties' lords keep theirs
                 tax[v["kingdom_id"]] = tax.get(v["kingdom_id"], 0) + reaped * H.GRAIN_TAX_SHARE * crowns_share
             for kingdom_id, expected in tax.items():
@@ -2356,17 +2430,25 @@ def _smoke_body(r, holder):
         ruled = {row["id"]: row["ruler_id"] for row in conn.execute(
             "SELECT c.id, c.ruler_id FROM cities c JOIN npcs n ON n.id = c.ruler_id WHERE n.alive = 1")}
         entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
-        import Data.Monsters.raids as raids_module                  # a raid is no quiet month: none this time
+        import Data.Monsters.raids as raids_module                  # a raid is no quiet month: none this time...
+        import Data.Government.rebellion as rebellion_module        # ...and nor is a lord's rising
         raids_held, raids_module.RAID_CHANCE = raids_module.RAID_CHANCE, 0.0
+        risings_held, rebellion_module.RISING_CHANCE_AT_ZERO = rebellion_module.RISING_CHANCE_AT_ZERO, 0.0
         try:
             manager.on_month()
         finally:
             raids_module.RAID_CHANCE = raids_held
+            rebellion_module.RISING_CHANCE_AT_ZERO = risings_held
         replaced = [cid for cid, rid in ruled.items()
                     if conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (cid,)).fetchone()[0] != rid]
         assert not replaced, f"a quiet month replaced {len(replaced)} living rulers (rulers are not being saved)"
         entries_after = conn.execute("SELECT COUNT(*) FROM chronicle_entries").fetchone()[0]
-        assert entries_after == entries_before, "a quiet month added chronicle entries (the founding coronation is being written again)"
+        if entries_after != entries_before:
+            added = [(row["kingdom_id"], row["event_type"], row["text"][:160]) for row in conn.execute(
+                "SELECT * FROM chronicle_entries ORDER BY id DESC LIMIT ?", (entries_after - entries_before,))]
+            dead_monarchs = [k["name"] for k in conn.execute(
+                "SELECT k.name FROM kingdoms k JOIN npcs n ON n.id = k.ruler_id WHERE n.alive = 0")]
+            raise AssertionError(f"a quiet month added chronicle entries: {added}; monarchs dead now: {dead_monarchs}")
 
     run_step(r, "rulers are saved, each realm's founding monarch is chronicled once", rulers_saved)
 
@@ -2919,12 +3001,13 @@ def _smoke_body(r, holder):
         lair = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
                               VALUES (?, 'Wolf', 'beast', ?, ?, 60, 9, 'Active')""", (world_id, spot[0] + 10, spot[1])).lastrowid
         conn.commit()
-        saved = TV.AMBUSH_CHANCE
-        TV.AMBUSH_CHANCE = 1.0
+        import Data.Magic.magic as MG
+        saved, calm = TV.AMBUSH_CHANCE, MG.CALM_SHARE
+        TV.AMBUSH_CHANCE, MG.CALM_SHARE = 1.0, 1.0           # a druid nearby would calm the wolves: not today
         try:
             reports = [r for r in TV.beasts_on_the_roads(conn, world_id) if r["kind"] == "caravan" and r["id"] == caravan["id"]]
         finally:
-            TV.AMBUSH_CHANCE = saved
+            TV.AMBUSH_CHANCE, MG.CALM_SHARE = saved, calm
         assert reports, "wolves beside a caravan's road did not fall on it"
         rep = reports[0]
         status = conn.execute("SELECT status FROM caravans WHERE id = ?", (caravan["id"],)).fetchone()[0]

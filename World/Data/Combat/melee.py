@@ -12,6 +12,11 @@ Fighting by the book: AD&D (first edition) melee, round by round.
              number breaks and flees -- unless it is mindless (intelligence 0:
              undead, oozes, golems), which fight to the end.
 
+Magic (Data.Magic.magic): casters cast their day's spells instead of
+swinging -- healing, harm, sleep and holding, blessings; bards sing their side
+into battle. Sleeping and held fighters do not fight and are hit by every
+blow; a routed one has left the field (alive, but out of the fight).
+
 Kept for later: special attacks (breath weapons, poison, paralysis) are text
 in the book and need their own rules; monsters fight with their attacks only.
 """
@@ -80,13 +85,28 @@ class Fighter:
     mindless: bool = False
     ref: object = None             # the NPC id or the lair id it stands for
     max_hp: float = 0.0
+    hit_dice: float = 1            # for spells: sleep and the like reach the weaker first
+    nature: str = "person"         # person, humanoid (orcs and their like), beast or monster: what a hold spell can grip
+    to_hit: int = 0                # blessings and songs (and curses)
+    held: int = 0                  # rounds still asleep or held
+    out: bool = False              # routed: fled the field
+    damage_scale: float = 1.0      # weakened
+    spells: list = field(default_factory=list)
+    caster_level: int = 0
+    inspires: int = 0              # a bard's song
+    guarded: bool = False          # has cast their shield (or their club) already
+    cast: int = 0                  # spells cast this fight
 
     def __post_init__(self):
         self.max_hp = self.max_hp or self.hp
 
     @property
     def alive(self):
-        return self.hp > 0
+        return self.hp > 0 and not self.out
+
+    @property
+    def fallen(self):
+        return self.hp <= 0
 
 
 def monster_fighters(monster, count, hp_each, side="monsters", ref=None):
@@ -98,7 +118,11 @@ def monster_fighters(monster, count, hp_each, side="monsters", ref=None):
     ac = stats.get("ac") if stats.get("ac") is not None else 10
     thac0 = monster_thac0(stats.get("hit_dice"), stats.get("hit_dice_bonus") or 0)
     mindless = monster.get("intelligence_level", 1) == 0
-    return [Fighter(monster["name"], side, hp_each, ac, thac0, attacks, mindless, ref) for _ in range(count)]
+    hd = stats.get("hit_dice") or 1
+    kind = monster.get("kind")
+    nature = "beast" if kind in ("beast", "mundane") else "humanoid" if kind in ("raider", "people") and hd <= 4 else "monster"
+    return [Fighter(monster["name"], side, hp_each, ac, thac0, attacks, mindless, ref, hit_dice=hd, nature=nature)
+            for _ in range(count)]
 
 
 def person_fighter(npc, side="people", armored=False, skills=None):
@@ -112,7 +136,11 @@ def person_fighter(npc, side="people", armored=False, skills=None):
     if skills.get("Shield"):
         ac -= 1
     hp = HP_COMMONER if level <= 0 else HP_PER_LEVEL * level
-    return Fighter(npc.get("name", "?"), side, hp, ac, person_thac0(level), [weapon], False, npc.get("id"))
+    fighter = Fighter(npc.get("name", "?"), side, hp, ac, person_thac0(level), [weapon], False, npc.get("id"),
+                      hit_dice=max(0, level))
+    from Data.Magic.magic import casting_level, arm_caster       # casters fight with their spells
+    casting = casting_level(npc.get("class"), npc.get("profession"), skills)
+    return arm_caster(fighter, npc.get("class"), casting, npc.get("id")) if casting else fighter
 
 
 def roll(lo, hi):
@@ -124,16 +152,20 @@ def attack_all(attacker, target):
     done = 0
     for lo, hi in attacker.attacks:
         die = random.randint(1, 20)
-        if die == 20 or (die != 1 and die >= attacker.thac0 - target.ac):
-            done += roll(lo, hi)
+        if target.held or die == 20 or (die != 1 and die + attacker.to_hit >= attacker.thac0 - target.ac):
+            done += roll(lo, hi) * attacker.damage_scale
     return done
 
 
 def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
     """Fights it out. Returns {"winner": "a" | "b" | None, "rounds", "fled": "a" | "b" | None, "a": survivors, "b": survivors,
     "dead_a": [...], "dead_b": [...]}."""
+    from Data.Magic.magic import cast_in_battle, inspire
     start = {"a": len(side_a), "b": len(side_b)}
     sides = {"a": side_a, "b": side_b}
+    state = {k: {"morale": morale, "blessed": set()} for k in sides}
+    for k in sides:                                                # bards sing their side into the fight
+        inspire(sides[k], state[k])
     fled = None
     rounds = 0
     for rounds in range(1, max_rounds + 1):
@@ -143,17 +175,22 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
             if not foes:
                 break
             for fighter in sides[me]:
-                if fighter.alive:
-                    target = random.choice(foes)
+                if fighter.alive and not fighter.held:
+                    if fighter.spells and cast_in_battle(fighter, sides[me], sides[them], state[me], state[them]):
+                        continue                                   # a spell, this round, instead of a blow
+                    targets = [f for f in foes if f.alive] or foes
+                    target = random.choice(targets)
                     harm[id(target)] = harm.get(id(target), 0) + attack_all(fighter, target)
         for fighter in side_a + side_b:                            # blows land together
             fighter.hp -= harm.get(id(fighter), 0)
+            if fighter.held:
+                fighter.held -= 1
         alive = {k: [f for f in v if f.alive] for k, v in sides.items()}
         if not alive["a"] or not alive["b"]:
             break
         for k in ("a", "b"):                                       # a side that has lost half its number breaks
             lost = 1 - len(alive[k]) / max(1, start[k])
-            if lost >= morale and not all(f.mindless for f in alive[k]):
+            if lost >= state[k]["morale"] and not all(f.mindless for f in alive[k]):
                 fled = k
                 break
         if fled:
@@ -168,4 +205,4 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
     else:
         winner = None
     return {"winner": winner, "rounds": rounds, "fled": fled, "a": alive["a"], "b": alive["b"],
-            "dead_a": [f for f in side_a if not f.alive], "dead_b": [f for f in side_b if not f.alive]}
+            "dead_a": [f for f in side_a if f.fallen], "dead_b": [f for f in side_b if f.fallen]}

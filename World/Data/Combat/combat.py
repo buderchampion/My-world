@@ -72,9 +72,11 @@ def load_json(file):
 def get_combat_power(npc):
     """A fighter's strength in the older battles (wars, raids, risings): their trade's base (CombatRates.json)
     and two points for each fighting level their training has earned (Data.Combat.melee.fighting_bonus) --
-    fighting skill only: a farmer's Farming does not make them a warrior."""
+    fighting skill only: a farmer's Farming does not make them a warrior -- and as much for each casting
+    level of a caster's magic (Data.Magic.magic)."""
 
     from Data.Combat.melee import fighting_bonus
+    from Data.Magic.magic import casting_level
 
     rates = load_json(COMBAT_RATES)
 
@@ -82,7 +84,11 @@ def get_combat_power(npc):
 
     skills = {name: (s["level"] if isinstance(s, dict) else s) for name, s in (npc.get("skills") or {}).items()}
 
-    return base + 2 * fighting_bonus(skills)
+    return base + 2 * fighting_bonus(skills) + CASTING_POWER * casting_level(npc.get("class"), npc.get("profession"), skills)
+
+
+CASTING_POWER = 2          # a caster's strength in the older battles, for each casting level
+INSPIRE_POWER = 0.1        # a side with a bard singing fights this much harder
 
 
 # Armor. A side's armor share is how much of it is equipped, 0-1 (the suits
@@ -93,7 +99,15 @@ ARMOR_PROTECTION = 0.4     # death and injury chances x (1 - ARMOR_PROTECTION x 
 
 def side_power(fighters, armor_share=0.0):
     """A side's strength in battle: its fighters' combat power, raised by its armor."""
-    return sum(get_combat_power(npc) for npc in fighters) * (1 + ARMOR_POWER * armor_share)
+    from Data.Magic.magic import casting_level
+    singing = any(npc.get("class") == "Bard" and casting_level("Bard", npc.get("profession"), _skill_levels(npc)) > 0
+                  for npc in fighters)
+    return (sum(get_combat_power(npc) for npc in fighters) * (1 + ARMOR_POWER * armor_share)
+            * (1 + INSPIRE_POWER * singing))
+
+
+def _skill_levels(npc):
+    return {name: (s["level"] if isinstance(s, dict) else s) for name, s in (npc.get("skills") or {}).items()}
 
 
 def armor_share(suits, fighters):

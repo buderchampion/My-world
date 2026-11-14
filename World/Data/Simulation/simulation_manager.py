@@ -298,6 +298,10 @@ class SimulationManager:
 
         # Everyone's happiness drifts toward what their life is like, now the day's meals are bought
         # (Data.NPCS.contentment).
+        # Each town's clerics, druids and bards heal its worst wounded (Data.Magic.magic).
+        from Data.Magic.magic import heal_the_wounded
+        heal_the_wounded(self.conn, self.world_id)
+
         from Data.NPCS.contentment import drift_happiness
         from Data.Government.edicts import today as contentment_day
         drift_happiness(self.conn, self.world_id, contentment_day(self.conn, self.world_id))
