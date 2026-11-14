@@ -21,9 +21,8 @@ RESUPPLY_SAFETY_DAYS = 5
 # The capital never sends away its last few days of its own Food.
 HOME_FOOD_RESERVE_DAYS = 3
 
-# The same daily chance of being raided as a trade caravan
-# (Data.Infrastructure.caravans.CARAVAN_RAID_CHANCE_PER_DAY).
-from Data.Infrastructure.caravans import CARAVAN_RAID_CHANCE_PER_DAY as SUPPLY_RAID_CHANCE_PER_DAY
+# Raided like a trade caravan: by bandits near their camps (Data.Infrastructure.caravans).
+from Data.Infrastructure.caravans import bandit_camps, bandit_chance
 
 ACTIVE = ("En Route", "Returning")
 
@@ -251,11 +250,19 @@ def advance_supply_lines(conn, world_id):
         (world_id, *ACTIVE)
     ).fetchall()
 
+    from Data.Monsters.travelers import _positions, _along
+    camps = bandit_camps(conn, world_id)
+    towns, road_days = _positions(conn, world_id)
+
     for row in caravans:
 
         caravan = dict(row)
+        if caravan.get("next_city_id"):
+            here = _along(towns, road_days, caravan["location_city_id"], caravan["next_city_id"], caravan["leg_days_remaining"])
+        else:
+            here = towns.get(caravan["location_city_id"])
 
-        if random.random() < SUPPLY_RAID_CHANCE_PER_DAY:
+        if random.random() < bandit_chance(camps, here):
             army = get_army(conn, caravan["army_id"])
             lost = [f"{caravan[k]:.0f} {name}" for k, name in (("food", "Food"), ("weapons", "Weapons"), ("potions", "Potions"))
                     if caravan[k] >= 0.5]

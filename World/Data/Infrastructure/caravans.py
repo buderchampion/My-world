@@ -1,7 +1,29 @@
 import random
 
-CARAVAN_RAID_CHANCE_PER_DAY = 0.03
+# Bandits strike near their camps (Bandit Camp buildings with bandits in them):
+# each day, a caravan within BANDIT_REACH of such a camp is raided with
+# BANDIT_CHANCE for each camp near enough. Far from any camp -- the deep wilds,
+# where the beasts are (Data.Monsters.travelers) -- bandits do not reach.
+BANDIT_REACH = 300
+BANDIT_CHANCE = 0.005
 FALLBACK_TRAVEL_DAYS = 5
+
+
+def bandit_camps(conn, world_id):
+    """Where bandits are: the map positions of every Bandit Camp with living bandits in it."""
+    return [(r[0], r[1]) for r in conn.execute(
+        """SELECT c.map_x, c.map_y FROM buildings b JOIN cities c ON c.id = b.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+           WHERE k.world_id = ? AND b.type = 'Bandit Camp'
+             AND EXISTS (SELECT 1 FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1)""", (world_id,))]
+
+
+def bandit_chance(camps, point):
+    """Today's chance that bandits strike a traveller at `point`: BANDIT_CHANCE for each camp within reach."""
+    if point is None:
+        return 0.0
+    x, y = point
+    near = sum(1 for cx, cy in camps if (cx - x) ** 2 + (cy - y) ** 2 <= BANDIT_REACH ** 2)
+    return 1 - (1 - BANDIT_CHANCE) ** near
 
 
 def get_travel_days(conn, city_a_id, city_b_id):
@@ -70,9 +92,14 @@ def advance_caravans(conn, world_id):
     raided = []
     seized = []
 
+    from Data.Monsters.travelers import _positions, _along
+    camps = bandit_camps(conn, world_id)
+    towns, road_days = _positions(conn, world_id)
+
     for caravan in get_active_caravans(conn, world_id):
 
-        if random.random() < CARAVAN_RAID_CHANCE_PER_DAY:
+        here = _along(towns, road_days, caravan["origin_city_id"], caravan["destination_city_id"], caravan["days_remaining"])
+        if random.random() < bandit_chance(camps, here):
             set_caravan_status(conn, caravan["id"], "Raided")
             origin = get_city(conn, caravan["origin_city_id"])
             destination = get_city(conn, caravan["destination_city_id"])

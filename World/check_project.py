@@ -597,6 +597,11 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["beasts_on_the_roads(self.conn"]},
     },
     {
+        "name": "Bandits strike caravans only near their camps, at half a percent a day per camp in reach",
+        "functions": {"Data/Infrastructure/caravans.py": ["bandit_camps", "bandit_chance"]},
+        "wired": {"Data/Infrastructure/caravans.py": ["bandit_chance(camps, here)"], "Data/Government/supply.py": ["bandit_chance(camps, here)"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -2768,8 +2773,8 @@ def _smoke_body(r, holder):
         save_city(conn, capital)
         conn.commit()
         army = A.raise_army(conn, k_att, get_city(conn, k_att["capital"]), size=3)
-        saved_raids = CV.CARAVAN_RAID_CHANCE_PER_DAY
-        CV.CARAVAN_RAID_CHANCE_PER_DAY = 0.0
+        saved_raids = CV.BANDIT_CHANCE
+        CV.BANDIT_CHANCE = 0.0
         try:
             caravan = CV.dispatch_caravan(conn, k_def["capital"], town, "Food", 400, k_def["id"], k_def["id"])
             assert caravan, "(setup) the caravan did not set out"
@@ -2788,7 +2793,7 @@ def _smoke_body(r, holder):
             assert CV.dispatch_caravan(conn, k_def["capital"], town, "Food", 100, k_def["id"], k_def["id"]) is None, \
                 "a caravan set out for a besieged town"
         finally:
-            CV.CARAVAN_RAID_CHANCE_PER_DAY = saved_raids
+            CV.BANDIT_CHANCE = saved_raids
             conn.execute("UPDATE campaigns SET status = 'Over' WHERE army_id = ?", (army["id"],))
             A.disband_army(conn, army["id"])
             conn.commit()
@@ -2903,6 +2908,18 @@ def _smoke_body(r, holder):
         conn.commit()
 
     run_step(r, "beasts near a road fall on caravans and travelers; the beaten lose their goods or lives, the lair its fallen", beasts_and_travelers)
+
+    def bandits_near_camps():
+        import Data.Infrastructure.caravans as CV
+        camps = CV.bandit_camps(conn, world_id)
+        assert camps, "no bandit camp in the world has bandits in it"
+        x, y = camps[0]
+        assert CV.bandit_chance(camps, (x, y)) >= CV.BANDIT_CHANCE, "bandits do not threaten the road beside their own camp"
+        far = (x + 10 * CV.BANDIT_REACH, y + 10 * CV.BANDIT_REACH)
+        assert CV.bandit_chance([(x, y)], far) == 0, "bandits strike far from any camp"
+        assert CV.bandit_chance([(x, y), (x + 1, y)], (x, y)) > CV.bandit_chance([(x, y)], (x, y)), "two camps near a road are no worse than one"
+
+    run_step(r, "bandits strike caravans only near their camps, more where camps cluster", bandits_near_camps)
 
     def armor_protects():
         import random as random_module
@@ -3446,7 +3463,7 @@ def _smoke_body(r, holder):
         assert threshold == max(S.RESUPPLY_BELOW_DAYS, journey + S.RESUPPLY_SAFETY_DAYS), \
             f"an army {journey} days from home asks at {threshold} days of Food, not its journey plus the safety margin"
 
-        real_random = S.random
+        real_random, real_bandit_chance = S.random, S.bandit_chance
         S.random = Dice(0.99)          # no raids, so the delivery is certain
         try:
             conn.execute("UPDATE armies SET food = 10 WHERE id = ?", (army["id"],))
@@ -3473,13 +3490,15 @@ def _smoke_body(r, holder):
 
             conn.execute("UPDATE armies SET food = 10 WHERE id = ?", (army["id"],))
             conn.commit()
-            S.random = Dice(0.0)       # this one is raided
+            S.random = Dice(0.0)       # this one is raided...
+            S.bandit_chance = lambda camps, here: 1.0      # ...its road within bandits' reach, wherever the camps are
             S.advance_supply_lines(conn, kingdom["world_id"])
             raided = conn.execute("SELECT COUNT(*) FROM supply_caravans WHERE army_id = ? AND status = 'Raided'", (army["id"],)).fetchone()[0]
             logged = conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Supply Raided'").fetchone()[0]
             assert raided == 1 and logged >= 1, "a raided supply caravan was not lost, or the raid was not logged"
         finally:
             S.random = real_random
+            S.bandit_chance = real_bandit_chance
 
     if len(kingdoms) >= 2:
         run_step(r, "a supply caravan reaches an army in the field at road speed, and can be raided", supply_lines)
