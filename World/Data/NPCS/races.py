@@ -186,3 +186,159 @@ def peoples_of(conn, city_ids):
                             GROUP BY r ORDER BY n DESC""", list(city_ids)).fetchall()
     total = sum(r[1] for r in rows) or 1
     return [(r[0], r[1] / total) for r in rows]
+
+
+# ---------------------------------------------------------------- classes and their limits (the Player's Handbook)
+
+def classes_open(race):
+    """{class: highest level (None: no limit)} its people can follow."""
+    return race_of(race).get("classes") or {}
+
+
+def level_limit(race, npc_class):
+    """The highest level someone of this people can reach in this class (None: no limit; 0: closed to them)."""
+    open_ = classes_open(race)
+    if not open_ or npc_class in (None, "None"):
+        return None
+    if npc_class not in open_:
+        return 0
+    return open_[npc_class]
+
+
+def fighting_limit(race):
+    """The highest fighting level their people reach (as fighters): None for no limit."""
+    limit = level_limit(race, "Fighter")
+    return None if limit == 0 else limit
+
+
+@lru_cache(maxsize=1)
+def _profession_classes():
+    with open(Path(__file__).with_name("ProfessionClasses.json"), encoding="utf-8") as f:
+        return json.load(f)
+
+
+def suited_class(race, npc_class, profession=None):
+    """`npc_class` if their people can follow it; otherwise another their trade allows, or none (a dwarf is never a monk)."""
+    if npc_class in (None, "None") or level_limit(race, npc_class) != 0:
+        return npc_class
+    choices = (_profession_classes().get(profession) or {}).get("classes") or []
+    fitting = [c for c in choices if c != "None" and level_limit(race, c) != 0]
+    return random.choice(fitting) if fitting else "None"
+
+
+# ---------------------------------------------------------------- abilities in a fight
+
+FIRE_SPELLS = {"Fireball", "Burning Hands", "Produce Flame", "Flame Strike"}
+
+
+def abilities(race):
+    return race_of(race).get("abilities") or {}
+
+
+def _is_kind(fighter, kind):
+    """Is this fighter (a monster by its name, a person by their people) one of `kind`: "Giant" means the giants
+    themselves (Hill Giant, Giant), not giant beetles."""
+    if getattr(fighter, "race", None) == kind:
+        return True
+    if getattr(fighter, "race", None):
+        return False
+    name = fighter.name or ""
+    if kind == "Giant":
+        return name == "Giant" or (name.endswith(" Giant") and "," not in name)
+    return name == kind or name.startswith(kind + " ") or name.startswith(kind + ",")
+
+
+def to_hit_bonus(attacker, target):
+    """The book's edge in a blow: an elf's sword arm, a dwarf against orcs; and a giant's trouble hitting a dwarf."""
+    bonus = 0
+    mine = abilities(getattr(attacker, "race", None)) if getattr(attacker, "race", None) else {}
+    bonus += mine.get("to_hit", 0)
+    if any(_is_kind(target, k) for k in mine.get("to_hit_vs", [])):
+        bonus += 1
+    theirs = abilities(getattr(target, "race", None)) if getattr(target, "race", None) else {}
+    if any(_is_kind(attacker, k) for k in theirs.get("dodge_vs", [])):
+        bonus -= 4
+    return bonus
+
+
+def save_bonus(race):
+    return abilities(race).get("save_vs_magic", 0) if race else 0
+
+
+def resists_sleep(race):
+    return bool(race) and random.random() < abilities(race).get("resist_sleep", 0)
+
+
+def fire_share(race):
+    """The share of fire's harm that reaches them (tieflings: half)."""
+    return 1 - abilities(race).get("resist_fire", 0) if race else 1
+
+
+def racial_powers(race):
+    """Powers of their blood, cast in a fight like spells (once each): a dragonborn's breath, a tiefling's rebuke."""
+    a = abilities(race)
+    out = []
+    if a.get("breath"):
+        out.append((0, "Dragon Breath", {"effect": "damage", "dice": a["breath"]["dice"], "targets": a["breath"]["targets"],
+                                         "save_half": True}))
+    if a.get("rebuke"):
+        out.append((0, "Hellish Rebuke", {"effect": "damage", "dice": a["rebuke"]["dice"], "targets": a["rebuke"]["targets"],
+                                          "save_half": True}))
+    return out
+
+
+# ---------------------------------------------------------------- how peoples feel about each other
+
+SAME_PEOPLE = 20                 # a people's feeling for its own
+FRIENDSHIP_SWAY = 50.0           # how much feelings between peoples sway friendships: +/- (attitude / this) of the odds
+PEACE_SWAY = 50.0                # and how fast peace warms two kingdoms of different peoples
+
+
+def attitude(race_a, race_b):
+    """How people of race_a feel about people of race_b (directional): + warmer, - colder."""
+    race_a, race_b = race_a or HUMAN, race_b or HUMAN
+    if race_a == race_b:
+        return SAME_PEOPLE
+    return (race_of(race_a).get("attitudes") or {}).get(race_b, 0)
+
+
+def kingdom_attitude(conn, from_kingdom_id, to_kingdom_id):
+    return attitude(kingdom_race(conn, from_kingdom_id), kingdom_race(conn, to_kingdom_id))
+
+
+def seed_world_feelings(conn, world_id):
+    """At the world's founding: every kingdom's first feelings toward every other, by their peoples."""
+    from Data.Database.repository import adjust_kingdom_favor
+    ids = [r[0] for r in conn.execute("SELECT id FROM kingdoms WHERE world_id = ?", (world_id,))]
+    for a in ids:
+        for b in ids:
+            if a != b:
+                adjust_kingdom_favor(conn, a, b, kingdom_attitude(conn, a, b))
+    conn.commit()
+    return len(ids)
+
+
+def seed_kingdom_feelings(conn, kingdom_id):
+    """A kingdom's first feelings toward the others, and theirs toward it, from how their peoples feel about each
+    other: dwarves start cold toward an elf kingdom, everyone toward the orcs."""
+    from Data.Database.repository import adjust_kingdom_favor
+    others = conn.execute("""SELECT id FROM kingdoms WHERE id != ? AND status != 'Fallen'
+                             AND world_id = (SELECT world_id FROM kingdoms WHERE id = ?)""", (kingdom_id, kingdom_id)).fetchall()
+    for (other,) in others:
+        adjust_kingdom_favor(conn, kingdom_id, other, kingdom_attitude(conn, kingdom_id, other))
+        adjust_kingdom_favor(conn, other, kingdom_id, kingdom_attitude(conn, other, kingdom_id))
+    return len(others)
+
+
+def peace_factor(conn, from_kingdom_id, to_kingdom_id):
+    """How fast peace warms one kingdom to another, by their peoples (1 alike-minded, less for old enemies)."""
+    return max(0.25, min(1.5, 1 + kingdom_attitude(conn, from_kingdom_id, to_kingdom_id) / PEACE_SWAY))
+
+
+def realm_name(race, taken, fallback):
+    """A new realm's name in its people's tongue (fallback: the human lists)."""
+    for _ in range(50):
+        name = place_name(race, taken) or fallback()
+        if name not in taken:
+            return name
+    return None

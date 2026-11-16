@@ -49,14 +49,20 @@ def apply_grief(conn, deceased_npc):
     return True
 
 
-def roll_relationship():
+def roll_relationship(attitude=0):
+    """A new acquaintance: friend, rival or neither. Between people of different peoples, how their peoples
+    feel about each other (Data.NPCS.races.attitude) sways the odds: a dwarf and an elf befriend less often."""
+
+    sway = 0.0 if attitude >= 20 else attitude / 50.0           # their own people (20): the plain odds
+    friend = max(0.05, FRIEND_CHANCE * (1 + sway))
+    rival = max(0.02, RIVAL_CHANCE * (1 - sway))
 
     roll = random.random()
 
-    if roll < FRIEND_CHANCE:
+    if roll < friend:
         return "Friend", random.randint(40, 90)
 
-    if roll < FRIEND_CHANCE + RIVAL_CHANCE:
+    if roll < friend + rival:
         return "Rival", random.randint(-80, -30)
 
     return "Acquaintance", random.randint(-10, 10)
@@ -243,7 +249,8 @@ def link(conn, npc_a, npc_b):
     if str(npc_b["id"]) in npc_a.get("relationships", {}):
         return
 
-    rel_type, reputation = roll_relationship()
+    from Data.NPCS.races import attitude
+    rel_type, reputation = roll_relationship(attitude(npc_a.get("race"), npc_b.get("race")))
 
     set_relationship(conn, npc_a["id"], npc_b["id"], rel_type, reputation, origin="became coworkers")
 

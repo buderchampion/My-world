@@ -114,11 +114,15 @@ def settle(conn, world_id, kingdom, source, region):
 
     home_kingdom = kingdom["id"]
     if new_realm:
+        from Data.NPCS.races import realm_name, seed_kingdom_feelings, kingdom_race
         world_kingdoms = {row[0] for row in conn.execute("SELECT name FROM kingdoms WHERE world_id = ?", (world_id,))}
-        name = next((n for n in (generate_kingdom_name() for _ in range(50)) if n not in world_kingdoms), "Freehold")
+        race = kingdom_race(conn, kingdom["id"])                    # the settlers' people, and its tongue
+        name = realm_name(race, world_kingdoms, generate_kingdom_name) or "Freehold"
         used = {row[0] for row in conn.execute("SELECT color FROM kingdoms WHERE world_id = ?", (world_id,))}
         color = next((c for c in KINGDOM_COLORS if c not in used), "#%06X" % random.randint(0, 0xFFFFFF))
         home_kingdom = create_kingdom(conn, world_id, name, color)["id"]
+        conn.execute("UPDATE kingdoms SET race = ? WHERE id = ?", (race, home_kingdom))
+        seed_kingdom_feelings(conn, home_kingdom)
 
     village = generate_city(conn, home_kingdom, "Village", x, y, biases, population=named)
     settlers = max(0.0, party - named / FAMILY_SIZE)            # the named villagers came from the party too

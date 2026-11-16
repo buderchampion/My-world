@@ -15,6 +15,7 @@ def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=N
     from Data.NPCS import races
     traits = traits or random_traits()
     race = race or races.choose_person_race(races.city_race(conn, city_id))
+    npc_class = races.suited_class(race, npc_class, profession)      # a dwarf is never a monk (the Player's Handbook)
     if race != races.HUMAN:
         name = races.given_name(race, gender)
 

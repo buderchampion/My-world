@@ -96,6 +96,7 @@ class Fighter:
     inspires: int = 0              # a bard's song
     guarded: bool = False          # has cast their shield (or their club) already
     cast: int = 0                  # spells cast this fight
+    race: str = ""                 # a person's people (Data.NPCS.races): the book's edge in a fight; "" for monsters
 
     def __post_init__(self):
         self.max_hp = self.max_hp or self.hp
@@ -130,17 +131,25 @@ def person_fighter(npc, side="people", armored=False, skills=None):
     level, ac, weapon = TRADES.get(npc.get("profession"), COMMONER)
     skills = skills if skills is not None else {k: v.get("level", 1) if isinstance(v, dict) else v
                                                 for k, v in (npc.get("skills") or {}).items()}
+    from Data.NPCS import races
+    race = npc.get("race") or races.HUMAN
     level = fighting_level(level, skills)                          # training: two Swordsmanship levels per fighting level
+    limit = races.fighting_limit(race)                             # ...up to their people's limit (a halfling's is 6)
+    if limit is not None:
+        level = min(level, limit)
     if armored:
         ac = min(ac, ARMORED_AC)
     if skills.get("Shield"):
         ac -= 1
     hp = HP_COMMONER if level <= 0 else HP_PER_LEVEL * level
     fighter = Fighter(npc.get("name", "?"), side, hp, ac, person_thac0(level), [weapon], False, npc.get("id"),
-                      hit_dice=max(0, level))
+                      hit_dice=max(0, level), race=race)
     from Data.Magic.magic import casting_level, arm_caster       # casters fight with their spells
-    casting = casting_level(npc.get("class"), npc.get("profession"), skills)
-    return arm_caster(fighter, npc.get("class"), casting, npc.get("id")) if casting else fighter
+    casting = casting_level(npc.get("class"), npc.get("profession"), skills, race)
+    if casting:
+        arm_caster(fighter, npc.get("class"), casting, npc.get("id"))
+    fighter.spells = fighter.spells + races.racial_powers(race)    # a dragonborn's breath, a tiefling's rebuke
+    return fighter
 
 
 def roll(lo, hi):
@@ -150,9 +159,11 @@ def roll(lo, hi):
 def attack_all(attacker, target):
     """All of one fighter's attacks on one target this round. Returns the damage done."""
     done = 0
+    from Data.NPCS.races import to_hit_bonus
+    edge = to_hit_bonus(attacker, target)          # an elf's sword arm, a dwarf against orcs, a giant swinging at a gnome
     for lo, hi in attacker.attacks:
         die = random.randint(1, 20)
-        if target.held or die == 20 or (die != 1 and die + attacker.to_hit >= attacker.thac0 - target.ac):
+        if target.held or die == 20 or (die != 1 and die + attacker.to_hit + edge >= attacker.thac0 - target.ac):
             done += roll(lo, hi) * attacker.damage_scale
     return done
 

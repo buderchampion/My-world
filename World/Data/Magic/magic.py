@@ -74,8 +74,9 @@ def spell_list(name):
     return {int(k): v for k, v in spells()[name].items() if not k.startswith("_")}
 
 
-def casting_level(npc_class, profession, skills):
-    """0 for someone who casts no spells."""
+def casting_level(npc_class, profession, skills, race=None):
+    """0 for someone who casts no spells. No higher than their people may reach in their class
+    (Data.NPCS.races: an elf wizard stops at 11, a gnome's at 7)."""
     caster = CASTERS.get(npc_class)
     if not caster:
         return 0
@@ -87,6 +88,11 @@ def casting_level(npc_class, profession, skills):
     level = (skill + 1) // SKILL_LEVELS_PER_CASTING_LEVEL
     if profession not in MAGIC_TRADES:
         level = int(level * HEDGE_SHARE)
+    if race:
+        from Data.NPCS.races import level_limit
+        limit = level_limit(race, npc_class)
+        if limit is not None:
+            level = min(level, limit)
     return min(MAX_CASTING_LEVEL, level)
 
 
@@ -143,7 +149,8 @@ def saves(f):
     """A saving throw against a spell: d20 against a number by level or hit dice (as fighters)."""
     level = f.hit_dice or 0
     target = 19 if level < 1 else max(4, 17 - int((level - 1) // 2))
-    return random.randint(1, 20) >= target
+    from Data.NPCS.races import save_bonus
+    return random.randint(1, 20) + save_bonus(getattr(f, "race", "")) >= target   # dwarves, gnomes, halflings: +4
 
 
 def _damage(spell, level):
@@ -233,10 +240,13 @@ def cast(caster, name, spell, allies, foes, mine, theirs):
                     break
                 random.choice(live).hp -= roll(*spell["dice"]) + spell.get("bonus", 0)
             return name
+        from Data.NPCS.races import fire_share, FIRE_SPELLS
         for f in targets[:spell.get("targets", 1)]:
             amount = _damage(spell, level)
             if spell.get("save_half") and saves(f):
                 amount = amount / 2
+            if name in FIRE_SPELLS:
+                amount *= fire_share(getattr(f, "race", ""))          # tieflings shrug off half of fire
             f.hp -= amount
         return name
     if effect in ("sleep", "slay_weak"):
@@ -246,6 +256,9 @@ def cast(caster, name, spell, allies, foes, mine, theirs):
             if cost > budget:
                 break
             budget -= cost
+            from Data.NPCS.races import resists_sleep
+            if effect == "sleep" and resists_sleep(getattr(f, "race", "")):
+                continue                                               # elves shrug off sleep (nine times in ten)
             if effect == "sleep":
                 f.held = 99
             else:
@@ -334,7 +347,7 @@ def casters(conn, world_id, classes=None, city_ids=None):
     classes = list(classes or CASTERS)
     marks = ",".join("?" * len(classes))
     rows = conn.execute(
-        f"""SELECT n.id, n.name, n.class, n.profession, n.city_id, n.health, s.skill_name, s.level
+        f"""SELECT n.id, n.name, n.class, n.profession, n.city_id, n.health, n.race, s.skill_name, s.level
             FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
             JOIN npc_skills s ON s.npc_id = n.id
             WHERE k.world_id = ? AND n.alive = 1 AND n.age >= 16 AND n.class IN ({marks})""",
@@ -343,7 +356,7 @@ def casters(conn, world_id, classes=None, city_ids=None):
     for r in rows:
         if r["skill_name"] != CASTERS[r["class"]][1]:
             continue
-        level = casting_level(r["class"], r["profession"], {r["skill_name"]: r["level"]})
+        level = casting_level(r["class"], r["profession"], {r["skill_name"]: r["level"]}, r["race"])
         if level > 0 and (city_ids is None or r["city_id"] in city_ids):
             found[r["id"]] = {"id": r["id"], "name": r["name"], "class": r["class"], "profession": r["profession"],
                               "city_id": r["city_id"], "health": r["health"], "level": level}

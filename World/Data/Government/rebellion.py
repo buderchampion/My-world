@@ -214,12 +214,16 @@ def break_away(conn, leader, allies, kingdom, lord):
     from Data.Government.feudal import LOYALTY_START
 
     world_id = kingdom["world_id"]
+    from Data.NPCS.races import realm_name, kingdom_race, seed_kingdom_feelings
     taken = {row[0] for row in conn.execute("SELECT name FROM kingdoms WHERE world_id = ?", (world_id,))}
-    name = next((n for n in (generate_kingdom_name() for _ in range(50)) if n not in taken), f"Free {leader['name']}")
+    race = kingdom_race(conn, kingdom["id"])                          # the breakaway realm is of the old one's people
+    name = realm_name(race, taken, generate_kingdom_name) or f"Free {leader['name']}"
     used = {row[0] for row in conn.execute("SELECT color FROM kingdoms WHERE world_id = ?", (world_id,))}
     color = next((c for c in KINGDOM_COLORS if c not in used), "#%06X" % random.randint(0, 0xFFFFFF))
 
     new_id = create_kingdom(conn, world_id, name, color)["id"]
+    conn.execute("UPDATE kingdoms SET race = ? WHERE id = ?", (race, new_id))
+    seed_kingdom_feelings(conn, new_id)
     treasury = conn.execute("SELECT treasury FROM provinces WHERE id = ?", (leader["id"],)).fetchone()[0]
 
     lord = get_npc(conn, lord["id"])

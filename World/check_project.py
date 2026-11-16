@@ -631,6 +631,20 @@ FEATURES = [
                   "Data/Map/map_model.py": ["_peoples(conn,"]},
     },
     {
+        "name": "Peoples part 2: the book's classes and level limits, racial abilities in fights, and how peoples feel about each other",
+        "functions": {"Data/NPCS/races.py": ["suited_class", "level_limit", "fighting_limit", "to_hit_bonus", "save_bonus",
+                                            "resists_sleep", "fire_share", "racial_powers", "attitude", "seed_world_feelings",
+                                            "seed_kingdom_feelings", "peace_factor"]},
+        "wired": {"Data/Database/repository.py": ["races.suited_class(race, npc_class, profession)"],
+                  "Data/Combat/melee.py": ["to_hit_bonus(attacker, target)", "races.racial_powers(race)", "races.fighting_limit(race)"],
+                  "Data/Magic/magic.py": ["level_limit(race, npc_class)", "save_bonus(getattr(f", "resists_sleep(getattr(f", "fire_share(getattr(f"],
+                  "Data/Government/diplomacy.py": ["peace_factor(conn, source", "kingdom_attitude(conn, kingdom_id"],
+                  "Data/World/world_generator.py": ["seed_world_feelings(conn"],
+                  "Data/World/expansion.py": ["seed_kingdom_feelings(conn, home_kingdom)"],
+                  "Data/Government/rebellion.py": ["seed_kingdom_feelings(conn, new_id)"],
+                  "Data/Relationships/relationships.py": ["roll_relationship(attitude("]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1257,6 +1271,10 @@ def _smoke_body(r, holder):
 
         conn.commit()
 
+        # their peoples' feelings set where favor starts (Data.NPCS.races): the trade moves it from there
+        buyer_before = get_kingdom_favor(conn, buyer["id"], seller["id"])
+        seller_before = get_kingdom_favor(conn, seller["id"], buyer["id"])
+
         trades = economy.simulate_cross_kingdom_trade_day(conn, world_id)
         conn.commit()
 
@@ -1268,8 +1286,8 @@ def _smoke_body(r, holder):
         got_seller = get_kingdom_favor(conn, seller["id"], buyer["id"])
         # the seller may also have bought something from the buyer the same day
         back = sum(1 for t in trades if t["buyer_id"] == seller["id"] and t["seller_id"] == buyer["id"])
-        want_buyer = n * economy.TRADE_FAVOR_GAIN + back * economy.TRADE_FAVOR_LOSS
-        want_seller = n * economy.TRADE_FAVOR_LOSS + back * economy.TRADE_FAVOR_GAIN
+        want_buyer = buyer_before + n * economy.TRADE_FAVOR_GAIN + back * economy.TRADE_FAVOR_LOSS
+        want_seller = seller_before + n * economy.TRADE_FAVOR_LOSS + back * economy.TRADE_FAVOR_GAIN
 
         assert abs(got_buyer - want_buyer) < 1e-6 and abs(got_seller - want_seller) < 1e-6, (
             f"after {n} trade(s), favor should be buyer->seller {want_buyer} and seller->buyer "
@@ -1637,6 +1655,52 @@ def _smoke_body(r, holder):
                         f"{k['name']}, a {k['race']} kingdom, has its capital on {terrain[0]}, not its homelands ({', '.join(sorted(home))})"
 
         run_step(r, "peoples: kingdoms of their own people with minorities, homelands, names in their tongue, half-peoples, lifespans", peoples)
+
+        def peoples_by_the_book():
+            from Data.NPCS import races as RC
+            from Data.Magic import magic as MG
+            from Data.Relationships.relationships import roll_relationship
+            import Data.Combat.melee as ML
+            from Data.Monsters.bestiary import by_name
+            # classes: none follows a class closed to their people (no dwarf wizards, no elf monks)
+            wrong = [(r[0], r[1]) for r in conn.execute("SELECT DISTINCT race, class FROM npcs WHERE class != 'None'")
+                     if RC.level_limit(r[0], r[1]) == 0]
+            assert not wrong, f"people follow classes their people cannot: {wrong}"
+            assert RC.suited_class("Dwarf", "Monk", "Farmer") in ("Fighter", "None"), "a dwarf farmer stayed a monk"
+            assert MG.casting_level("Wizard", "Mage", {"Arcane Knowledge": 40}, "Elf") == 11, "an elf wizard passed their limit of 11"
+            assert MG.casting_level("Wizard", "Mage", {"Arcane Knowledge": 40}, "Gnome") == 7, "a gnome wizard passed their limit of 7"
+            halfling = ML.person_fighter({"id": 1, "name": "h", "profession": "Knight", "class": "Fighter", "race": "Halfling"},
+                                         skills={"Swordsmanship": 25})
+            assert halfling.thac0 == ML.person_thac0(6), "a halfling fought above their limit of 6"
+            # abilities: a dwarf strikes orcs better, a giant strikes dwarves worse; elves shrug off sleep
+            dwarf = ML.person_fighter({"id": 2, "name": "d", "profession": "Soldier", "class": "None", "race": "Dwarf"}, skills={})
+            orc = ML.monster_fighters(by_name("Orc"), 1, 5)[0]
+            giant = ML.monster_fighters(by_name("Hill Giant"), 1, 40)[0]
+            beetle = ML.monster_fighters(by_name("Beetle, Giant, Fire"), 1, 5)[0] if by_name("Beetle, Giant, Fire") else None
+            assert RC.to_hit_bonus(dwarf, orc) == 1 and RC.to_hit_bonus(giant, dwarf) == -4, "a dwarf's edge against orcs and giants is missing"
+            assert beetle is None or RC.to_hit_bonus(beetle, dwarf) == 0, "a giant beetle counted as a giant"
+            elves = [ML.person_fighter({"id": i, "name": "e", "profession": "Soldier", "class": "None", "race": "Elf"}, skills={})
+                     for i in range(100)]
+            MG.cast(dwarf, "Sleep", {"effect": "sleep", "hit_dice": [500, 500], "max_hit_dice_each": 40}, [], elves, {}, {})
+            asleep = sum(1 for e in elves if e.held)
+            assert asleep < 30, f"{asleep} of 100 elves fell asleep (they resist nine times in ten)"
+            assert RC.fire_share("Tiefling") == 0.5 and [p[1] for p in RC.racial_powers("Dragonborn")] == ["Dragon Breath"], \
+                "tieflings' fire resistance or dragonborn breath is missing"
+            # feelings: dwarves and elves wary, everyone cold to orcs, peace warms them slowly; friendships swayed
+            assert RC.attitude("Dwarf", "Elf") < 0 and RC.attitude("Elf", "Orc") < RC.attitude("Elf", "Dwarf") < RC.attitude("Elf", "Elf"), \
+                "the peoples' feelings are out of order"
+            pairs = [(a, b) for a, b in conn.execute(
+                """SELECT a.id, b.id FROM kingdoms a JOIN kingdoms b ON a.world_id = b.world_id AND a.id != b.id
+                   WHERE a.world_id = ? AND a.race != b.race""", (world_id,))]
+            for a, b in pairs[:5]:
+                assert RC.peace_factor(conn, a, b) == max(0.25, min(1.5, 1 + RC.kingdom_attitude(conn, a, b) / RC.PEACE_SWAY)), \
+                    "peace does not warm kingdoms by their peoples' feelings"
+            random.seed(7)
+            friends = lambda att: sum(roll_relationship(att)[0] == "Friend" for _ in range(3000))
+            assert friends(-35) < friends(0) - 300, "a dwarf befriends an orc as easily as anyone"
+            random.seed()
+
+        run_step(r, "peoples by the book: class and level limits, a dwarf's edge against orcs and giants, elves resist sleep, peoples' feelings", peoples_by_the_book)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here

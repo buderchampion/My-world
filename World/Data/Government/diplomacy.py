@@ -102,6 +102,7 @@ def apply_peace_dividend(conn, world_id, current_year):
     """
 
     from Data.Database.repository import get_kingdom_relation, get_kingdom_favor, adjust_kingdom_favor
+    from Data.NPCS.races import peace_factor
 
     kingdoms = _world_kingdoms(conn, world_id)
 
@@ -118,6 +119,7 @@ def apply_peace_dividend(conn, world_id, current_year):
 
             current = get_kingdom_favor(conn, source["id"], target["id"])
             gain = random.uniform(*PEACE_DIVIDEND_RANGE) * (1.0 - max(0.0, current) / 100.0)
+            gain *= peace_factor(conn, source["id"], target["id"])   # dwarves warm slowly to elves, everyone to orcs
 
             adjust_kingdom_favor(conn, source["id"], target["id"], gain)
 
@@ -295,6 +297,7 @@ def apply_succession_shock(conn, kingdom_id, overthrown=False):
     """
 
     from Data.Database.repository import get_kingdom_favor, adjust_kingdom_favor
+    from Data.NPCS.races import kingdom_attitude
 
     keep = SUCCESSION_KEEP_OVERTHROWN if overthrown else SUCCESSION_KEEP
 
@@ -309,7 +312,7 @@ def apply_succession_shock(conn, kingdom_id, overthrown=False):
     for other in others:
 
         current = get_kingdom_favor(conn, kingdom_id, other["id"])
-        fresh = random.uniform(*SUCCESSION_FRESH_RANGE)
+        fresh = random.uniform(*SUCCESSION_FRESH_RANGE) + kingdom_attitude(conn, kingdom_id, other["id"])   # still of their people
 
         adjust_kingdom_favor(conn, kingdom_id, other["id"], keep * current + (1.0 - keep) * fresh - current)
 

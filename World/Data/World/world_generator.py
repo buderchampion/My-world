@@ -43,6 +43,9 @@ def generate_world(seed=None, kingdoms=None):
         {"id": k["id"], "name": k["name"]} for k in get_world_kingdoms(conn, world["id"])
     ]
 
+    from Data.NPCS.races import seed_world_feelings     # dwarves start cold toward elves, everyone toward orcs
+    seed_world_feelings(conn, world["id"])
+
     generate_roads(conn, world["id"])
 
     # Put every settlement into the region it sits in (the regions themselves
