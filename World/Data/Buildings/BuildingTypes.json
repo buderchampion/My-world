@@ -22,5 +22,8 @@
     "Thieves Den":        {"category": "Criminal",    "capacity": 6},
     "House":              {"category": "Residential", "capacity": 5},
     "Bandit Camp":        {"category": "Criminal",    "capacity": 4},
-    "Slums":              {"category": "Residential", "capacity": 100000}
+    "Slums":              {"category": "Residential", "capacity": 100000},
+    "Cathedral":          {"category": "Grand",       "capacity": 0},
+    "Guildhall":          {"category": "Grand",       "capacity": 0},
+    "Great Library":      {"category": "Grand",       "capacity": 0}
 }

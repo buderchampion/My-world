@@ -106,6 +106,9 @@ def init_database():
                                               "disease_severity": "REAL"})
     _add_missing_columns(connection, "kingdoms", {"quarantine_until": "INTEGER"})
     _add_missing_columns(connection, "cities", {"afraid_until": "INTEGER"})
+    # prosperity (Data.Economy.prosperity): a town's score; a family's rise to merchant house and nobility
+    _add_missing_columns(connection, "cities", {"prosperity": "REAL"})
+    _add_missing_columns(connection, "families", {"status": "TEXT", "ennobled_year": "INTEGER"})
     # crime (Data.Government.crime): a person's convictions, their guild, and when they leave jail
     _add_missing_columns(connection, "npcs", {"convictions": "INTEGER NOT NULL DEFAULT 0", "guild_id": "INTEGER",
                                               "jailed_until": "INTEGER"})        # shaken by a disaster (Data.World.disasters)

@@ -491,6 +491,11 @@ class SimulationManager:
         from Data.Government.crime import crime_month
         crime_month(self.conn, self.world_id)
 
+        # Each town's prosperity: settlers drawn to the thriving, grand buildings raised and their benefits
+        # (Data.Economy.prosperity).
+        from Data.Economy.prosperity import prosperity_month
+        prosperity_month(self.conn, self.world_id)
+
         # Feasts, fairs, and at midsummer the tournaments (Data.Events.festivals).
         from Data.Events.festivals import festivals_month
         festivals_month(self.conn, self.world_id)
@@ -607,6 +612,10 @@ class SimulationManager:
 
             for city in cities:
                 save_city(self.conn, city)
+
+        # A crown with a lordless county sells it to its richest merchant house (Data.Economy.prosperity).
+        from Data.Economy.prosperity import ennoble
+        ennoble(self.conn, self.world_id)
 
         self.conn.commit()
 

@@ -134,6 +134,11 @@ def buy_food(conn, city, has_temple, away_ids=frozenset()):
         adults = [m for m in members if m["profession"] != "Child"]
         purse = sum(max(0.0, m["gold"]) for m in adults)
 
+        orphans = not adults
+        if orphans:                           # no grown-up left in the house (sickness, disaster, the gallows):
+            adults = members                  # the children spend what they have, and the town feeds them the rest
+            purse = sum(max(0.0, m["gold"]) for m in adults)
+
         bought = min(need, purse / price, stock)
         cost = bought * price
         stock -= bought
@@ -145,6 +150,13 @@ def buy_food(conn, city, has_temple, away_ids=frozenset()):
                 m["gold"] = round(m["gold"] - cost * max(0.0, m["gold"]) / purse, 2)
 
         short = need - bought
+        if short > 1e-9 and orphans:          # the parish feeds orphans from the town's purse
+            given = min(short, stock, max(0.0, wealth) / price)
+            stock -= given
+            wealth -= given * price
+            bought += given
+            report["alms"] += given
+            short = need - bought
         if short > 1e-9 and has_temple:
             alms = min(short, stock, max(0.0, wealth) / price)
             stock -= alms

@@ -307,6 +307,14 @@ def town_details(conn, city_id):
         guild = conn.execute("SELECT name FROM thieves_guilds WHERE city_id = ? AND status = 'Active'", (city_id,)).fetchone()
     except Exception:
         thefts, guild = None, None
+    try:                                                   # prosperity (worlds from before it: nothing to show)
+        how_prosperous = lambda v: "thriving" if v >= 65 else "struggling" if v < 35 else "steady"   # as Data.Economy.prosperity
+        score = conn.execute("SELECT prosperity FROM cities WHERE id = ?", (city_id,)).fetchone()[0]
+        grand = [r[0] for r in conn.execute("SELECT type FROM buildings WHERE city_id = ? AND category = 'Grand'", (city_id,))]
+    except Exception:
+        score, grand = None, []
+    if score is not None:
+        rows.append(("Prosperity", f"{score:.0f} of 100 ({how_prosperous(score)})" + (f"; {', '.join(grand)}" if grand else "")))
     if thefts and thefts[0]:
         rows.append(("Crime", f"{thefts[0]} thefts this year, {thefts[1] or 0} caught" + (f"; {guild[0]}" if guild else "")))
     if c["households"]:

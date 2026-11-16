@@ -13,6 +13,7 @@ WORKING, LABORING = 10, 3
 MARRIED, PARENT = 10, 5
 BEREAVED, BEREAVED_DAYS = -15, 90
 OCCUPIED = -10
+CATHEDRAL = 5                   # a town with a cathedral (Data.Economy.prosperity)
 JAILED = -20                    # in jail (Data.Government.crime)
 UNSAFE = -5                     # a town robbed often
 SICK = -15                      # sick in bed
@@ -52,6 +53,8 @@ def life_levels(conn, world_id, day):
     afraid |= afraid_towns(conn, day)
     from Data.Government.crime import unsafe_towns
     unsafe = unsafe_towns(conn, world_id, day)
+    from Data.Economy.prosperity import grand_towns
+    cathedrals = grand_towns(conn, "Cathedral")
 
     levels = {}
     for p in people:
@@ -81,6 +84,8 @@ def life_levels(conn, world_id, day):
             level += JAILED
         if p["city_id"] in unsafe:
             level += UNSAFE
+        if p["city_id"] in cathedrals:
+            level += CATHEDRAL
         level -= STRESS_WEIGHT * (p["needs_stress"] or 0)
         if p["age"] >= ADULT_AGE and (p["gold"] or 0) < POOR_BELOW:
             level += POOR

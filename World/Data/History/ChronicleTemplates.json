@@ -276,5 +276,15 @@
         "{When}, the crown of {kingdom} broke {guild} in {city}, {fate}.",
         "{When}, {guild} of {city} was scattered, {fate}, and {kingdom}'s streets were the safer for it.",
         "{When}, the thieves of {city} were undone: {guild} fell, {fate}."
+    ],
+    "Grand Building Raised": [
+        "{When}, the folk of {city} in {kingdom}, grown rich, raised a great {building}, and it was the wonder of the land.",
+        "{When}, a {building} was raised at {city}, that all of {kingdom} might know the town's good fortune.",
+        "{When}, the masons of {city} finished its {building}, the pride of {kingdom}."
+    ],
+    "Merchant Ennobled": [
+        "{When}, {ruler}, of a house grown rich in trade, bought the {county} from the crown of {kingdom}, and was made its {title}.",
+        "{When}, the crown of {kingdom}, wanting a lord for the {county}, sold it to the merchant {ruler}, now {title}.",
+        "{When}, gold won what birth had not: {ruler} became {title} of the {county} in {kingdom}."
     ]
 }

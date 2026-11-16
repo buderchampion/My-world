@@ -680,6 +680,13 @@ FEATURES = [
         "tables": ["crimes", "thieves_guilds"],
     },
     {
+        "name": "Prosperity: a score for every town (purse, work, mood, trade, safety); the struggling lose households to the thriving; grand buildings; merchant houses buy their way into the nobility",
+        "functions": {"Data/Economy/prosperity.py": ["scores", "update_scores", "draw_settlers", "build_grand", "grand_benefits",
+                                                     "merchant_houses", "ennoble", "prosperity_month"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["prosperity_month(self.conn", "ennoble(self.conn"],
+                  "Data/NPCS/contentment.py": ["level += CATHEDRAL"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1276,6 +1283,10 @@ def _smoke_body(r, holder):
     holder["conn"] = conn
 
     kingdoms = get_world_kingdoms(conn, world_id)
+    # Thieving is tested in its own step: in every other tick a thief jailed by chance would take a worker from
+    # the workplaces other steps count (Data.Government.crime). The real THEFT_CHANCE is restored for the crime step.
+    import Data.Government.crime as crime_module
+    real_theft_chance, crime_module.THEFT_CHANCE = crime_module.THEFT_CHANCE, 0.0
     npc_count = conn.execute("SELECT COUNT(*) FROM npcs").fetchone()[0]
     seed = conn.execute("SELECT seed FROM worlds WHERE id = ?", (world_id,)).fetchone()[0]
     r.info(f"{len(kingdoms)} kingdoms, {npc_count} NPCs, seed {seed}  (rebuild this exact world: python saves.py new {seed})")
@@ -1923,8 +1934,12 @@ def _smoke_body(r, holder):
             # justice by the ruler's mercy: a hardened thief under the harshest ruler often hangs; under the kindest, never
             town = conn.execute("""SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
                                    WHERE k.world_id = ? AND c.type != 'Village' LIMIT 1""", (world_id,)).fetchone()[0]
-            folk = [dict(r) for r in conn.execute("SELECT id, convictions FROM npcs WHERE city_id = ? AND alive = 1 AND age >= 16 LIMIT 60",
-                                                  (town,))]
+            # plain folk only (no soldiers, guards or titled heads, whom later steps count on), put back to work after
+            folk = [dict(r) for r in conn.execute(
+                """SELECT id, convictions, profession, workplace_id FROM npcs WHERE alive = 1 AND age >= 16 AND title IS NULL
+                   AND profession NOT IN ('Guard', 'Soldier', 'Captain', 'Knight', 'Child') AND city_id IN
+                   (SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?) ORDER BY RANDOM() LIMIT 60""",
+                (world_id,))]
             kind = [CR.sentence(conn, dict(p, convictions=5), 100, day) for p in folk[:20]]
             assert "gallows" not in kind, "a merciful ruler hanged a thief"
             harsh = [CR.sentence(conn, dict(p, convictions=5), -100, day) for p in folk[20:60]]
@@ -1936,7 +1951,10 @@ def _smoke_body(r, holder):
                 conn.execute("UPDATE npcs SET jailed_until = ? WHERE id = ?", (day - 1, jailed[0]))
                 assert CR.release(conn, world_id) >= 1, "a thief whose time was served stayed in jail"
             conn.execute("UPDATE npcs SET convictions = 0, jailed_until = NULL")
+            conn.executemany("UPDATE npcs SET profession = ?, workplace_id = ? WHERE id = ? AND alive = 1",
+                             [(p["profession"], p["workplace_id"], p["id"]) for p in folk])
             # a month of thieving in the world: some steal, and the watch catches some of them
+            assert real_theft_chance > 0, "thieving is switched off"
             saved = CR.THEFT_CHANCE
             CR.THEFT_CHANCE = 0.05
             try:
@@ -1964,6 +1982,62 @@ def _smoke_body(r, holder):
             conn.commit()
 
         run_step(r, "crime: the desperate steal, the watch catches some, the crown judges by its mercy, a guild rises where thieving thrives", crime_and_justice)
+
+        def prosperity_works():
+            from Data.Economy import prosperity as PR
+            s = PR.update_scores(conn, world_id)
+            assert s and all(0 <= v[0] <= 100 for v in s.values()), "a town's prosperity is out of bounds"
+            assert all(conn.execute("SELECT prosperity FROM cities WHERE id = ?", (k,)).fetchone()[0] == v[0] for k, v in s.items()), \
+                "prosperity was not saved"
+            # the purse counts: the richest town a head outranks the poorest on it
+            purse = {k: v[1]["purse"] for k, v in s.items()}
+            assert max(purse.values()) == 1.0 and min(purse.values()) == 0.0 or len(purse) < 2, "the purse is not ranked across towns"
+            # a grand building: a thriving town with the gold raises one, and a cathedral gladdens it
+            town = max(s, key=lambda k: s[k][0])
+            gold, stone, wood = PR.GRAND["Cathedral"]
+            conn.execute("UPDATE cities SET wealth = wealth + ? WHERE id = ?", (gold * 4, town))
+            for res, amount in (("Stone", stone * 4), ("Wood", wood * 4)):
+                conn.execute("""INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, ?, ?)
+                                ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = city_resources.amount + excluded.amount""",
+                             (town, res, amount))
+            forced = {k: (100.0, v[1]) if k == town else v for k, v in s.items()}
+            saved = PR.GRAND_CHANCE
+            PR.GRAND_CHANCE = 1.0
+            try:
+                built = PR.build_grand(conn, world_id, forced)
+            finally:
+                PR.GRAND_CHANCE = saved
+            assert any(b[0] == town for b in built), (
+                f"a thriving town with the gold raised nothing ({built}; town {town}: "
+                f"{[t for t in PR._towns(conn, world_id) if t['id'] == town]}, "
+                f"{dict(conn.execute('SELECT resource_name, amount FROM city_resources WHERE city_id = ?', (town,)).fetchall())}, "
+                f"grand {[tuple(x) for x in conn.execute('SELECT type, category FROM buildings WHERE city_id = ? AND category = ?', (town, 'Grand'))]})")
+            assert town in PR.grand_towns(conn, next(b[1] for b in built if b[0] == town)), "the grand building is not standing"
+            assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Grand Building'").fetchone()[0] >= 1, \
+                "the grand building was not chronicled"
+            # merchants into nobility: a rich family buys a lordless county
+            kid, county = conn.execute("""SELECT p.kingdom_id, p.id FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id
+                                           WHERE k.world_id = ? AND k.status != 'Fallen' LIMIT 1""", (world_id,)).fetchone()
+            old_lord = conn.execute("SELECT lord_id FROM provinces WHERE id = ?", (county,)).fetchone()[0]
+            conn.execute("UPDATE provinces SET lord_id = NULL WHERE id = ?", (county,))
+            fam = conn.execute("""SELECT n.family_id FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1
+                                  AND n.family_id IS NOT NULL AND n.title IS NULL AND n.age >= 20 LIMIT 1""", (kid,)).fetchone()[0]
+            conn.execute("UPDATE npcs SET gold = gold + ? WHERE id = (SELECT id FROM npcs WHERE family_id = ? AND alive = 1 LIMIT 1)",
+                         (PR.MERCHANT_WEALTH * 10, fam))
+            treasury = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0]
+            raised = PR.ennoble(conn, world_id)
+            mine = [x for x in raised if x[1] == county]
+            assert mine, "a rich merchant house did not buy the lordless county"
+            lord = conn.execute("SELECT n.title, n.family_id FROM provinces p JOIN npcs n ON n.id = p.lord_id WHERE p.id = ?", (county,)).fetchone()
+            assert lord[0] in ("Count", "Countess") and lord[1] == mine[0][0], "the merchant did not become the county's lord"
+            assert conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0] >= treasury + PR.TITLE_PRICE - 1e-6, \
+                "the crown was not paid for the county"
+            if old_lord:                                              # put the old lord back for the steps that follow
+                conn.execute("UPDATE npcs SET title = NULL WHERE id = (SELECT lord_id FROM provinces WHERE id = ?)", (county,))
+                conn.execute("UPDATE provinces SET lord_id = ? WHERE id = ?", (old_lord, county))
+            conn.commit()
+
+        run_step(r, "prosperity: towns are scored, a thriving town raises a grand building, a merchant house buys a lordless county", prosperity_works)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
@@ -2074,12 +2148,13 @@ def _smoke_body(r, holder):
             conn.execute("UPDATE npcs SET fed = 1, gold = 500, needs_stress = 0, needs_happiness = 100, profession = ? WHERE id = ?", (smith, content))
             conn.execute("UPDATE npcs SET fed = 0, gold = 0, needs_stress = 60, needs_happiness = 100, profession = 'Laborer', workplace_id = NULL, home_id = NULL WHERE id = ?", (lonely,))
             conn.commit()
-            songs, CT.INSPIRED = CT.INSPIRED, 0                      # a bard in town would lift both: this step weighs life alone
+            # a bard or a cathedral in town would lift both: this step weighs life alone
+            songs, church, CT.INSPIRED, CT.CATHEDRAL = CT.INSPIRED, CT.CATHEDRAL, 0, 0
             try:
                 for _ in range(30):
                     CT.drift_happiness(conn, world_id, today(conn, world_id))
             finally:
-                CT.INSPIRED = songs
+                CT.INSPIRED, CT.CATHEDRAL = songs, church
             happy = lambda i: conn.execute("SELECT needs_happiness FROM npcs WHERE id = ?", (i,)).fetchone()[0]
             assert 70 <= happy(content) < 100, f"a fed, housed, married tradesman's happiness did not settle where life puts it ({happy(content)})"
             assert happy(lonely) <= 40, f"a hungry, homeless, penniless laborer is still at {happy(lonely)} after a month"
@@ -3026,7 +3101,9 @@ def _smoke_body(r, holder):
         from Data.Economy.economy import simulate_cross_kingdom_trade_day
         from Data.Database.repository import get_npc, get_kingdom_cities, get_city, save_city
 
-        kingdom = dict(conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND ruler_id IS NOT NULL ORDER BY id LIMIT 1", (world_id,)).fetchone())
+        # a kingdom whose ruler lives (sickness, disaster or a fall may have taken one, its heir not yet crowned)
+        kingdom = dict(conn.execute("""SELECT k.* FROM kingdoms k JOIN npcs n ON n.id = k.ruler_id WHERE k.world_id = ? AND n.alive = 1
+                                       AND k.status != 'Fallen' ORDER BY k.id LIMIT 1""", (world_id,)).fetchone())
         ruler = kingdom["ruler_id"]
         saved_kingdom = dict(kingdom)
         saved_traits = tuple(conn.execute("SELECT generosity, mercy, boldness FROM npcs WHERE id = ?", (ruler,)).fetchone())
@@ -3351,7 +3428,7 @@ def _smoke_body(r, holder):
         village = dict(conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?
                                        AND k.status != 'Fallen' AND c.type = 'Village' AND c.households > 5 ORDER BY c.id LIMIT 1""", (world_id,)).fetchone())
         lair_id = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
-                                 VALUES (?, 'Orc', 'raider', ?, ?, 80, 4.5, 'Active')""", (world_id, village["map_x"] + 5, village["map_y"])).lastrowid   # right beside it: no other village nearer
+                                 VALUES (?, 'Orc', 'raider', ?, ?, 80, 4.5, 'Active')""", (world_id, village["map_x"], village["map_y"])).lastrowid   # on its doorstep: no other village nearer
         conn.execute("UPDATE monster_lairs SET status = 'Cleared' WHERE world_id = ? AND id != ? AND kind = 'raider'", (world_id, lair_id))
         conn.commit()
         households = village["households"]
