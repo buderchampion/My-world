@@ -12,6 +12,7 @@ REQUIRED_TEMPLATE_KEYS = (
     "Monster Raid (sacked)", "Monster Raid (repelled)",
     "Plague Began", "Plague Ended", "Edict (quarantine)", "Ruler Died (sickness)",
     "Great Fire", "Flood", "Earthquake", "Locusts", "Ruler Died (disaster)",
+    "Tournament",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -68,7 +69,7 @@ TEMPLATE_FIELDS = (
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
- "monsters", "village", "dead", "disease")
+ "monsters", "village", "dead", "disease", "champion", "riders")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".

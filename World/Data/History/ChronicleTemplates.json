@@ -261,5 +261,10 @@
         "{When}, {ruler}, {title} of {kingdom}, perished in the calamity that struck the realm.",
         "{When}, {title} {ruler} of {kingdom} was lost when disaster fell upon the land.",
         "{When}, fate took {ruler}, {title} of {kingdom}, in the ruin of that terrible day."
+    ],
+    "Tournament": [
+        "{When}, a great tournament was held at {city} in {kingdom}; {riders} rode in the lists, and {champion} of {other} was crowned champion.",
+        "{When}, the lists were raised at {city}, and of {riders} riders {champion} of {other} unhorsed them all and won the prize of {kingdom}.",
+        "{When}, {kingdom} held its summer tournament at {city}, and the day belonged to {champion} of {other}."
     ]
 }

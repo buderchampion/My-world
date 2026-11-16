@@ -666,6 +666,11 @@ FEATURES = [
         "tables": ["region_blights"],
     },
     {
+        "name": "Festivals: yearly feasts (Harvest Home, Midwinter, Founding Day), town fairs that draw folk across borders, and summer tournaments with a chronicled champion",
+        "functions": {"Data/Events/festivals.py": ["feast", "fair", "joust", "tournament", "festivals_month", "founding_month", "fair_month"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["festivals_month(self.conn"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1849,6 +1854,49 @@ def _smoke_body(r, holder):
             assert entries >= 2, "the earthquake and the locusts were not chronicled"
 
         run_step(r, "disasters: a fire burns and spoils, a flood cuts the next harvest, an earthquake breaks buildings, locusts strip a region", disasters_strike)
+
+        def festivals_held():
+            from Data.Events import festivals as FS
+            from Data.Simulation.clock import SEASON_BY_MONTH
+            assert SEASON_BY_MONTH[FS.FEASTS["Harvest Home"]] == "Autumn" and SEASON_BY_MONTH[FS.FEASTS["Midwinter"]] == "Winter" \
+                and SEASON_BY_MONTH[FS.TOURNEY_MONTH] == "Summer", "the feasts and the tournament fall in the wrong seasons"
+            assert all(1 <= FS.founding_month(i) <= 12 and SEASON_BY_MONTH[FS.fair_month(i)] != "Winter" for i in range(1, 200)), \
+                "a Founding Day or a fair falls outside the year (or a fair in winter)"
+            towns = [t for t in FS._settlements(conn, world_id) if t["type"] != "Village" and not FS._cancelled(conn, world_id, t)]
+            town = max(towns, key=lambda t: t["people"])
+            conn.execute("UPDATE cities SET wealth = wealth + 10000 WHERE id = ?", (town["id"],))   # a purse that can pay for it
+            town["wealth"] = (town["wealth"] or 0) + 10000
+            mood = lambda: conn.execute("SELECT AVG(needs_happiness) FROM npcs WHERE city_id = ? AND alive = 1", (town["id"],)).fetchone()[0]
+            before, purse = mood(), town["wealth"]
+            rep = FS.feast(conn, world_id, town, "Harvest Home")
+            assert rep and mood() > before, "a feast did not gladden its town"
+            assert conn.execute("SELECT wealth FROM cities WHERE id = ?", (town["id"],)).fetchone()[0] < purse, "a feast cost its town nothing"
+            saved = FS.FAIR_GOER_CHANCE
+            FS.FAIR_GOER_CHANCE = 1.0
+            try:
+                town = dict(FS._settlements(conn, world_id)[[t["id"] for t in FS._settlements(conn, world_id)].index(town["id"])])
+                fair = FS.fair(conn, world_id, town)
+            finally:
+                FS.FAIR_GOER_CHANCE = saved
+            assert fair and fair["goers"] > 0, "no one came to the fair"
+            after = conn.execute("SELECT wealth FROM cities WHERE id = ?", (town["id"],)).fetchone()[0]
+            assert abs(after - town["wealth"] - FS.FAIR_SPEND * fair["goers"]) < 1e-6, "the fair's takings did not reach the town's purse"
+            assert conn.execute("SELECT COUNT(*) FROM npc_travels WHERE purpose = 'Fair' AND destination_city_id = ?",
+                                (town["id"],)).fetchone()[0] == fair["goers"], "the fair-goers did not set out"
+            conn.execute("DELETE FROM npc_travels WHERE purpose = 'Fair'")         # home again, for the steps that follow
+            kingdom = conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id LIMIT 1", (world_id,)).fetchone()[0]
+            conn.execute("UPDATE kingdoms SET treasury = treasury + ? WHERE id = ?", (FS.TOURNEY_PRIZE, kingdom))
+            renown = lambda i: conn.execute("SELECT renown FROM npcs WHERE id = ?", (i,)).fetchone()[0]
+            t = FS.tournament(conn, world_id, kingdom)
+            if t:                                                            # a realm with two riders or more
+                assert renown(t["champion"]) >= FS.CHAMPION_RENOWN, "the champion won no renown"
+                assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Tournament' AND kingdom_id = ?",
+                                    (kingdom,)).fetchone()[0] >= 1, "the tournament was not chronicled"
+                assert conn.execute("SELECT level FROM npc_skills WHERE npc_id = ? AND skill_name = 'Swordsmanship'",
+                                    (t["champion"],)).fetchone() is not None, "the champion learned nothing in the lists"
+            conn.commit()
+
+        run_step(r, "festivals: a feast gladdens a town at its purse's cost, a fair draws folk and fills the purse, a tournament crowns a champion", festivals_held)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here

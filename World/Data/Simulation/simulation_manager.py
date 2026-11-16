@@ -486,6 +486,10 @@ class SimulationManager:
         # Fires, floods, and now and then an earthquake or a swarm of locusts (Data.World.disasters).
         from Data.World.disasters import disasters_month
         disasters_month(self.conn, self.world_id)
+
+        # Feasts, fairs, and at midsummer the tournaments (Data.Events.festivals).
+        from Data.Events.festivals import festivals_month
+        festivals_month(self.conn, self.world_id)
         
         self.conn.commit()
 
