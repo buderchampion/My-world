@@ -294,6 +294,13 @@ def town_details(conn, city_id):
     peoples = _peoples(conn, "n.city_id = ?", (city_id,))
     if peoples:
         rows.append(("Peoples", peoples))
+    try:                                                   # sickness (worlds from before it: nothing to show)
+        sick = conn.execute("""SELECT disease, COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1 AND disease IS NOT NULL
+                               GROUP BY disease ORDER BY COUNT(*) DESC""", (city_id,)).fetchall()
+    except Exception:
+        sick = []
+    if sick:
+        rows.append(("Sick", ", ".join(f"{n} of {d}" for d, n in sick)))
     if c["households"]:
         rows.append(("Households", f"{c['households']:,.0f} farming families (about {c['households'] * 5:,.0f} people)"))
     if people[3] is not None:

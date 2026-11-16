@@ -374,8 +374,8 @@ def heal(conn, healers, wounded_ids):
     if not healers or not wounded_ids:
         return 0
     marks = ",".join("?" * len(wounded_ids))
-    hurt = {r[0]: r[1] for r in conn.execute(
-        f"SELECT id, health FROM npcs WHERE alive = 1 AND health < 100 AND id IN ({marks})", list(wounded_ids))}
+    hurt = {r[0]: r[1] for r in conn.execute(          # wounds, not sickness: Cure Wounds does not touch a fever
+        f"SELECT id, health FROM npcs WHERE alive = 1 AND health < 100 AND disease IS NULL AND id IN ({marks})", list(wounded_ids))}
     restored = 0
     for h in healers:
         for lo, hi, bonus in healing_spells(h["class"], h["level"], h["id"]):

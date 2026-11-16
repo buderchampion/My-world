@@ -326,6 +326,37 @@ CREATE TABLE IF NOT EXISTS kingdom_edicts (
     ruler_id    INTEGER REFERENCES npcs(id)
 );
 
+-- Sickness (Data.NPCS.sickness): who has had what, and for how long they cannot catch it again
+-- (until_day NULL: for life); and each plague's stay in a kingdom, from its coming to its leaving.
+CREATE TABLE IF NOT EXISTS npc_immunities (
+    id          INTEGER PRIMARY KEY,
+    npc_id      INTEGER NOT NULL REFERENCES npcs(id),
+    disease     TEXT NOT NULL,
+    until_day   INTEGER
+);
+CREATE INDEX IF NOT EXISTS idx_immunities_npc ON npc_immunities(npc_id);
+
+CREATE TABLE IF NOT EXISTS outbreaks (
+    id          INTEGER PRIMARY KEY,
+    world_id    INTEGER NOT NULL REFERENCES worlds(id),
+    kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    disease     TEXT NOT NULL,
+    started_day INTEGER NOT NULL,
+    ended_day   INTEGER,
+    dead        INTEGER NOT NULL DEFAULT 0,
+    chronicled  INTEGER NOT NULL DEFAULT 0      -- written into the kingdom's chronicle (it grew to CHRONICLE_AT cases)
+);
+
+-- Disasters (Data.World.disasters): a region's harvest cut by a flood or a swarm of locusts, by year.
+CREATE TABLE IF NOT EXISTS region_blights (
+    id          INTEGER PRIMARY KEY,
+    region_id   INTEGER NOT NULL REFERENCES regions(id),
+    year        INTEGER NOT NULL,
+    kind        TEXT NOT NULL,
+    factor      REAL NOT NULL,
+    UNIQUE (region_id, year)
+);
+
 CREATE TABLE IF NOT EXISTS harvests (
     id          INTEGER PRIMARY KEY,
     region_id   INTEGER NOT NULL REFERENCES regions(id),

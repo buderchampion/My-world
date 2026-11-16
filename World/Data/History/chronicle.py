@@ -10,6 +10,8 @@ TEMPLATES_FILE = Path(__file__).resolve().parent / "ChronicleTemplates.json"
 REQUIRED_TEMPLATE_KEYS = (
     "Vengeance (duel)",
     "Monster Raid (sacked)", "Monster Raid (repelled)",
+    "Plague Began", "Plague Ended", "Edict (quarantine)", "Ruler Died (sickness)",
+    "Great Fire", "Flood", "Earthquake", "Locusts", "Ruler Died (disaster)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -66,7 +68,7 @@ TEMPLATE_FIELDS = (
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
- "monsters", "village", "dead")
+ "monsters", "village", "dead", "disease")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".
@@ -76,6 +78,10 @@ DEATH_CAUSE_TEMPLATES = {
     "civil war": "Ruler Died (civil war)",
     "raid": "Ruler Died (raid)",
     "starvation": "Ruler Died (starvation)",
+    "sickness": "Ruler Died (sickness)",
+    "fire": "Ruler Died (disaster)",
+    "flood": "Ruler Died (disaster)",
+    "earthquake": "Ruler Died (disaster)",
 }
 
 CORONATION_TEMPLATES = {

@@ -72,6 +72,7 @@
         "3": {
             "Call Lightning":   {"effect": "damage", "dice": [2, 16], "bonus_dice_per_level": [1, 8], "targets": 1, "save_half": true},
             "Plant Growth":     {"effect": "grow", "harvest_bonus": 0.1},
+            "Cure Disease":     {"effect": "cure_disease"},
             "Hold Animal":      {"effect": "hold", "targets": 4, "rounds": 6, "beasts_only": true}
         },
         "4": {

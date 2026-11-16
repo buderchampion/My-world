@@ -100,6 +100,15 @@ def init_database():
     _add_missing_columns(connection, "kingdoms", {"race": "TEXT NOT NULL DEFAULT 'Human'"})
     connection.execute("UPDATE npcs SET years = age WHERE years IS NULL AND race = 'Human'")
 
+    # sickness (Data.NPCS.sickness): what someone is sick of, the days it has left and how hard it fell;
+    # a kingdom's quarantine (Data.Government.edicts)
+    _add_missing_columns(connection, "npcs", {"disease": "TEXT", "disease_days": "INTEGER NOT NULL DEFAULT 0",
+                                              "disease_severity": "REAL"})
+    _add_missing_columns(connection, "kingdoms", {"quarantine_until": "INTEGER"})
+    _add_missing_columns(connection, "cities", {"afraid_until": "INTEGER"})        # shaken by a disaster (Data.World.disasters)
+    _add_missing_columns(connection, "outbreaks", {"chronicled": "INTEGER NOT NULL DEFAULT 0"})
+    connection.execute("CREATE INDEX IF NOT EXISTS idx_npcs_disease ON npcs(disease)")
+
     # How well each NPC ate today, 0-1 (Data.Economy.food_market): meals restore
     # only this share of their hunger.
     _add_missing_columns(connection, "npcs", {"fed": "REAL NOT NULL DEFAULT 1"})

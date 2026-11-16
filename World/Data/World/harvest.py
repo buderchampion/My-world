@@ -115,6 +115,11 @@ def run_harvest(conn, world_id, year):
                WHERE r.world_id = ? AND h.year = ?""", (world_id, year - 1))
     }
     weather = roll_weather(regions, region_neighbors(regions), last)
+    from Data.World.disasters import blights                     # floods and locusts cut a region's harvest
+    for rid, cut in blights(conn, world_id, year).items():
+        if rid in weather:
+            quality, factor, score = weather[rid]
+            weather[rid] = (quality, round(factor * cut, 3), score)
 
     for rid, (quality, factor, score) in weather.items():
         conn.execute(

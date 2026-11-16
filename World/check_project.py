@@ -645,6 +645,27 @@ FEATURES = [
                   "Data/Relationships/relationships.py": ["roll_relationship(attitude("]},
     },
     {
+        "name": "Sickness and plague: people fall sick and spread it by house, work, town and road; healers, temples and Cure Disease fight it; plagues are chronicled and quarantined",
+        "functions": {"Data/NPCS/sickness.py": ["catch", "fall_sick", "spread", "road_spread", "cure", "run_course", "bury",
+                                               "chronicle_outbreaks", "sickness_day", "outbreak", "plagues_break_out", "plague_towns"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["sickness_day(self.conn", "plagues_break_out(self.conn"],
+                  "Data/Government/edicts.py": ["def quarantined(", "n[\"quarantine\"]"],
+                  "Data/NPCS/healing.py": ["npc.get(\"disease\")"],
+                  "Data/NPCS/contentment.py": ["level += SICK", "level += AFRAID"],
+                  "Data/Infrastructure/caravans.py": ["plague_towns(conn, None, FEAR_AT)"],
+                  "Data/Magic/magic.py": ["disease IS NULL"]},
+        "tables": ["npc_immunities", "outbreaks"],
+    },
+    {
+        "name": "Disasters: town fires, river floods, earthquakes and locusts burn, spoil, shake and strip; the stricken are afraid, the worst chronicled",
+        "functions": {"Data/World/disasters.py": ["fire", "flood", "earthquake", "locusts", "blight", "blights", "disasters_month",
+                                                  "afraid_towns"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["disasters_month(self.conn"],
+                  "Data/World/harvest.py": ["blights(conn, world_id, year)"],
+                  "Data/NPCS/contentment.py": ["afraid_towns(conn, day)"]},
+        "tables": ["region_blights"],
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1701,6 +1722,133 @@ def _smoke_body(r, holder):
             random.seed()
 
         run_step(r, "peoples by the book: class and level limits, a dwarf's edge against orcs and giants, elves resist sleep, peoples' feelings", peoples_by_the_book)
+
+        def sickness_works():
+            try:
+                sickness_checks()
+            finally:                                                    # whatever happened, no plague is left for the steps after
+                conn.execute("UPDATE npcs SET disease = NULL, disease_days = 0, disease_severity = NULL WHERE disease IS NOT NULL")
+                conn.execute("UPDATE kingdoms SET quarantine_until = NULL")
+                conn.commit()
+
+        def sickness_checks():
+            from Data.NPCS import sickness as SK
+            from Data.NPCS.healing import apply_healing, drink_potion
+            from Data.Government import edicts as ED
+            from Data.Magic.magic import prepare
+            import Data.Infrastructure.caravans as CV
+            pest = SK.diseases()["Great Pestilence"]
+            day = ED.today(conn, world_id)
+            # a house: one falls sick, and at full contagion the rest of the house catches it
+            home = conn.execute("""SELECT home_id FROM npcs WHERE alive = 1 AND home_id IS NOT NULL AND disease IS NULL
+                                   GROUP BY home_id HAVING COUNT(*) BETWEEN 3 AND ?  LIMIT 1""", (SK.HOUSE_CONTACTS,)).fetchone()[0]
+            house = [r[0] for r in conn.execute("SELECT id FROM npcs WHERE home_id = ? AND alive = 1", (home,))]
+            conn.execute("DELETE FROM npc_immunities WHERE npc_id IN (%s)" % ",".join("?" * len(house)), house)
+            SK.catch(conn, house[0], "Great Pestilence")
+            saved = pest["contagion"]
+            pest["contagion"] = 1.0
+            try:
+                SK.spread(conn, SK._people(conn, world_id), set(), "Summer")
+            finally:
+                pest["contagion"] = saved
+            sick = {r[0] for r in conn.execute("SELECT id FROM npcs WHERE home_id = ? AND disease = 'Great Pestilence'", (home,))}
+            assert set(house) <= sick, "a plague did not pass through a house at full contagion"
+            # the sick do not mend from rest or potions; cure wounds does not touch them
+            assert not apply_healing({"alive": True, "health": 50, "disease": "Winter Ague"}, True), "rest mended a sick person"
+            assert not drink_potion({"alive": True, "health": 30, "disease": "Winter Ague"}, {"resources": {"Potions": 5}}), \
+                "a potion was drunk against sickness"
+            # running its course: one dies (health gone), one recovers (days run out) and is immune for life
+            dying, mending = house[0], house[1]
+            conn.execute("UPDATE npcs SET health = 1, disease_severity = 1.5, disease_days = 5 WHERE id = ?", (dying,))
+            conn.execute("UPDATE npcs SET health = 100, disease_severity = 0.3, disease_days = 1 WHERE id = ?", (mending,))
+            for other in house[2:]:
+                conn.execute("UPDATE npcs SET disease = NULL, disease_days = 0 WHERE id = ?", (other,))
+            people = SK._people(conn, world_id)
+            dead, well = SK.run_course(conn, world_id, people, day, set())
+            SK.bury(conn, dead, people)
+            assert (dying, "Great Pestilence") in dead and mending in well, f"the plague did not run its course (dead {dead}, well {well})"
+            assert not conn.execute("SELECT alive FROM npcs WHERE id = ?", (dying,)).fetchone()[0], "the plague's victim still lives"
+            assert conn.execute("SELECT COUNT(*) FROM events WHERE type = 'Death' AND description LIKE '%(sickness)%'").fetchone()[0] >= 1, \
+                "a death of sickness was not recorded"
+            immune = SK._immune(conn, day + 10000)
+            assert (mending, "Great Pestilence") in immune, "the recovered are not immune to the plague"
+            # Cure Disease is a third-level spell of clerics and druids
+            assert any(s[2]["effect"] == "cure_disease" for s in prepare("Cleric", 5, 1, wanted={"cure_disease"})), \
+                "a fifth-level cleric cannot cast Cure Disease"
+            # a plague town: chronicled once it grows, a quarantine called for, caravans kept away
+            town = conn.execute("""SELECT c.id, c.kingdom_id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                                   WHERE k.world_id = ? AND c.type != 'Village' AND k.status != 'Fallen'
+                                   AND (SELECT COUNT(*) FROM npcs n WHERE n.city_id = c.id AND n.alive = 1) >= ? LIMIT 1""",
+                                (world_id, SK.CHRONICLE_AT + 2)).fetchone()
+            SK.outbreak(conn, world_id, "Great Pestilence", city_id=town[0], cases=SK.CHRONICLE_AT + 1)
+            begun, _ = SK.chronicle_outbreaks(conn, world_id, day)
+            assert (town[1], "Great Pestilence") in begun, "a plague's coming was not chronicled"
+            kingdom = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (town[1],)).fetchone())
+            need = ED.needs(kingdom, ED.situation(conn, kingdom), day)["quarantine"]
+            assert need >= ED.QUARANTINE_CALL, f"plague in the realm does not call for a quarantine ({need})"
+            ED.apply_edict(conn, kingdom, "quarantine", day)
+            assert ED.quarantined(conn, town[1], day), "the quarantine was not proclaimed"
+            other = conn.execute("SELECT id FROM cities WHERE id != ? LIMIT 1", (town[0],)).fetchone()[0]
+            assert CV.dispatch_caravan(conn, other, town[0], "Food", 10, kingdom["id"], kingdom["id"]) is None, \
+                "a caravan set out for a plague town"
+            # the plague leaves: its leaving is written, with its dead
+            conn.execute("UPDATE npcs SET disease = NULL, disease_days = 0 WHERE disease IS NOT NULL")
+            conn.execute("UPDATE kingdoms SET quarantine_until = NULL")
+            _, ended = SK.chronicle_outbreaks(conn, world_id, day)
+            assert any(k == town[1] for k, _ in ended), "a plague's leaving was not chronicled"
+            conn.commit()
+
+        run_step(r, "sickness: it spreads through a house, runs its course (death or lifelong immunity), plague is chronicled and quarantined", sickness_works)
+
+        def disasters_strike():
+            # the steps that follow (the harvest, repairs) expect the world as it was: put stores and buildings back after
+            stores = conn.execute("SELECT city_id, resource_name, amount FROM city_resources").fetchall()
+            households = conn.execute("SELECT id, households, household_store FROM cities").fetchall()
+            conditions = conn.execute("SELECT id, condition FROM buildings").fetchall()
+            try:
+                disaster_checks()
+            finally:
+                conn.executemany("UPDATE city_resources SET amount = ? WHERE city_id = ? AND resource_name = ?",
+                                 [(a, c, n) for c, n, a in stores])
+                conn.executemany("UPDATE cities SET households = ?, household_store = ? WHERE id = ?",
+                                 [(h, st, i) for i, h, st in households])
+                conn.executemany("UPDATE buildings SET condition = ? WHERE id = ?", [(c, i) for i, c in conditions])
+                conn.execute("DELETE FROM region_blights")
+                conn.execute("UPDATE cities SET afraid_until = NULL")
+                conn.commit()
+
+        def disaster_checks():
+            from Data.World import disasters as DS
+            from Data.Government.edicts import today
+            day = today(conn, world_id)
+            year = conn.execute("SELECT clock_year FROM worlds WHERE id = ?", (world_id,)).fetchone()[0]
+            towns = DS._towns(conn, world_id, "c.type != 'Village'")
+            town = max(towns, key=lambda t: t["people"])
+            cond = lambda cid: conn.execute("SELECT SUM(condition) FROM buildings WHERE city_id = ? AND type != 'Slums'", (cid,)).fetchone()[0]
+            stock = lambda cid: conn.execute("SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE city_id = ?", (cid,)).fetchone()[0]
+            before, stores = cond(town["id"]), stock(town["id"])
+            rep = DS.fire(conn, world_id, town, day)
+            assert rep["buildings"] > 0 and cond(town["id"]) < before, "a fire burned nothing"
+            assert stores == 0 or stock(town["id"]) < stores, "a fire spared every store"
+            assert town["id"] in DS.afraid_towns(conn, day), "a burned town is not afraid"
+            river = DS._towns(conn, world_id, "c.region_id IN (SELECT id FROM regions WHERE has_river = 1)")
+            if river:
+                DS.flood(conn, world_id, river[0], day)
+                assert DS.blights(conn, world_id, year).get(river[0]["region_id"]) == DS.FLOOD_HARVEST, \
+                    "a flood did not cut its region's next harvest"
+            capital = conn.execute("""SELECT c.id, c.region_id FROM kingdoms k JOIN cities c ON c.id = k.capital_city_id
+                                      WHERE k.world_id = ? AND k.status != 'Fallen' LIMIT 1""", (world_id,)).fetchone()
+            region = conn.execute("SELECT id, name, center_x, center_y FROM regions WHERE id = ?", (capital[1],)).fetchone()
+            before = cond(capital[0])
+            quake = DS.earthquake(conn, world_id, region, day)
+            assert capital[0] in quake["towns"] and cond(capital[0]) < before, "an earthquake beneath a capital left it whole"
+            swarm = DS.locusts(conn, world_id, region, day)
+            assert region["id"] in swarm["regions"] and DS.blights(conn, world_id, year)[region["id"]] == DS.LOCUST_HARVEST, \
+                "locusts did not strip the region they settled on"
+            entries = conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Disaster'").fetchone()[0]
+            assert entries >= 2, "the earthquake and the locusts were not chronicled"
+
+        run_step(r, "disasters: a fire burns and spoils, a flood cuts the next harvest, an earthquake breaks buildings, locusts strip a region", disasters_strike)
 
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here

@@ -38,7 +38,9 @@ def dispatch_caravan(conn, origin_city_id, destination_city_id, resource, amount
                       buyer_kingdom_id, seller_kingdom_id):
     from Data.Database.repository import create_caravan
     from Data.Government.campaigns import besieging_army
-    if besieging_army(conn, destination_city_id):
+    from Data.NPCS.sickness import plague_towns, FEAR_AT
+    if besieging_army(conn, destination_city_id) or destination_city_id in plague_towns(conn, None, FEAR_AT):
+        # no caravan sets out for a besieged town, nor one in the grip of plague (Data.NPCS.sickness)
         # no caravan sets out for a besieged town: the goods stay where they were
         conn.execute("""INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, ?, ?)
                         ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = city_resources.amount + excluded.amount""",

@@ -13,6 +13,8 @@ WORKING, LABORING = 10, 3
 MARRIED, PARENT = 10, 5
 BEREAVED, BEREAVED_DAYS = -15, 90
 OCCUPIED = -10
+SICK = -15                      # sick in bed
+AFRAID = -5                     # plague in town (Data.NPCS.sickness)
 INSPIRED = 3                    # a town with a bard: for each step of the best bard's song (a master bard's is two)
 STRESS_WEIGHT = 0.2
 POOR, POOR_BELOW = -5, 10
@@ -22,7 +24,7 @@ ADULT_AGE, OLD_AGE = 16, 60
 def life_levels(conn, world_id, day):
     """{npc_id: the happiness their life sets} for every living person."""
     people = conn.execute(
-        """SELECT n.id, n.age, n.fed, n.gold, n.home_id, n.profession, n.needs_stress, n.city_id,
+        """SELECT n.id, n.age, n.fed, n.gold, n.home_id, n.profession, n.needs_stress, n.city_id, n.disease,
                   (SELECT alive FROM npcs s WHERE s.id = n.spouse_id) spouse_alive
            FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
            WHERE k.world_id = ? AND n.alive = 1""", (world_id,)).fetchall()
@@ -42,6 +44,10 @@ def life_levels(conn, world_id, day):
 
     from Data.Magic.magic import bard_towns
     songs = bard_towns(conn, world_id)
+    from Data.NPCS.sickness import plague_towns, FEAR_AT
+    afraid = set(plague_towns(conn, world_id, FEAR_AT))
+    from Data.World.disasters import afraid_towns              # and towns shaken by fire, flood or quake
+    afraid |= afraid_towns(conn, day)
 
     levels = {}
     for p in people:
@@ -63,6 +69,10 @@ def life_levels(conn, world_id, day):
         if p["city_id"] in occupied:
             level += OCCUPIED
         level += INSPIRED * songs.get(p["city_id"], 0)
+        if p["disease"]:
+            level += SICK
+        if p["city_id"] in afraid:
+            level += AFRAID
         level -= STRESS_WEIGHT * (p["needs_stress"] or 0)
         if p["age"] >= ADULT_AGE and (p["gold"] or 0) < POOR_BELOW:
             level += POOR

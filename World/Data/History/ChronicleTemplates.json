@@ -216,5 +216,50 @@
     "Monster Raid (repelled)": [
         "{When}, {monsters} fell upon the village of {village} in {kingdom}, but its folk stood and drove them back into the wilds, though {dead} of them fell.",
         "{When}, the people of {village} in {kingdom} threw back an onslaught of {monsters} out of the wild lands, at the cost of {dead} lives."
+    ],
+    "Plague Began": [
+        "{When}, the {disease} came upon {kingdom}, first in {city}, and there was weeping in every house it touched.",
+        "{When}, a pestilence called the {disease} broke out in {city}, and fear went through all of {kingdom}.",
+        "{When}, the {disease} crept into {kingdom} by way of {city}, and the bells tolled for the dead."
+    ],
+    "Plague Ended": [
+        "{When}, the {disease} at last departed {kingdom}, having taken {dead} souls.",
+        "{When}, {kingdom} was free of the {disease}, which had laid {dead} of its people in the earth.",
+        "{When}, the {disease} passed from {kingdom}; {dead} had perished of it."
+    ],
+    "Edict (quarantine)": [
+        "{When}, the {nature} {title} {ruler} of {kingdom} shut the plague towns and set watchmen upon the roads.",
+        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, decreed a quarantine against the sickness.",
+        "{When}, by command of {kingdom}'s {nature} {title}, {ruler}, none might pass in or out of the stricken towns."
+    ],
+    "Ruler Died (sickness)": [
+        "{When}, sickness carried off {ruler}, {title} of {kingdom}.",
+        "{When}, {title} {ruler} of {kingdom} took ill and did not rise again.",
+        "{When}, the fever that walked among the people came also to {ruler}, {title} of {kingdom}, and took {possessive} life."
+    ],
+    "Great Fire": [
+        "{When}, a great fire swept through {city} in {kingdom}; whole streets were left in ashes, and {dead} perished in the flames.",
+        "{When}, {city} of {kingdom} burned for three days and nights, and {dead} souls were lost to the fire.",
+        "{When}, fire fell upon {city}, and the folk of {kingdom} long remembered the year the town burned."
+    ],
+    "Flood": [
+        "{When}, the river rose over its banks at {city} in {kingdom}, spoiling the stores and drowning {dead}.",
+        "{When}, the waters came down upon {city}, and {kingdom} counted {dead} drowned and its granaries ruined.",
+        "{When}, a great flood laid {city} of {kingdom} under the water, and the fields round about were spoiled."
+    ],
+    "Earthquake": [
+        "{When}, the earth shook beneath {kingdom}; at {city} walls fell and houses were thrown down, and {dead} died under the stones.",
+        "{When}, the ground of {kingdom} heaved and cracked, and {city} was much broken; {dead} perished.",
+        "{When}, a great shaking of the earth fell upon {kingdom}, and {city} and the lands about it were laid in ruin."
+    ],
+    "Locusts": [
+        "{When}, a cloud of locusts came down upon the fields of {kingdom} about {city}, and the harvest was eaten bare.",
+        "{When}, the locusts darkened the sky over {kingdom}, and where they settled near {city} no green thing was left.",
+        "{When}, {kingdom} was smitten with locusts, and the farmers about {city} reaped little that year."
+    ],
+    "Ruler Died (disaster)": [
+        "{When}, {ruler}, {title} of {kingdom}, perished in the calamity that struck the realm.",
+        "{When}, {title} {ruler} of {kingdom} was lost when disaster fell upon the land.",
+        "{When}, fate took {ruler}, {title} of {kingdom}, in the ruin of that terrible day."
     ]
 }

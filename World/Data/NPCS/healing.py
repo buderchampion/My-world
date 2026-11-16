@@ -23,6 +23,9 @@ def apply_healing(npc: dict, city_has_active_temple: bool) -> bool:
     if npc["health"] >= 100:
         return False
 
+    if npc.get("disease"):          # the sick do not mend until they are well (Data.NPCS.sickness)
+        return False
+
     heal_amount = BASE_HEAL_PER_DAY + (TEMPLE_HEAL_BONUS if city_has_active_temple else 0)
 
     npc["health"] = min(100, npc["health"] + heal_amount)
@@ -45,6 +48,9 @@ def drink_potion(npc: dict, city: dict) -> bool:
     """
 
     if not npc["alive"] or npc["health"] >= POTION_HEALTH_THRESHOLD:
+        return False
+
+    if npc.get("disease"):          # a potion mends wounds, not sickness (Data.NPCS.sickness)
         return False
 
     stock = city.get("resources", {}).get("Potions", 0)

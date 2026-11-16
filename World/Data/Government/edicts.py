@@ -27,7 +27,7 @@
 # Every edict is logged; tax changes, the granary and martial law are
 # chronicled.
 
-EDICTS = ("lower taxes", "raise taxes", "festival", "open the granary", "ban food exports", "martial law", "public works")
+EDICTS = ("lower taxes", "raise taxes", "festival", "open the granary", "ban food exports", "martial law", "public works", "quarantine")
 
 ACT_THRESHOLD = 0.35
 SEASON_DAYS = 90
@@ -55,10 +55,15 @@ LEANS = {
     "ban food exports": {"boldness": -0.6},
     "martial law":      {"mercy": -0.6, "boldness": 0.3},
     "public works":     {"boldness": 0.4, "generosity": 0.3},     # builders: bold, and open-handed
+    "quarantine":       {"boldness": -0.4, "mercy": 0.2},         # the careful shut the gates; the reckless trust to luck
 }
+QUARANTINE_MOOD = 3                  # shut gates and idle roads: a little unhappiness while it lasts
+QUARANTINE_CALL = 0.8                # how strongly any plague in the realm calls for a quarantine...
+QUARANTINE_PER_SICK = 20.0           # ...and more the larger the share of the realm sick of it
 
 CHRONICLED = {"public works": "Edict (public works)", "lower taxes": "Edict (lower taxes)", "raise taxes": "Edict (raise taxes)",
-              "open the granary": "Edict (open the granary)", "martial law": "Edict (martial law)"}
+              "open the granary": "Edict (open the granary)", "martial law": "Edict (martial law)",
+              "quarantine": "Edict (quarantine)"}
 
 
 def today(conn, world_id):
@@ -68,6 +73,12 @@ def today(conn, world_id):
 
 def martial_law_active(kingdom, day):
     return (kingdom.get("martial_law_until") or -1) >= day
+
+
+def quarantined(conn, kingdom_id, day):
+    """Is this kingdom under a quarantine (plague towns shut, roads watched)?"""
+    row = conn.execute("SELECT quarantine_until FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
+    return bool(row) and (row[0] or -1) >= day
 
 
 def exports_banned(kingdom, day):
@@ -98,6 +109,11 @@ def situation(conn, kingdom):
     lords = conn.execute(
         "SELECT COUNT(*) n, SUM(CASE WHEN p.loyalty < ? THEN 1 ELSE 0 END) restless FROM provinces p WHERE p.kingdom_id = ?",
         (RESTLESS_BELOW, kingdom["id"])).fetchone()
+    from Data.NPCS.sickness import plagues
+    marks_p = ",".join("?" * len(plagues()))
+    plague_sick = conn.execute(
+        f"""SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1
+            AND n.disease IN ({marks_p})""", (kingdom["id"], *plagues())).fetchone()[0]
     capital_food = conn.execute(
         "SELECT COALESCE(SUM(amount), 0) FROM city_resources WHERE city_id = ? AND resource_name = 'Food'",
         (kingdom["capital_city_id"],)).fetchone()[0]
@@ -107,6 +123,7 @@ def situation(conn, kingdom):
         "restless_share": (lords["restless"] or 0) / lords["n"] if lords["n"] else 0.0,
         "capital_food": capital_food,
         "works_need": works_need(conn, kingdom),
+        "plague_sick": plague_sick,
         "unrest": kingdom["health_unrest"], "stability": kingdom["health_stability"], "loyalty": kingdom["health_loyalty"],
     }
 
@@ -131,6 +148,9 @@ def needs(kingdom, s, day):
     n["martial law"] = 0.0 if martial_law_active(kingdom, day) or kingdom["treasury"] < MARTIAL_LAW_GOLD_PER_SOLDIER * s["soldiers"] \
         else min(1.0, max(0.0, (50 - s["stability"]) / 50) + 0.5 * s["restless_share"])
     n["public works"] = min(1.0, s.get("works_need", 0.0))      # the share of towns bursting, and able to pay
+    sick = s.get("plague_sick", 0)
+    n["quarantine"] = 0.0 if not sick or (kingdom.get("quarantine_until") or -1) >= day else \
+        min(1.0, QUARANTINE_CALL + QUARANTINE_PER_SICK * sick / max(1, s["people"]))
     return n
 
 
@@ -222,6 +242,11 @@ def apply_edict(conn, kingdom, edict, day):
         done = public_works(conn, kingdom)
         loan = f", {done['borrowed']:.0f} gold lent by the crown" if done["borrowed"] else ""
         return f"{done['upgraded']} buildings enlarged and {done['built']} built in {done['towns']} towns{loan}"
+
+    if edict == "quarantine":
+        conn.execute("UPDATE kingdoms SET quarantine_until = ? WHERE id = ?", (day + SEASON_DAYS, kid))
+        _mood(conn, kid, happiness=-QUARANTINE_MOOD)
+        return "plague towns shut and the roads watched this season"
 
     if edict == "martial law":
         spend_treasury(conn, kid, MARTIAL_LAW_GOLD_PER_SOLDIER * s["soldiers"])

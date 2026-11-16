@@ -302,6 +302,10 @@ class SimulationManager:
         from Data.Magic.magic import heal_the_wounded
         heal_the_wounded(self.conn, self.world_id)
 
+        # Sickness starts, spreads along houses, workplaces and roads, is cured, kills and passes (Data.NPCS.sickness).
+        from Data.NPCS.sickness import sickness_day
+        sickness_day(self.conn, self.world_id)
+
         from Data.NPCS.contentment import drift_happiness
         from Data.Government.edicts import today as contentment_day
         drift_happiness(self.conn, self.world_id, contentment_day(self.conn, self.world_id))
@@ -474,6 +478,14 @@ class SimulationManager:
         # Monster raids: raider lairs strike villages near them (Data.Monsters.raids).
         from Data.Monsters.raids import monster_raids
         monster_raids(self.conn, self.world_id)
+
+        # A plague may break out somewhere: the Red Pox now and then, the Great Pestilence a few times a century.
+        from Data.NPCS.sickness import plagues_break_out
+        plagues_break_out(self.conn, self.world_id)
+
+        # Fires, floods, and now and then an earthquake or a swarm of locusts (Data.World.disasters).
+        from Data.World.disasters import disasters_month
+        disasters_month(self.conn, self.world_id)
         
         self.conn.commit()
 
