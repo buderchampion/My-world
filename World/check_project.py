@@ -687,6 +687,14 @@ FEATURES = [
                   "Data/NPCS/contentment.py": ["level += CATHEDRAL"]},
     },
     {
+        "name": "Balance from the long test run: bigger harvests, families sell their spare, kingdoms buy Food ahead, capitals keep their bread, granaries spoil past a year, market fees on trade not hoard, every kingdom's land feeds it, food sold abroad ships from the villages",
+        "functions": {"Data/World/harvest.py": ["households_sell", "spoil_stores"], "Data/Economy/economy.py": ["market_value", "food_sources", "food_horizon"],
+                      "long_run.py": ["advance_day", "snapshot", "year_events", "main"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["households_sell(self.conn", "spoil_stores(self.conn", "market_value(city)"],
+                  "Data/Economy/economy.py": ["horizon / CONSUMABLE_BUFFER_DAYS", "food_sources(cities_by_kingdom", "food_sources(cities, kingdom"],
+                  "Data/World/countryside.py": ["FOOD_MARGIN"]},
+    },
+    {
         "name": "Ruling households do not emigrate",
         "wired": {"Data/Infrastructure/migration.py": ["RULING_TITLES", 'title") in RULING_TITLES']},
     },
@@ -1303,7 +1311,7 @@ def _smoke_body(r, holder):
 
         for c in get_kingdom_cities(conn, seller["id"]):
             city = get_city(conn, c["id"])
-            city["resources"]["Food"] = 100000.0
+            city["resources"]["Food"] = 10000000.0      # far beyond its own needs until the next harvest (economy.food_horizon)
             save_city(conn, city)
 
         # every other kingdom neither short nor in surplus, so this buyer and
@@ -1312,7 +1320,7 @@ def _smoke_body(r, holder):
         for other in kingdoms[2:]:
             for c in get_kingdom_cities(conn, other["id"]):
                 city = get_city(conn, c["id"])
-                city["resources"]["Food"] = economy.get_target_stock("Food", city)
+                city["resources"]["Food"] = economy.get_target_stock("Food", city) * economy.food_horizon(conn, world_id) / economy.CONSUMABLE_BUFFER_DAYS
                 save_city(conn, city)
 
         conn.commit()
@@ -1354,9 +1362,10 @@ def _smoke_body(r, holder):
                     ).fetchone()
                     expected = round(city["population"] * amount, 2)
                     if resource == "Food":     # plus last year's surplus, until the first harvest (Data.World.harvest)
-                        from Data.World.harvest import days_until_harvest
+                        from Data.World.harvest import days_until_harvest, START_RESERVE_DAYS
                         clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
-                        expected = round(expected + city["population"] * days_until_harvest(clock["clock_month"], clock["clock_day"]), 2)
+                        expected = round(expected + city["population"] * (days_until_harvest(clock["clock_month"], clock["clock_day"])
+                                                                          + START_RESERVE_DAYS), 2)     # until the harvest, and a reserve
                     if row is None or abs(row["amount"] - expected) > 0.01:
                         wrong.append(f"{city['name']} {resource}: {row['amount'] if row else 'none'} (expected {expected})")
             assert not wrong, f"{len(wrong)} starting stocks are wrong, e.g. " + "; ".join(wrong[:3])
@@ -1439,7 +1448,14 @@ def _smoke_body(r, holder):
                 rural = sum(C.total_people(c) for c in mine if c["type"] == "Village")
                 share = rural / sum(C.total_people(c) for c in mine)
                 want = REPUBLIC_RURAL_SHARE if types[kingdom_id] == "Republic" else C.RURAL_SHARE
-                assert abs(share - want) <= 0.04, f"a {types[kingdom_id]} has {share:.0%} of its people in villages, not about {want:.0%}"
+                assert share >= want - 0.04, f"a {types[kingdom_id]} has {share:.0%} of its people in villages, not about {want:.0%}"
+                if share > want + 0.04:
+                    # more farmers than the share only where the land is poor: just enough to feed the kingdom
+                    from Data.World.harvest import HARVEST_PER_HOUSEHOLD, SEED_SHARE, DAYS_PER_YEAR
+                    reaped = sum(c["households"] * HARVEST_PER_HOUSEHOLD * c["farmland"] * (1 - SEED_SHARE) for c in mine if c["households"])
+                    eaten = sum(C.total_people(c) for c in mine) * DAYS_PER_YEAR
+                    assert reaped <= eaten * (C.FOOD_MARGIN + 0.15), \
+                        f"a {types[kingdom_id]} has {share:.0%} of its people in villages, not about {want:.0%}, though its land feeds it well"
 
             villages = [c for c in cities if c["type"] == "Village"]
             assert villages and all(v["households"] >= C.MIN_HOUSEHOLDS for v in villages), "a village has too few households (or none)"
@@ -2210,7 +2226,7 @@ def _smoke_body(r, holder):
             from Data.Economy.economy import get_target_stock
 
             clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
-            days = H.days_until_harvest(clock["clock_month"], clock["clock_day"])
+            days = H.days_until_harvest(clock["clock_month"], clock["clock_day"]) + H.START_RESERVE_DAYS   # until the harvest, and a reserve
             villages = [dict(v) for v in conn.execute(
                 """SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
                    WHERE k.world_id = ? AND c.households > 0""", (world_id,))]
@@ -3244,6 +3260,54 @@ def _smoke_body(r, holder):
 
     run_step(r, "republics charge customs duties, and their grain offices buy reserves abroad", republics_trade)
 
+    def food_ships_from_villages():
+        from Data.Economy.economy import simulate_cross_kingdom_trade_day, get_target_stock, food_horizon, CONSUMABLE_BUFFER_DAYS
+        from Data.Database.repository import get_city, save_city, get_kingdom_cities
+        from Data.NPCS.sickness import plague_towns, FEAR_AT
+        from Data.Government.campaigns import besieged_city_ids
+        import Data.World.countryside as CS
+        import Data.World.harvest as H
+
+        # poor land still feeds its kingdom: forest villages are planned big enough
+        plan = CS.plan_villages(3000, [0.6, 0.6, 0.6])
+        reaped = sum(h * H.HARVEST_PER_HOUSEHOLD * 0.6 * (1 - H.SEED_SHARE) for h, _ in plan)
+        eaten = (3000 + sum(n for _, n in plan) + sum(h for h, _ in plan) * CS.FAMILY_SIZE) * H.DAYS_PER_YEAR
+        assert reaped >= eaten * (CS.FOOD_MARGIN - 0.05), f"villages on poor land reap {reaped:.0f}, but the kingdom eats {eaten:.0f}"
+
+        # the seller's grain lies in one village; its capital is bare; the buyer has none
+        avoid = set(plague_towns(conn, None, FEAR_AT)) | set(besieged_city_ids(conn, world_id))
+        kingdoms = [dict(k) for k in conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND capital_city_id IS NOT NULL ORDER BY id", (world_id,))]
+        buyer = next((k for k in kingdoms if k["capital_city_id"] not in avoid), None)
+        seller = next((k for k in kingdoms if k["id"] != buyer["id"] and k["capital_city_id"] not in avoid
+                       and any(c["type"] == "Village" and c["id"] not in avoid for c in get_kingdom_cities(conn, k["id"]))), None)
+        assert buyer and seller, "(setup) no two kingdoms free of plague and siege to trade"
+        village_id = next(c["id"] for c in get_kingdom_cities(conn, seller["id"]) if c["type"] == "Village" and c["id"] not in avoid)
+        conn.execute("UPDATE kingdoms SET export_ban_until = NULL, treasury = 10000000 WHERE world_id = ?", (world_id,))
+        for k in kingdoms:
+            for c in get_kingdom_cities(conn, k["id"]):
+                city = get_city(conn, c["id"])
+                if k["id"] == buyer["id"]:
+                    city["resources"]["Food"] = 0.0
+                elif c["id"] == village_id:
+                    city["resources"]["Food"] = 10.0 ** 6
+                elif k["id"] == seller["id"]:
+                    city["resources"]["Food"] = 0.0
+                else:
+                    city["resources"]["Food"] = get_target_stock("Food", city) * food_horizon(conn, world_id) / CONSUMABLE_BUFFER_DAYS
+                save_city(conn, city)
+        conn.commit()
+        before = conn.execute("SELECT COALESCE(MAX(id), 0) FROM caravans").fetchone()[0]
+        sold = [t for t in simulate_cross_kingdom_trade_day(conn, world_id) if t["resource"] == "Food" and t["seller"] == seller["name"]]
+        assert sold, "a kingdom with a village full of grain and a bare capital sold no Food abroad"
+        assert conn.execute("SELECT COUNT(*) FROM caravans WHERE id > ? AND origin_city_id = ? AND resource = 'Food'",
+                            (before, village_id)).fetchone()[0], "the Food sold abroad did not set out from the village that held it"
+        village = get_city(conn, village_id)
+        keep = get_target_stock("Food", village) * food_horizon(conn, world_id) / CONSUMABLE_BUFFER_DAYS
+        assert village["resources"]["Food"] >= keep - 0.01, "the village sold away the grain it needs itself"
+        assert get_city(conn, seller["capital_city_id"])["resources"].get("Food", 0) == 0, "the bare capital somehow shipped Food"
+
+    run_step(r, "every kingdom's land is planned to feed it; food sold abroad ships from the villages that hold it", food_ships_from_villages)
+
     def campaign_marches_and_fights():
         import Data.Government.campaigns as CP
         import Data.Government.armies as A
@@ -3350,13 +3414,17 @@ def _smoke_body(r, holder):
             "SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id", (world_id,))]
         k_def = next(k for k in standing if conn.execute("SELECT 1 FROM cities WHERE kingdom_id = ? AND id != ?",
                                                          (k["id"], k["capital"])).fetchone())
-        k_att = next(k for k in standing if k["id"] != k_def["id"])
         town = conn.execute("SELECT id FROM cities WHERE kingdom_id = ? AND id != ? ORDER BY id LIMIT 1", (k_def["id"], k_def["capital"])).fetchone()[0]
-        capital = get_city(conn, k_att["capital"])
-        capital["resources"]["Food"] = capital["resources"].get("Food", 0) + 10000
-        save_city(conn, capital)
-        conn.commit()
-        army = A.raise_army(conn, k_att, get_city(conn, k_att["capital"]), size=3)
+        army = None
+        for k_att in [k for k in standing if k["id"] != k_def["id"]]:     # a kingdom with soldiers free (earlier wars may have spent some)
+            capital = get_city(conn, k_att["capital"])
+            capital["resources"]["Food"] = capital["resources"].get("Food", 0) + 10000
+            save_city(conn, capital)
+            conn.commit()
+            army = A.raise_army(conn, k_att, get_city(conn, k_att["capital"]), size=3)
+            if army:
+                break
+        assert army, "(setup) no kingdom had a soldier free to besiege a town"
         saved_raids = CV.BANDIT_CHANCE
         CV.BANDIT_CHANCE = 0.0
         try:
@@ -4041,7 +4109,7 @@ def _smoke_body(r, holder):
 
         kingdom = get_kingdom(conn, kingdoms[0]["id"])
         capital = get_city(conn, kingdom["capital"])
-        capital["resources"].update({"Food": 20000.0, "Weapons": 500.0, "Potions": 50.0})
+        capital["resources"].update({"Food": 10000000.0, "Weapons": 500.0, "Potions": 50.0})
         save_city(conn, capital)
         target = next(
             (c for other in kingdoms[1:] for c in get_kingdom_cities(conn, other["id"])

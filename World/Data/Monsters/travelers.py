@@ -26,6 +26,7 @@ from Data.Monsters.bestiary import by_name
 AMBUSH_REACH = 200               # map units: a lair hunts the roads this near it
 AMBUSH_CHANCE = 0.01             # each day, for each lair near enough: a typical trade journey through the wilds is attacked about one time in six
 PACK_SHARE = 0.5                 # the share of a lair that hunts (the rest keep the den)
+TRAVELER_SHARE = 0.4             # folk on a journey keep to the road in company: beasts fall on them this much as often as on caravans
 CARAVAN_DRIVERS = 2              # a caravan's commoners...
 CARAVAN_GUARDS = 1               # ...and its hired guard
 DISTANCE_PER_TRAVEL_DAY = 90     # road speed (Data.Infrastructure.roads)
@@ -151,7 +152,7 @@ def beasts_on_the_roads(conn, world_id):
         for lair in lairs:
             if lair["count"] <= 0 or (lair["map_x"] - x) ** 2 + (lair["map_y"] - y) ** 2 > reach2:
                 continue
-            if random.random() >= chance[lair["id"]] or by_name(lair["monster"]) is None:
+            if random.random() >= chance[lair["id"]] * (TRAVELER_SHARE if kind == "traveler" else 1) or by_name(lair["monster"]) is None:
                 continue
             report = ambush(conn, world_id, lair, kind, ident, row)
             if report:

@@ -123,7 +123,7 @@ class SimulationManager:
         from Data.Relationships.relationships import apply_grief
         from Data.Economy.economy import (
             simulate_city_economy_day, simulate_kingdom_trade_day, simulate_cross_kingdom_trade_day,
-            total_resource_value
+            total_resource_value, market_value
         )
         from Data.Combat.combat import resolve_raid
         from Data.Government.military import apply_military_upkeep, MILITARY_PROFESSIONS
@@ -152,7 +152,8 @@ class SimulationManager:
         # than relentless. ~78% chance of at least one raid per camp
         # over a 30-day month at this rate.
         RAID_CHANCE_PER_DAY = 0.05
-        CITY_WEALTH_MARKET_FEE_RATE = 0.02
+        CITY_WEALTH_MARKET_FEE_RATE = 0.005    # a day, on a month's trade (long_run.py: at 0.02 town purses still grew
+                                               # by 18 million a year with little to spend it on)
 
         # A city with genuinely happy residents draws extra visitors --
         # trade, tourism, word of mouth -- generating real treasury
@@ -185,7 +186,7 @@ class SimulationManager:
                 from Data.World.harvest import feed_households
                 feed_households(city)
                 
-                market_revenue = round(total_resource_value(city) * CITY_WEALTH_MARKET_FEE_RATE, 2)
+                market_revenue = round(market_value(city) * CITY_WEALTH_MARKET_FEE_RATE, 2)   # on the trade, not the hoard
                 if market_revenue > 0:
                     add_city_wealth(self.conn, city["id"], market_revenue)
 
@@ -476,6 +477,11 @@ class SimulationManager:
         village_hardship(self.conn, self.world_id)
 
         # Monster raids: raider lairs strike villages near them (Data.Monsters.raids).
+        # Families sell the food they can spare at the village markets, more when it is dear (Data.World.harvest).
+        from Data.World.harvest import households_sell, spoil_stores
+        households_sell(self.conn, self.world_id)
+        spoil_stores(self.conn, self.world_id)
+
         from Data.Monsters.raids import monster_raids
         monster_raids(self.conn, self.world_id)
 

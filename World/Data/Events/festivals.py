@@ -6,7 +6,7 @@ Feasts        every settlement keeps three feasts a year, edict or no edict:
               Founding Day (a month of its own). A town pays from its purse and
               its Food stock, a village from its households' store; everyone
               there is happier and calmer for it, and a few become friends.
-              No feast in a plague town, a besieged one, or a village going
+              No feast in a plague town, a besieged or occupied one, or a village going
               hungry -- and a poor town keeps a meagre feast, at half the joy.
 Fairs         once a year (in a season of its own) every capital and every town
               of FAIR_MIN_PEOPLE holds a fair. Folk with gold to spend come
@@ -84,6 +84,9 @@ def _cancelled(conn, world_id, city):
     from Data.NPCS.sickness import plague_towns, FEAR_AT
     from Data.Government.campaigns import besieging_army
     if city["id"] in plague_towns(conn, world_id, FEAR_AT) or besieging_army(conn, city["id"]):
+        return True
+    from Data.Government.occupation import occupied
+    if occupied(conn, city["id"]):                      # no feasting under a foreign garrison
         return True
     return city["type"] == "Village" and (city["hungry_days"] or 0) > 0
 

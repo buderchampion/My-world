@@ -348,6 +348,28 @@ def total_resource_value(city):
     )
 
 
+MARKET_STOCK_COUNTED = 10   # a town's market fees count its goods up to this many times its target stock (a month of Food)
+
+
+def market_value(city):
+    """
+    The worth of the goods a town's market trades in: each resource counted up
+    to MARKET_STOCK_COUNTED times its target stock. A granary heaped beyond
+    that is hoard, not trade -- measured with long_run.py, fees on the whole
+    of the stores grew the town purses by 170 million gold a year as the food
+    piled up, money from nothing.
+    """
+    resource_types = load_json(RESOURCE_TYPES)
+    consumption_rates = load_json(CONSUMPTION_RATES)
+    total = 0.0
+    for resource, amount in city.get("resources", {}).items():
+        if resource not in resource_types:
+            continue
+        cap = get_target_stock(resource, city, resource_types, consumption_rates) * MARKET_STOCK_COUNTED
+        total += min(amount, cap) * get_price(resource, city)
+    return total
+
+
 def classify_supply(resource, city):
 
     resource_types = load_json(RESOURCE_TYPES)
@@ -461,6 +483,15 @@ def simulate_kingdom_trade_day(cities, trade_fraction=DEFAULT_TRADE_FRACTION):
 # real gold rather than free barter.
 DEFAULT_CROSS_KINGDOM_TRADE_FRACTION = 0.3
 
+# Food between kingdoms is bought ahead: a kingdom judges its Food against
+# FOOD_TRADE_DAYS of eating (not the few days' buffer a town keeps), so it
+# starts buying abroad with a month and a half still in hand -- time for the
+# caravans to arrive -- and only kingdoms with months to spare sell. Measured
+# with the long test run (long_run.py): judged on the few days' buffer, a
+# kingdom only bought once it was all but empty, a little each day, and its
+# towns starved while their neighbours sat on full granaries.
+FOOD_TRADE_DAYS = 90
+
 # Every successful cross-kingdom trade shifts favor for both sides --
 # the buyer's favor toward the seller rises (real aid received), and
 # the seller's favor toward the buyer dips slightly (giving up stock
@@ -471,6 +502,39 @@ DEFAULT_CROSS_KINGDOM_TRADE_FRACTION = 0.3
 # own, exactly the "one-sided trade route wears thin" dynamic wanted.
 TRADE_FAVOR_GAIN = 0.3
 TRADE_FAVOR_LOSS = -0.1
+
+
+def food_horizon(conn, world_id):
+    """
+    How many days of eating a kingdom's Food must cover: until the next
+    harvest, and FOOD_TRADE_DAYS beyond it. Grain comes in once a year, so a
+    kingdom judged only on the next few months sold its winter bread abroad
+    after harvest and starved before the next (measured with long_run.py).
+    """
+    from Data.World.harvest import days_until_harvest
+    clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
+    return days_until_harvest(clock[0], clock[1]) + FOOD_TRADE_DAYS
+
+
+def food_sources(cities, capital_id, days=FOOD_TRADE_DAYS):
+    """
+    Where a kingdom's Food for sale abroad lies: [(city, spare)], the capital
+    first, then the rest by most to spare. Every settlement keeps days of its
+    own eating (food_horizon: until the next harvest and a reserve) and sells
+    only what is beyond it. Measured with the long test run (long_run.py): a
+    kingdom's spare grain sits in its village markets after harvest, and
+    shipping only from the capital -- which holds a few days' bread and the
+    grain tax -- meant no kingdom ever had Food to sell, and a poor-landed one
+    starved beside them.
+    """
+    sources = []
+    for city in cities:
+        keep = get_target_stock("Food", city) * days / CONSUMABLE_BUFFER_DAYS
+        spare = round(city.get("resources", {}).get("Food", 0) - keep, 2)
+        if spare > 0:
+            sources.append((city, spare))
+    sources.sort(key=lambda entry: (entry[0]["id"] != capital_id, -entry[1]))
+    return sources
 
 
 def simulate_cross_kingdom_trade_day(
@@ -518,6 +582,7 @@ def simulate_cross_kingdom_trade_day(
     # a kingdom that has banned food exports sells no Food abroad (Data.Government.edicts)
     from Data.Government.edicts import exports_banned, today as edict_day
     trade_day = edict_day(conn, world_id)
+    horizon = food_horizon(conn, world_id)
 
     trade_log = []
 
@@ -537,8 +602,20 @@ def simulate_cross_kingdom_trade_day(
                 get_target_stock(resource, c, resource_types, consumption_rates)
                 for c in cities
             )
+            if resource == "Food":
+                total_target *= horizon / CONSUMABLE_BUFFER_DAYS     # judged on eating until next harvest and beyond, not days
 
             if total_target <= 0:
+                continue
+
+            if resource == "Food":
+                # a kingdom sells Food only from what its settlements hold beyond their own horizon
+                spare = sum(extra for _, extra in food_sources(cities, kingdom.get("capital"), horizon))
+                if spare > 0:
+                    if not exports_banned(kingdom, trade_day):
+                        surplus_entries.append([kingdom, spare])
+                elif total_stock <= total_target * SHORTAGE_THRESHOLD:
+                    shortage_entries.append([kingdom, total_target - total_stock])
                 continue
 
             if total_stock >= total_target * SURPLUS_THRESHOLD:
@@ -595,8 +672,14 @@ def simulate_cross_kingdom_trade_day(
                 amount = min(amount, affordable_amount)
 
                 # the goods leave from the seller's capital, so it can only ship what the capital
-                # actually holds -- the kingdom's surplus may lie in its other towns
-                on_hand = max(0.0, seller_capital["resources"].get(resource, 0))
+                # actually holds -- the kingdom's surplus may lie in its other towns.
+                # Food is the exception: a kingdom's spare grain lies in its village markets,
+                # not its capital, so it ships from wherever it lies (see food_sources)
+                if resource == "Food":
+                    sources = food_sources(cities_by_kingdom[seller_kingdom["id"]], seller_capital_id, horizon)
+                    on_hand = sum(spare for _, spare in sources)
+                else:
+                    on_hand = max(0.0, seller_capital["resources"].get(resource, 0))
                 amount = round(min(amount, on_hand), 2)
 
                 if amount <= 0:
@@ -613,14 +696,30 @@ def simulate_cross_kingdom_trade_day(
                 adjust_kingdom_favor(conn, buyer_kingdom["id"], seller_kingdom["id"], TRADE_FAVOR_GAIN)
                 adjust_kingdom_favor(conn, seller_kingdom["id"], buyer_kingdom["id"], TRADE_FAVOR_LOSS)
 
-                seller_capital["resources"][resource] = round(seller_capital["resources"].get(resource, 0) - amount, 2)
-                save_city(conn, seller_capital)
-
                 from Data.Infrastructure.caravans import dispatch_caravan
-                dispatch_caravan(
-                    conn, seller_capital["id"], buyer_capital_id, resource, amount,
-                    buyer_kingdom["id"], seller_kingdom["id"]
-                )
+                if resource == "Food":
+                    left = amount
+                    for source, spare in sources:
+                        part = round(min(left, spare), 2)
+                        if part <= 0:
+                            continue
+                        source["resources"]["Food"] = round(source["resources"].get("Food", 0) - part, 2)
+                        save_city(conn, source)
+                        if dispatch_caravan(conn, source["id"], buyer_capital_id, "Food", part,
+                                            buyer_kingdom["id"], seller_kingdom["id"]) is None:
+                            # no caravan set out (a besieged or plague-struck buyer): the grain stayed home,
+                            # and this copy must say so before it is saved again
+                            source["resources"]["Food"] = round(source["resources"]["Food"] + part, 2)
+                        left = round(left - part, 2)
+                        if left <= 0:
+                            break
+                else:
+                    seller_capital["resources"][resource] = round(seller_capital["resources"].get(resource, 0) - amount, 2)
+                    save_city(conn, seller_capital)
+                    dispatch_caravan(
+                        conn, seller_capital["id"], buyer_capital_id, resource, amount,
+                        buyer_kingdom["id"], seller_kingdom["id"]
+                    )
 
                 seller_entry[1] -= amount
                 need -= amount

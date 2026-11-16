@@ -15,7 +15,9 @@ COURTSHIP_MONTHS = 6        # the least time before they may marry
 WEDDING_CHANCE = 0.35       # each month after that
 MAX_AGE_GAP = 15
 DAYS_PER_MONTH = 30
-BIRTH_CHANCE = 0.02         # each month, for a married couple of whom one is of age to have children
+BIRTH_CHANCE = 0.035        # each month, for a married couple of whom one is of age to have children
+                            # (about a child every two or three years: measured with long_run.py, 0.02 left
+                            # births well short of deaths, and a world never recovered from a plague)
 FOUNDING_AGE = 25           # at generation, about FOUNDING_SHARE of adults this old start married
 FOUNDING_SHARE = 0.5
 FOUNDING_AGE_GAP = 10

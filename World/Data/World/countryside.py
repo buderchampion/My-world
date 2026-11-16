@@ -41,6 +41,15 @@ RIVER_SITE_BONUS = 0.3
 SITE_WEIGHT_POWER = 3
 VILLAGE_LAND_POWER = 1.5
 
+# A kingdom's fields must feed it: in an ordinary year its villages reap at
+# least FOOD_MARGIN times what all its people eat (households, named
+# villagers and towns alike), so one bad harvest is a lean year, not a
+# famine. Where the land is poor (forest, hills) that takes more farming
+# households than RURAL_SHARE alone would give. Measured with the long test
+# run (long_run.py): elves in their forests, sized by headcount alone, reaped
+# barely what they ate, and the first bad harvest starved a fifth of them.
+FOOD_MARGIN = 1.3
+
 
 def named_villagers(households):
     return max(NAMED_MIN, min(NAMED_MAX, round(NAMED_PER_ROOT_HOUSEHOLD * math.sqrt(households))))
@@ -94,6 +103,22 @@ def plan_villages(urban_people, village_farmland, rural_share=RURAL_SHARE):
     for _ in range(3):      # named villagers depend on size, and size on them: settle in a few passes
         to_share = max(0.0, rural_target - sum(named)) / FAMILY_SIZE
         households = [max(MIN_HOUSEHOLDS, round(to_share * w / total_weight)) for w in weights]
+        named = [named_villagers(h) for h in households]
+
+    # then enough of them to feed the kingdom, however poor its land
+    from Data.World.harvest import HARVEST_PER_HOUSEHOLD, SEED_SHARE, DAYS_PER_YEAR
+    for _ in range(3):
+        spare = sum(h * (HARVEST_PER_HOUSEHOLD * max(0.05, f) * (1 - SEED_SHARE) - FAMILY_SIZE * DAYS_PER_YEAR * FOOD_MARGIN)
+                    for h, f in zip(households, village_farmland))
+        need = (urban_people + sum(named)) * DAYS_PER_YEAR * FOOD_MARGIN
+        if spare >= need:
+            break
+        # each extra household brings in what it grows beyond its own eating, at the villages' average land
+        per_household = spare / sum(households) if spare > 0 else 0
+        if per_household <= 0:
+            break
+        scale = 1 + (need - spare) / per_household / sum(households)
+        households = [max(MIN_HOUSEHOLDS, round(h * scale)) for h in households]
         named = [named_villagers(h) for h in households]
 
     return list(zip(households, named))

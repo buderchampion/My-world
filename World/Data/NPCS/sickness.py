@@ -53,6 +53,7 @@ QUARANTINE_SHARE = 0.2         # a quarantined kingdom's sick towns pass plague 
 NOTICED_AFTER = 2              # a case is only seen for what it is (and cured) after this many days
 CHRONICLE_AT = 10              # a plague is chronicled once this many in a kingdom are sick of it at once
 REOPEN_WITHIN = 30             # a plague back in a kingdom this soon after it left is the same visitation
+FARMSTEADS = 0.7               # a village's households, spread over their farmsteads, die at this share of its named villagers' rate
 FEAR_AT = 3                    # a town with this many plague cases is afraid (Data.NPCS.contentment)
 
 
@@ -298,7 +299,8 @@ def bury(conn, dead, people):
         if p["city_type"] == "Village":
             named = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1", (p["city_id"],)).fetchone()[0]
             if named:
-                conn.execute("UPDATE cities SET households = MAX(0, households - households / ?) WHERE id = ?", (named, p["city_id"]))
+                conn.execute("UPDATE cities SET households = MAX(0, households - households * ? / ?) WHERE id = ?",
+                             (FARMSTEADS, named, p["city_id"]))
         npc.update(alive=False, health=0, workplace=None, home=None)
         save_npc(conn, npc)
         conn.execute("UPDATE npcs SET disease = NULL, disease_days = 0 WHERE id = ?", (npc_id,))

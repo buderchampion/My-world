@@ -9,10 +9,32 @@ import random
 # village market; if that is empty too, the village goes hungry.
 
 # Food a household's fields yield in a year, on farmland 1.0 in a normal
-# year. A household of five eats 1,800 a year, so a good-land family feeds
-# itself and about one more mouth -- sized so that a typical kingdom just
-# about feeds itself in a normal year (see the countryside notes).
-HARVEST_PER_HOUSEHOLD = 3600
+# year. A household of five eats 1,800 a year. After seed and grain tax a
+# family on middling land (0.7) has about 2,450 left: its year, a reserve,
+# and food to sell to the towns, where about a third of the people live (more
+# with their children). Measured with the long test run (long_run.py): at the
+# old 3,600 the towns ran dry a hundred days after every harvest while the
+# villages sat on their stores, and starved.
+HARVEST_PER_HOUSEHOLD = 5000
+
+# What a family keeps back: its food until the next harvest, and a reserve of
+# RESERVE_DAYS against a bad year. Anything above it goes to market at the
+# harvest; and through the year, each month, families sell SELL_SHARE of what
+# they hold above their keep -- more as food grows dear (the kingdom's price
+# level), down to their keep and never below.
+RESERVE_DAYS = 90
+SELL_SHARE = 0.25
+SELL_PRICE = 1.0       # coin a family takes for each Food sold (Food's base price), times the kingdom's price level
+
+# Grain keeps, but not forever: each month a town's Food beyond KEEP_DAYS of its
+# people's eating loses SPOIL_SHARE to rats and rot. Measured with long_run.py:
+# without it the towns' granaries grew by millions every year.
+KEEP_DAYS = 360
+SPOIL_SHARE = 0.05
+
+# A new world opens as though last year's harvest was a fair one: the stores
+# hold food until the first harvest and this much beyond.
+START_RESERVE_DAYS = 60
 
 # Of every harvest: kept back as next year's seed, and sent to the crown's
 # capital as grain tax.
@@ -150,7 +172,7 @@ def run_harvest(conn, world_id, year):
         tax = reaped * GRAIN_TAX_SHARE
         left = reaped - seed - tax
 
-        room = max(0.0, v["households"] * year_need - v["household_store"])
+        room = max(0.0, v["households"] * FAMILY_SIZE * (DAYS_PER_YEAR + RESERVE_DAYS) - v["household_store"])   # a year and a reserve
         kept = min(left, room)
         surplus = left - kept
 
@@ -248,7 +270,7 @@ def ensure_household_stores(conn, world_id):
         return 0
 
     clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
-    days = days_until_harvest(clock["clock_month"], clock["clock_day"])
+    days = days_until_harvest(clock["clock_month"], clock["clock_day"]) + START_RESERVE_DAYS
     rows = conn.execute(
         """
         SELECT c.id, c.households FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
@@ -273,3 +295,48 @@ def ensure_household_stores(conn, world_id):
 
     conn.commit()
     return len(rows)
+
+def households_sell(conn, world_id):
+    """
+    Monthly: families sell food they hold beyond their keep (until the next
+    harvest, plus RESERVE_DAYS) at the village market, where trade carries it to
+    the towns: SELL_SHARE of the spare at ordinary prices, more as food grows
+    dear in their kingdom (up to all of it). They take coin for it (into the
+    village's purse). Returns the Food sold.
+    """
+
+    clock = conn.execute("SELECT clock_month, clock_day FROM worlds WHERE id = ?", (world_id,)).fetchone()
+    keep_days = days_until_harvest(clock["clock_month"], clock["clock_day"]) + RESERVE_DAYS
+    sold = 0.0
+    for v in conn.execute(
+            """SELECT c.id, c.households, c.household_store, k.price_level FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND k.status != 'Fallen' AND c.households > 0""", (world_id,)).fetchall():
+        spare = (v["household_store"] or 0) - v["households"] * FAMILY_SIZE * keep_days
+        if spare <= 0:
+            continue
+        share = min(1.0, SELL_SHARE * max(1.0, v["price_level"] or 1.0) ** 2)
+        amount = round(spare * share, 2)
+        conn.execute("UPDATE cities SET household_store = household_store - ? WHERE id = ?", (amount, v["id"]))
+        _add_food(conn, v["id"], amount)
+        conn.execute("UPDATE cities SET wealth = wealth + ? WHERE id = ?",               # sold at the kingdom's price
+                     (round(amount * SELL_PRICE * (v["price_level"] or 1.0), 2), v["id"]))
+        sold += amount
+    conn.commit()
+    return round(sold, 2)
+
+
+def spoil_stores(conn, world_id):
+    """Monthly: Food a town holds beyond KEEP_DAYS of its people's eating spoils in part. Returns the Food lost."""
+    lost = 0.0
+    for c in conn.execute(
+            """SELECT c.id, r.amount, (SELECT COUNT(*) FROM npcs n WHERE n.city_id = c.id AND n.alive = 1)
+                      + COALESCE(c.households, 0) * 5 people
+               FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id JOIN city_resources r ON r.city_id = c.id AND r.resource_name = 'Food'
+               WHERE k.world_id = ?""", (world_id,)).fetchall():
+        excess = (c["amount"] or 0) - c["people"] * KEEP_DAYS
+        if excess > 0:
+            gone = round(excess * SPOIL_SHARE, 2)
+            conn.execute("UPDATE city_resources SET amount = amount - ? WHERE city_id = ? AND resource_name = 'Food'", (gone, c["id"]))
+            lost += gone
+    conn.commit()
+    return round(lost, 2)
