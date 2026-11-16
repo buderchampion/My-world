@@ -301,6 +301,14 @@ def town_details(conn, city_id):
         sick = []
     if sick:
         rows.append(("Sick", ", ".join(f"{n} of {d}" for d, n in sick)))
+    try:                                                   # crime (worlds from before it: nothing to show)
+        day = conn.execute("SELECT (clock_year - 1) * 360 + (clock_month - 1) * 30 + clock_day - 1 FROM worlds LIMIT 1").fetchone()[0]
+        thefts = conn.execute("SELECT COUNT(*), SUM(caught) FROM crimes WHERE city_id = ? AND day >= ?", (city_id, day - 360)).fetchone()
+        guild = conn.execute("SELECT name FROM thieves_guilds WHERE city_id = ? AND status = 'Active'", (city_id,)).fetchone()
+    except Exception:
+        thefts, guild = None, None
+    if thefts and thefts[0]:
+        rows.append(("Crime", f"{thefts[0]} thefts this year, {thefts[1] or 0} caught" + (f"; {guild[0]}" if guild else "")))
     if c["households"]:
         rows.append(("Households", f"{c['households']:,.0f} farming families (about {c['households'] * 5:,.0f} people)"))
     if people[3] is not None:

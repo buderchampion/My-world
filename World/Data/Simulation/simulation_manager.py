@@ -221,8 +221,8 @@ class SimulationManager:
                     if npc["profession"] != "Laborer":
                         tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
                         changed = True
-                    elif npc["id"] not in away_ids:
-                        # no trade: a day's casual labour (Data.Economy.food_market)
+                    elif npc["id"] not in away_ids and npc.get("jailed_until") is None:
+                        # no trade: a day's casual labour (Data.Economy.food_market); none in jail (Data.Government.crime)
                         npc["gold"] = round(npc["gold"] + LABOUR_WAGE, 2)
                         changed = True
 
@@ -486,6 +486,10 @@ class SimulationManager:
         # Fires, floods, and now and then an earthquake or a swarm of locusts (Data.World.disasters).
         from Data.World.disasters import disasters_month
         disasters_month(self.conn, self.world_id)
+
+        # Thieves steal, the watch catches some, the crown judges them; thieves' guilds rise and fall (Data.Government.crime).
+        from Data.Government.crime import crime_month
+        crime_month(self.conn, self.world_id)
 
         # Feasts, fairs, and at midsummer the tournaments (Data.Events.festivals).
         from Data.Events.festivals import festivals_month

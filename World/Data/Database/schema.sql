@@ -357,6 +357,33 @@ CREATE TABLE IF NOT EXISTS region_blights (
     UNIQUE (region_id, year)
 );
 
+-- Crime (Data.Government.crime): every theft, whether caught and how it was punished; and the thieves' guilds.
+CREATE TABLE IF NOT EXISTS crimes (
+    id          INTEGER PRIMARY KEY,
+    world_id    INTEGER NOT NULL REFERENCES worlds(id),
+    city_id     INTEGER NOT NULL REFERENCES cities(id),
+    thief_id    INTEGER NOT NULL REFERENCES npcs(id),
+    victim_id   INTEGER REFERENCES npcs(id),
+    kind        TEXT NOT NULL,
+    amount      REAL NOT NULL DEFAULT 0,
+    day         INTEGER NOT NULL,
+    caught      INTEGER NOT NULL DEFAULT 0,
+    punishment  TEXT                      -- fine, jail or gallows (caught only)
+);
+CREATE INDEX IF NOT EXISTS idx_crimes_city_day ON crimes(city_id, day);
+
+CREATE TABLE IF NOT EXISTS thieves_guilds (
+    id          INTEGER PRIMARY KEY,
+    world_id    INTEGER NOT NULL REFERENCES worlds(id),
+    city_id     INTEGER NOT NULL REFERENCES cities(id),
+    name        TEXT NOT NULL,
+    master_id   INTEGER REFERENCES npcs(id),
+    chest       REAL NOT NULL DEFAULT 0,
+    founded_day INTEGER NOT NULL,
+    broken_day  INTEGER,
+    status      TEXT NOT NULL DEFAULT 'Active'
+);
+
 CREATE TABLE IF NOT EXISTS harvests (
     id          INTEGER PRIMARY KEY,
     region_id   INTEGER NOT NULL REFERENCES regions(id),

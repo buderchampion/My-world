@@ -105,7 +105,10 @@ def init_database():
     _add_missing_columns(connection, "npcs", {"disease": "TEXT", "disease_days": "INTEGER NOT NULL DEFAULT 0",
                                               "disease_severity": "REAL"})
     _add_missing_columns(connection, "kingdoms", {"quarantine_until": "INTEGER"})
-    _add_missing_columns(connection, "cities", {"afraid_until": "INTEGER"})        # shaken by a disaster (Data.World.disasters)
+    _add_missing_columns(connection, "cities", {"afraid_until": "INTEGER"})
+    # crime (Data.Government.crime): a person's convictions, their guild, and when they leave jail
+    _add_missing_columns(connection, "npcs", {"convictions": "INTEGER NOT NULL DEFAULT 0", "guild_id": "INTEGER",
+                                              "jailed_until": "INTEGER"})        # shaken by a disaster (Data.World.disasters)
     _add_missing_columns(connection, "outbreaks", {"chronicled": "INTEGER NOT NULL DEFAULT 0"})
     connection.execute("CREATE INDEX IF NOT EXISTS idx_npcs_disease ON npcs(disease)")
 

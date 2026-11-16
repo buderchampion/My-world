@@ -266,5 +266,15 @@
         "{When}, a great tournament was held at {city} in {kingdom}; {riders} rode in the lists, and {champion} of {other} was crowned champion.",
         "{When}, the lists were raised at {city}, and of {riders} riders {champion} of {other} unhorsed them all and won the prize of {kingdom}.",
         "{When}, {kingdom} held its summer tournament at {city}, and the day belonged to {champion} of {other}."
+    ],
+    "Thieves' Guild (founded)": [
+        "{When}, the cutpurses of {city} in {kingdom} banded together as {guild}, and {ruler} was their master.",
+        "{When}, a fellowship of thieves called {guild} arose in the alleys of {city}, in {kingdom}, under one {ruler}.",
+        "{When}, it was whispered in {city} that the thieves of that town now answered to {ruler}, master of {guild}."
+    ],
+    "Thieves' Guild (broken)": [
+        "{When}, the crown of {kingdom} broke {guild} in {city}, {fate}.",
+        "{When}, {guild} of {city} was scattered, {fate}, and {kingdom}'s streets were the safer for it.",
+        "{When}, the thieves of {city} were undone: {guild} fell, {fate}."
     ]
 }

@@ -40,7 +40,7 @@ def hire_jobless(conn, world_id):
         """SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
            WHERE k.world_id = ? AND k.status != 'Fallen'""", (world_id,)).fetchall():
         jobless = [row[0] for row in conn.execute(
-            "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND age >= ? ORDER BY age, id",
+            "SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND age >= ? AND jailed_until IS NULL ORDER BY age, id",
             (city["id"], WORKING_AGE))]
         if not jobless:
             continue
