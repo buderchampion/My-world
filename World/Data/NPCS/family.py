@@ -11,13 +11,17 @@ MIN_MARRY_AGE = 18
 COURTSHIP_START = 70        # a friendship this warm can become a courtship
 COURTSHIP_CHANCE = 0.25     # each month, for an unmarried adult not yet courting
 COURTSHIP_GROWTH = 4        # reputation a courting pair gains each month
+FRIENDSHIP_GROWTH = 1       # and two unmarried friends in the same town, each month (long_run.py: friendships
+                            # never deepened, so once a town's few close friendships had wed, weddings and then
+                            # births dried up, with a third of all grown folk single)
 COURTSHIP_MONTHS = 6        # the least time before they may marry
 WEDDING_CHANCE = 0.35       # each month after that
 MAX_AGE_GAP = 15
 DAYS_PER_MONTH = 30
-BIRTH_CHANCE = 0.035        # each month, for a married couple of whom one is of age to have children
-                            # (about a child every two or three years: measured with long_run.py, 0.02 left
-                            # births well short of deaths, and a world never recovered from a plague)
+BIRTH_CHANCE = 0.025        # each month, for a married couple of whom one is of age to have children
+                            # (about a child every three years. Measured with long_run.py: 0.02 left births well
+                            # short of deaths while weddings were stalled; at 0.035, once friends grew into
+                            # couples, towns grew 2% a year and outgrew the countryside's 1%)
 FOUNDING_AGE = 25           # at generation, about FOUNDING_SHARE of adults this old start married
 FOUNDING_SHARE = 0.5
 FOUNDING_AGE_GAP = 10
@@ -136,6 +140,16 @@ def form_families(conn, city):
                 courting[a] = courting[b] = dict(row)
             else:
                 conn.execute("DELETE FROM courtships WHERE npc_a_id = ? AND npc_b_id = ?", (a, b))
+
+    # unmarried friends in the same town grow closer, month by month, toward courting
+    singles = sorted(single)
+    for start in range(0, len(singles), 400):
+        chunk = singles[start:start + 400]
+        marks = ",".join("?" * len(chunk))
+        conn.execute(f"""UPDATE relationships SET reputation = MIN(100, reputation + ?)
+                         WHERE type = 'Friend' AND reputation < 100 AND npc_a_id IN ({marks})
+                           AND npc_b_id IN ({",".join("?" * len(singles))})""",
+                     (FRIENDSHIP_GROWTH, *chunk, *singles))
 
     # going on: they grow closer, and after long enough may marry
     for court in {(c["npc_a_id"], c["npc_b_id"]): c for c in courting.values()}.values():

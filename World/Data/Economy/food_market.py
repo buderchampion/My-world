@@ -28,10 +28,15 @@ HUNGER_UNHAPPINESS = 3
 # it -- by more each year in a row: the first by BAD_YEAR_RISE, the second by
 # twice that, the third by three times (three bad years running take bread to
 # about 2.7x). A good harvest takes it GOOD_YEAR_EASE of the way back toward
-# normal; an ordinary year holds it. Wages do not rise with it, so families
+# normal; an ordinary year FAIR_YEAR_EASE (long_run.py: when only good years
+# eased it, bad years ratcheted bread past four times its price in a world
+# full of grain, and it never came down). It never passes PRICE_LEVEL_MAX, about
+# three bad years running. Wages do not rise with it, so families
 # are squeezed. A revolt that topples the crown resets it (reset_price_level).
 BAD_YEAR_RISE = 0.20
-GOOD_YEAR_EASE = 0.25
+GOOD_YEAR_EASE = 0.40
+FAIR_YEAR_EASE = 0.25
+PRICE_LEVEL_MAX = 3.0
 
 
 def price_level(conn, kingdom_id):
@@ -51,7 +56,7 @@ def food_price(city, conn=None):
 def update_price_level(conn, kingdom_id, verdict):
     """
     After a kingdom's harvest: "bad" raises its price level (more for each bad
-    year in a row), "good" eases it back toward normal, anything else holds it.
+    year in a row), "good" eases it back toward normal, anything else eases it a little.
     Returns (old level, new level).
     """
 
@@ -60,10 +65,10 @@ def update_price_level(conn, kingdom_id, verdict):
 
     if verdict == "bad":
         years += 1
-        new = old * (1 + BAD_YEAR_RISE * years)
+        new = min(PRICE_LEVEL_MAX, old * (1 + BAD_YEAR_RISE * years))
     else:
         years = 0
-        new = 1 + (old - 1) * (1 - GOOD_YEAR_EASE) if verdict == "good" else old
+        new = 1 + (old - 1) * (1 - (GOOD_YEAR_EASE if verdict == "good" else FAIR_YEAR_EASE))
 
     conn.execute("UPDATE kingdoms SET price_level = ?, bad_harvest_years = ? WHERE id = ?",
                  (round(new, 4), years, kingdom_id))

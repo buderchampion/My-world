@@ -136,11 +136,12 @@ def run_grain_offices(conn, world_id):
 
     from Data.Database.repository import (get_city, save_city, get_kingdom_cities, spend_treasury, add_treasury,
                                           adjust_kingdom_favor, create_event)
-    from Data.Economy.economy import get_price, get_target_stock, TRADE_FAVOR_GAIN, TRADE_FAVOR_LOSS
+    from Data.Economy.economy import get_price, food_sources, food_horizon, TRADE_FAVOR_GAIN, TRADE_FAVOR_LOSS
     from Data.Government.edicts import exports_banned, today
     from Data.Infrastructure.caravans import dispatch_caravan
 
     day = today(conn, world_id)
+    horizon = food_horizon(conn, world_id)
     kingdoms = [dict(k) for k in conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,))]
     bought = []
 
@@ -159,21 +160,24 @@ def run_grain_offices(conn, world_id):
         if wanted <= 0 or budget <= 0:
             continue
 
-        # who can sell: foreign capitals holding more Food than their own needs, biggest first
+        # who can sell: foreign kingdoms with Food beyond their own needs until the next harvest
+        # (economy.food_sources -- the same rule as all trade abroad; long_run.py: buying a seller's
+        # capital down to three days' bread, the office starved a kingdom that had just had a bad harvest)
         sellers = []
         for other in kingdoms:
             if other["id"] == republic["id"] or not other["capital_city_id"] or exports_banned(other, day):
                 continue
-            seat = get_city(conn, other["capital_city_id"])
-            spare = seat["resources"].get("Food", 0) - get_target_stock("Food", seat)
+            sources = food_sources([get_city(conn, c["id"]) for c in get_kingdom_cities(conn, other["id"])],
+                                   other["capital_city_id"], horizon)
+            spare = sum(extra for _, extra in sources)
             if spare > 0:
-                sellers.append((spare, other, seat))
+                sellers.append((spare, other, sources))
         sellers.sort(key=lambda entry: -entry[0])
 
-        for spare, seller, seat in sellers:
+        for spare, seller, sources in sellers:
             if wanted <= 0 or budget <= 0:
                 break
-            price = get_price("Food", seat)
+            price = get_price("Food", get_city(conn, seller["capital_city_id"]))
             if price <= 0:
                 continue
             amount = int(min(wanted, spare, budget / (price * duty_rate(seller, republic))) * 100) / 100   # never over budget
@@ -183,11 +187,21 @@ def run_grain_offices(conn, world_id):
             if not spend_treasury(conn, republic["id"], paid):
                 break
             add_treasury(conn, seller["id"], received)
-            seat["resources"]["Food"] = round(seat["resources"]["Food"] - amount, 2)
-            save_city(conn, seat)
+            left = amount
+            for source, extra in sources:               # the grain sets out from wherever it lies
+                part = round(min(left, extra), 2)
+                if part <= 0:
+                    continue
+                source["resources"]["Food"] = round(source["resources"]["Food"] - part, 2)
+                save_city(conn, source)
+                if dispatch_caravan(conn, source["id"], republic["capital_city_id"], "Food", part,
+                                    republic["id"], seller["id"]) is None:
+                    source["resources"]["Food"] = round(source["resources"]["Food"] + part, 2)
+                left = round(left - part, 2)
+                if left <= 0:
+                    break
             adjust_kingdom_favor(conn, republic["id"], seller["id"], TRADE_FAVOR_GAIN)
             adjust_kingdom_favor(conn, seller["id"], republic["id"], TRADE_FAVOR_LOSS)
-            dispatch_caravan(conn, seat["id"], republic["capital_city_id"], "Food", amount, republic["id"], seller["id"])
             create_event(conn, "Grain Office",
                          f"The grain office of {republic['name']} bought {amount:.0f} Food from {seller['name']} "
                          f"for {paid:.0f} gold, to fill the republic's granaries.",

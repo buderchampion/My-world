@@ -682,17 +682,22 @@ FEATURES = [
     {
         "name": "Prosperity: a score for every town (purse, work, mood, trade, safety); the struggling lose households to the thriving; grand buildings; merchant houses buy their way into the nobility",
         "functions": {"Data/Economy/prosperity.py": ["scores", "update_scores", "draw_settlers", "build_grand", "grand_benefits",
-                                                     "merchant_houses", "ennoble", "prosperity_month"]},
+                                                     "merchant_houses", "ennoble", "town_upkeep", "crown_upkeep", "prosperity_month"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["prosperity_month(self.conn", "ennoble(self.conn"],
                   "Data/NPCS/contentment.py": ["level += CATHEDRAL"]},
     },
     {
-        "name": "Balance from the long test run: bigger harvests, families sell their spare, kingdoms buy Food ahead, capitals keep their bread, granaries spoil past a year, market fees on trade not hoard, every kingdom's land feeds it, food sold abroad ships from the villages",
+        "name": "Balance from the long test run: bigger harvests, families sell their spare, kingdoms buy Food ahead, capitals keep their bread, granaries spoil past a year, market fees on trade not hoard, every kingdom's land feeds it, food sold abroad ships from the villages; towns pay upkeep, full land sends families on, ordinary years ease prices, friends grow closer",
         "functions": {"Data/World/harvest.py": ["households_sell", "spoil_stores"], "Data/Economy/economy.py": ["market_value", "food_sources", "food_horizon"],
                       "long_run.py": ["advance_day", "snapshot", "year_events", "main"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["households_sell(self.conn", "spoil_stores(self.conn", "market_value(city)"],
                   "Data/Economy/economy.py": ["horizon / CONSUMABLE_BUFFER_DAYS", "food_sources(cities_by_kingdom", "food_sources(cities, kingdom"],
-                  "Data/World/countryside.py": ["FOOD_MARGIN"]},
+                  "Data/World/countryside.py": ["FOOD_MARGIN"],
+                  "Data/Government/republic.py": ["food_sources(", "food_horizon(conn"],
+                  "Data/Economy/prosperity.py": ["upkeep = town_upkeep(conn", "+ crown_upkeep(conn"],
+                  "Data/World/expansion.py": ["the families with no land at home"],
+                  "Data/Economy/food_market.py": ["FAIR_YEAR_EASE))"],
+                  "Data/NPCS/family.py": ["FRIENDSHIP_GROWTH, *chunk"]},
     },
     {
         "name": "Ruling households do not emigrate",
@@ -2055,6 +2060,74 @@ def _smoke_body(r, holder):
 
         run_step(r, "prosperity: towns are scored, a thriving town raises a grand building, a merchant house buys a lordless county", prosperity_works)
 
+        def upkeep_drains_hoards():
+            import Data.Economy.prosperity as PR
+            t = max(PR._towns(conn, world_id), key=lambda x: x["people"])
+            heads = t["people"]
+            reserve = heads * PR.RESERVE_PER_HEAD
+            conn.execute("UPDATE cities SET wealth = ? WHERE id = ?", (reserve + 1_000_000, t["id"]))
+            PR.town_upkeep(conn, world_id)
+            left = conn.execute("SELECT wealth FROM cities WHERE id = ?", (t["id"],)).fetchone()[0]
+            want = reserve + 1_000_000 - heads * PR.UPKEEP_PER_HEAD - 1_000_000 * PR.SURPLUS_SPEND
+            assert abs(left - want) < 1, f"a hoarding town's purse went to {left:.0f}, not {want:.0f}"
+            # a month after month of no takings brings it down toward its reserve, never below nothing
+            for _ in range(120):
+                PR.town_upkeep(conn, world_id)
+            left = conn.execute("SELECT wealth FROM cities WHERE id = ?", (t["id"],)).fetchone()[0]
+            assert 0 <= left < reserve, f"ten years of upkeep left the purse at {left:.0f} (reserve {reserve:.0f})"
+            conn.execute("UPDATE cities SET wealth = ? WHERE id = ?", (t["wealth"], t["id"]))
+            conn.commit()
+
+        run_step(r, "town upkeep: the watch and streets cost a little a head, and councils spend what they hoard", upkeep_drains_hoards)
+
+        def crowns_spend_hoards():
+            import Data.Economy.prosperity as PR
+            kid, before = conn.execute("SELECT id, treasury FROM kingdoms WHERE world_id = ? AND status != 'Fallen' LIMIT 1", (world_id,)).fetchone()
+            subjects = conn.execute("""SELECT (SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1)
+                                              + (SELECT COALESCE(SUM(households), 0) FROM cities WHERE kingdom_id = ?) * 5""", (kid, kid)).fetchone()[0]
+            reserve = subjects * PR.CROWN_RESERVE_PER_HEAD
+            conn.execute("UPDATE kingdoms SET treasury = ? WHERE id = ?", (reserve + 1_000_000, kid))
+            PR.crown_upkeep(conn, world_id)
+            left = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0]
+            assert abs(left - (reserve + 1_000_000 * (1 - PR.CROWN_SURPLUS_SPEND))) < 1, f"a hoarding crown's treasury went to {left:.0f}"
+            conn.execute("UPDATE kingdoms SET treasury = ? WHERE id = ?", (reserve / 2, kid))
+            PR.crown_upkeep(conn, world_id)
+            assert conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0] == reserve / 2, \
+                "a crown below its reserve still paid upkeep"
+            conn.execute("UPDATE kingdoms SET treasury = ? WHERE id = ?", (before, kid))
+            conn.commit()
+
+        run_step(r, "crowns spend what they hoard beyond a reserve on court, castles and officials", crowns_spend_hoards)
+
+        def friends_grow_closer():
+            import Data.NPCS.family as FA
+            from Data.Database.repository import get_city
+            # two unmarried grown friends in one town, and a married pair of friends beside them
+            for (city_id,) in conn.execute("SELECT id FROM cities WHERE type != 'Village' ORDER BY id").fetchall():
+                single = conn.execute("""SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND spouse_id IS NULL AND age >= ?
+                                         ORDER BY id LIMIT 2""", (city_id, FA.MIN_MARRY_AGE + 2)).fetchall()
+                wed = conn.execute("SELECT id, spouse_id FROM npcs WHERE city_id = ? AND alive = 1 AND spouse_id IS NOT NULL LIMIT 1",
+                                   (city_id,)).fetchone()
+                if len(single) == 2 and wed:
+                    break
+            else:
+                raise AssertionError("(setup) no town with two unmarried grown folk")
+            a, b = sorted(x[0] for x in single)
+            conn.execute("DELETE FROM relationships WHERE npc_a_id = ? AND npc_b_id = ?", (a, b))
+            conn.execute("INSERT INTO relationships (npc_a_id, npc_b_id, type, reputation, origin) VALUES (?, ?, 'Friend', 50, 'test')", (a, b))
+            conn.execute("DELETE FROM courtships WHERE npc_a_id IN (?, ?) OR npc_b_id IN (?, ?)", (a, b, a, b))
+            saved = FA.COURTSHIP_CHANCE
+            FA.COURTSHIP_CHANCE = 0.0                        # no courting this month: only the friendship moves
+            try:
+                FA.form_families(conn, get_city(conn, city_id))
+            finally:
+                FA.COURTSHIP_CHANCE = saved
+            now = conn.execute("SELECT reputation FROM relationships WHERE npc_a_id = ? AND npc_b_id = ?", (a, b)).fetchone()[0]
+            assert now == 50 + FA.FRIENDSHIP_GROWTH, f"two unmarried friends in one town went from 50 to {now} in a month"
+            conn.commit()
+
+        run_step(r, "unmarried friends in the same town grow closer each month, toward courting", friends_grow_closer)
+
         def map_draws():
             # the map reads the world as it now is: a schema change that breaks it shows up here
             try:
@@ -2459,7 +2532,11 @@ def _smoke_body(r, holder):
                     FM.update_price_level(conn, kingdom_id, verdict)
                     seen.append(level())
                 assert seen[:3] == [1.2, 1.68, 2.688], f"bad years in a row should raise prices to 1.2, 1.68, 2.688x, not {seen[:3]}"
-                assert seen[3] == seen[2], "an ordinary harvest changed food prices"
+                conn.execute("UPDATE kingdoms SET price_level = ?, bad_harvest_years = 3 WHERE id = ?", (seen[2], kingdom_id))
+                FM.update_price_level(conn, kingdom_id, "bad")
+                assert level() == FM.PRICE_LEVEL_MAX, f"a fourth bad year running took prices to {level()}x, not the {FM.PRICE_LEVEL_MAX}x ceiling"
+                assert abs(seen[3] - (1 + (seen[2] - 1) * (1 - FM.FAIR_YEAR_EASE))) < 1e-3, \
+                    "an ordinary harvest did not ease prices a little back toward normal"
                 assert abs(seen[4] - (1 + (seen[3] - 1) * (1 - FM.GOOD_YEAR_EASE))) < 1e-3, "a good harvest did not ease prices back toward normal"
 
                 capital = get_city(conn, get_kingdom(conn, kingdom_id)["capital"])
@@ -2484,7 +2561,7 @@ def _smoke_body(r, holder):
             for kingdom_id in summary:
                 old, years = before[kingdom_id]
                 now = conn.execute("SELECT price_level FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()[0]
-                want = round(old * (1 + FM.BAD_YEAR_RISE * (years + 1)), 4)
+                want = round(min(FM.PRICE_LEVEL_MAX, old * (1 + FM.BAD_YEAR_RISE * (years + 1))), 4)
                 assert abs(now - want) < 1e-3, f"a bad harvest left a kingdom's food prices at {now}x, not {want}x"
             conn.executemany("UPDATE kingdoms SET price_level = ?, bad_harvest_years = ? WHERE id = ?",
                              [(lvl, yrs, kid) for kid, (lvl, yrs) in before.items()])
@@ -3257,6 +3334,18 @@ def _smoke_body(r, holder):
         assert sum(b[3] for b in bought) <= 1000 * RP.GRAIN_BUDGET_SHARE + 0.01, "the grain office spent more than its budget"
         assert conn.execute("SELECT COUNT(*) FROM caravans WHERE buyer_kingdom_id = ? AND destination_city_id = ? AND resource = 'Food'",
                             (rep["id"], rep["capital_city_id"])).fetchone()[0], "the grain office's purchase never set out by caravan"
+
+        # ...but never the bread a seller needs until its next harvest
+        from Data.Economy.economy import food_horizon, CONSUMABLE_BUFFER_DAYS
+        for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND id != ?", (world_id, rep["id"])).fetchall():
+            for c in get_kingdom_cities(conn, k[0]):
+                city = get_city(conn, c["id"])
+                city["resources"]["Food"] = get_target_stock("Food", city) * food_horizon(conn, world_id) / CONSUMABLE_BUFFER_DAYS
+                save_city(conn, city)
+        conn.execute("UPDATE kingdoms SET treasury = 100000 WHERE id = ?", (rep["id"],))
+        conn.commit()
+        assert not [b for b in RP.run_grain_offices(conn, world_id) if b[0] == rep["name"]], \
+            "the grain office bought Food a kingdom needs before its next harvest"
 
     run_step(r, "republics charge customs duties, and their grain offices buy reserves abroad", republics_trade)
 
@@ -4285,6 +4374,41 @@ def _smoke_body(r, holder):
         manager.on_month()
 
     run_step(r, "a capital falls and the seat moves; a kingdom that loses everything falls, and the world goes on", capitals_fall)
+
+    def full_land_sends_families_on():
+        import Data.World.expansion as EX
+        # a kingdom with one village on full land and another with room
+        pair = None
+        for (kid,) in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall():
+            vs = conn.execute("""SELECT c.id, c.region_id, c.households FROM cities c JOIN regions r ON r.id = c.region_id
+                                 WHERE c.kingdom_id = ? AND c.households > 0 AND r.farmland >= 0.5""", (kid,)).fetchall()
+            regions = {v[1] for v in vs}
+            if len(regions) >= 2:
+                full = vs[0]
+                spare = next(v for v in vs if v[1] != full[1])
+                pair = (kid, full, spare)
+                break
+        if not pair:
+            return                                         # (setup) no kingdom farms two regions
+        kid, full, spare = pair
+        saved = {r[0]: r[1] for r in conn.execute("SELECT id, households FROM cities")}
+        conn.execute("UPDATE cities SET hungry_days = 0")
+        # pack the full village's region far past its land; leave the other region nearly empty
+        conn.execute("UPDATE cities SET households = 0 WHERE region_id = ? AND id != ?", (spare[1], spare[0]))
+        conn.execute("UPDATE cities SET households = 10 WHERE id = ?", (spare[0],))
+        farmland = conn.execute("SELECT farmland FROM regions WHERE id = ?", (full[1],)).fetchone()[0]
+        conn.execute("UPDATE cities SET households = ? WHERE id = ?", (EX.CAPACITY_PER_FARMLAND * max(0.05, farmland) * 2, full[0]))
+        home = lambda: conn.execute("SELECT households FROM cities WHERE id = ?", (full[0],)).fetchone()[0]
+        others = lambda: conn.execute("SELECT SUM(households) FROM cities WHERE kingdom_id = ? AND id != ?", (kid, full[0])).fetchone()[0]
+        home_before, others_before = home(), others()
+        EX.grow_villages(conn, world_id)
+        assert abs(home() - home_before) < 1e-6, "a village on land twice full still grew at home"
+        assert others() - others_before > home_before * EX.GROWTH_RATE * 0.9, \
+            "the families a full village's land could not hold did not go to the kingdom's villages with room"
+        conn.executemany("UPDATE cities SET households = ? WHERE id = ?", [(h, i) for i, h in saved.items()])
+        conn.commit()
+
+    run_step(r, "villages grow; families whose land is full move to the kingdom's villages with room", full_land_sends_families_on)
 
     def settlers_found_villages():
         import math

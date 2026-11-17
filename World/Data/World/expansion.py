@@ -8,6 +8,12 @@ import random
 #   (about 1%), slowing as its region's land fills: each region supports
 #   CAPACITY_PER_FARMLAND households for each point of its farmland. Below
 #   60% full a village grows at the full rate; at 100% it stops.
+#   The families its land cannot hold are not lost: they go to the kingdom's
+#   villages whose land has room (the emptiest first), as younger sons clear
+#   new fields. Measured with the long test run (long_run.py): a new world's
+#   farms lie in a few regions round its towns, most of them full from the
+#   start, so most villages never grew and the countryside slowly emptied
+#   into the towns.
 #
 #   Settlement: when one of a kingdom's regions is CROWDED, there is a
 #   SETTLE_CHANCE each year that a party of families leaves its most crowded
@@ -43,23 +49,58 @@ def region_fill(conn, region_id):
 
 
 def grow_villages(conn, world_id):
-    """Yearly: every fed village grows, slowing as its land fills. Returns households added."""
+    """
+    Yearly: every fed village grows by GROWTH_RATE. What its own land can hold
+    stays (less as its region fills); the rest move to the kingdom's fed
+    villages whose land has room, the emptiest regions first. Returns households added.
+    """
     added = 0.0
     fills = {}
-    for village in conn.execute(
-        """SELECT c.id, c.households, c.region_id, c.hungry_days FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+    overflow = {}                                            # kingdom id -> families with no land at home
+    villages = conn.execute(
+        """SELECT c.id, c.kingdom_id, c.households, c.region_id, c.hungry_days FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
            WHERE k.world_id = ? AND k.status != 'Fallen' AND c.households > 0 AND c.region_id IS NOT NULL""", (world_id,)
-    ).fetchall():
-        if village["hungry_days"] > 0:
-            continue                                         # no growth in a hungry year
+    ).fetchall()
+    for village in villages:
         if village["region_id"] not in fills:                # once per region, before any of it grows this year
             fills[village["region_id"]] = region_fill(conn, village["region_id"])
+    for village in villages:
+        if village["hungry_days"] > 0:
+            continue                                         # no growth in a hungry year
         fill = fills[village["region_id"]]
-        rate = GROWTH_RATE * max(0.0, min(1.0, (1 - fill) / (1 - FULL_RATE_BELOW)))
-        if rate > 0:
-            growth = village["households"] * rate
+        share = max(0.0, min(1.0, (1 - fill) / (1 - FULL_RATE_BELOW)))
+        born = village["households"] * GROWTH_RATE
+        growth = born * share
+        if growth > 0:
             conn.execute("UPDATE cities SET households = households + ? WHERE id = ?", (growth, village["id"]))
             added += growth
+        if born - growth > 0:
+            overflow[village["kingdom_id"]] = overflow.get(village["kingdom_id"], 0.0) + born - growth
+
+    # the families with no land at home go where their kingdom's land has room
+    for kingdom_id, families in overflow.items():
+        room = []
+        for village in villages:
+            if village["kingdom_id"] != kingdom_id or village["hungry_days"] > 0:
+                continue
+            region = village["region_id"]
+            row = conn.execute("SELECT farmland FROM regions WHERE id = ?", (region,)).fetchone()
+            capacity = CAPACITY_PER_FARMLAND * max(0.05, row["farmland"])
+            free = capacity * FULL_RATE_BELOW - fills[region] * capacity
+            if free > 0:
+                room.append((fills[region], village["id"], region, free, capacity))
+        room.sort()
+        for fill, village_id, region, free, capacity in room:
+            if families <= 0:
+                break
+            free = capacity * FULL_RATE_BELOW - fills[region] * capacity     # what this region still has, after earlier arrivals
+            take = min(families, free)
+            if take <= 0:
+                continue
+            conn.execute("UPDATE cities SET households = households + ? WHERE id = ?", (take, village_id))
+            fills[region] += take / capacity
+            families -= take
+            added += take
     conn.commit()
     return round(added, 2)
 

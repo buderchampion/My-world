@@ -25,6 +25,17 @@ families    them is a Merchant House. Each year a crown with a county lacking a
             lord sells it to its richest merchant house: their eldest grown
             member becomes its Count or Countess, the family a noble house
             (chronicled), and the gold goes to the crown.
+Upkeep      each month every settlement pays for its watch, its streets and
+            walls (UPKEEP_PER_HEAD), and its council spends a share of what
+            its purse holds beyond a reserve (RESERVE_PER_HEAD) on works,
+            wages and show. Measured with the long test run (long_run.py):
+            bread money and market fees flowed into the purses and nothing
+            large flowed out, so they grew by 17 million a year without end;
+            with upkeep a purse settles where its spending meets its takings.
+            A crown likewise spends CROWN_SURPLUS_SPEND of its treasury beyond
+            CROWN_RESERVE_PER_HEAD a subject on its court, castles and
+            officials (long_run.py: treasuries otherwise grew by 2 million a
+            year with nothing to spend it on).
 """
 
 from __future__ import annotations
@@ -49,6 +60,11 @@ CATHEDRAL_JOY = 5
 GUILDHALL_TAKINGS = 1.0          # gold a head, a month, into the purse
 LIBRARY_XP = 30                  # a month, in every skill of every working person
 
+UPKEEP_PER_HEAD = 1.0            # gold a month, each of its people: the watch, streets and walls
+RESERVE_PER_HEAD = 100           # a council keeps this much a head in its purse...
+SURPLUS_SPEND = 0.1              # ...and spends this share of the rest each month
+CROWN_RESERVE_PER_HEAD = 200     # a crown keeps this much a subject in its treasury (for famine grain, wars)...
+CROWN_SURPLUS_SPEND = 0.05       # ...and spends this share of the rest each month
 MERCHANT_WEALTH = 20000          # gold held by a family's living members between them
 TITLE_PRICE = 2000               # what the crown asks for a county
 
@@ -254,11 +270,55 @@ def ennoble(conn, world_id):
     return raised
 
 
+def town_upkeep(conn, world_id):
+    """
+    Monthly: every settlement (villages too) pays its upkeep from its purse,
+    as far as the purse goes: UPKEEP_PER_HEAD for each of its people, and
+    SURPLUS_SPEND of whatever lies beyond RESERVE_PER_HEAD a head.
+    The people: named folk, and a village's households of five. Returns the gold spent.
+    """
+    spent = 0.0
+    for c in conn.execute(
+            """SELECT c.id, c.wealth,
+                      (SELECT COUNT(*) FROM npcs n WHERE n.city_id = c.id AND n.alive = 1) + COALESCE(c.households, 0) * 5 people
+               FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND k.status != 'Fallen'""", (world_id,)).fetchall():
+        purse = c[1] or 0.0
+        if purse <= 0:
+            continue
+        cost = c[2] * UPKEEP_PER_HEAD + max(0.0, purse - c[2] * RESERVE_PER_HEAD) * SURPLUS_SPEND
+        cost = round(min(purse, cost), 2)
+        if cost > 0:
+            conn.execute("UPDATE cities SET wealth = wealth - ? WHERE id = ?", (cost, c[0]))
+            spent += cost
+    return round(spent, 2)
+
+
+def crown_upkeep(conn, world_id):
+    """
+    Monthly: every crown spends CROWN_SURPLUS_SPEND of its treasury beyond
+    CROWN_RESERVE_PER_HEAD for each subject (named folk, and five to a village
+    household) on its court, castles and officials. Returns the gold spent.
+    """
+    spent = 0.0
+    for k in conn.execute(
+            """SELECT k.id, k.treasury,
+                      (SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = k.id AND n.alive = 1)
+                      + (SELECT COALESCE(SUM(households), 0) FROM cities c WHERE c.kingdom_id = k.id) * 5 subjects
+               FROM kingdoms k WHERE k.world_id = ? AND k.status != 'Fallen'""", (world_id,)).fetchall():
+        cost = round(max(0.0, (k[1] or 0) - k[2] * CROWN_RESERVE_PER_HEAD) * CROWN_SURPLUS_SPEND, 2)
+        if cost > 0:
+            conn.execute("UPDATE kingdoms SET treasury = treasury - ? WHERE id = ?", (cost, k[0]))
+            spent += cost
+    return round(spent, 2)
+
+
 def prosperity_month(conn, world_id):
-    """Monthly: scores, settlers to the thriving, grand buildings, and their benefits. Returns a report."""
+    """Monthly: scores, settlers to the thriving, grand buildings, their benefits, and upkeep. Returns a report."""
     s = update_scores(conn, world_id)
     moved = draw_settlers(conn, world_id, s)
     built = build_grand(conn, world_id, s)
     paid, taught = grand_benefits(conn, world_id)
+    upkeep = town_upkeep(conn, world_id) + crown_upkeep(conn, world_id)
     conn.commit()
-    return {"scores": s, "moved": moved, "built": built, "paid": paid, "taught": taught}
+    return {"scores": s, "moved": moved, "built": built, "paid": paid, "taught": taught, "upkeep": upkeep}
