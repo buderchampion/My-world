@@ -46,6 +46,10 @@ def apply_military_upkeep(conn, kingdom, military_npcs, capital_city, deployed_i
     gold_cost = round(count * UPKEEP_GOLD_PER_SOLDIER_PER_DAY, 2)
     food_cost = round(at_home * UPKEEP_FOOD_PER_SOLDIER_PER_DAY, 2)
     weapons_cost = round(at_home * UPKEEP_WEAPONS_PER_SOLDIER_PER_DAY, 2)
+    if kingdom.get("type") == "Horde":
+        # a horde's riders are not paid: they live off the herds and what they take,
+        # and bring their own bows and horses (Data.Government.horde)
+        gold_cost = weapons_cost = 0.0
 
     available_food = capital_city.get("resources", {}).get("Food", 0)
     available_weapons = capital_city.get("resources", {}).get("Weapons", 0)

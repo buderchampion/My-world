@@ -324,5 +324,33 @@
     "Tribute (lost)": [
         "{When}, {other} stopped paying its tribute, and {kingdom} counted it an enemy.",
         "{When}, {other} threw off the rule of {kingdom}, and the empire's coffers were the lighter for it."
+    ],
+    "Horde Risen": [
+        "{When}, the tribes of {region} were united under one banner, and {ruler} led {kingdom} out onto the steppe.",
+        "{When}, {ruler} broke the feuding clans of {region} to one will, and the horde of {kingdom} was born.",
+        "{When}, from the grass sea of {region} rose a horde: {kingdom}, and at its head {ruler}."
+    ],
+    "Horde Split": [
+        "{When}, {rival} would not bow to {ruler}, and rode away from {kingdom} with a third of the horde to found {other} in {region}.",
+        "{When}, the horde was sundered: {ruler} kept {kingdom}, but {rival} led {other} away into {region}."
+    ],
+    "Khan Chosen": [
+        "{When}, with {old} dead, the chiefs of {kingdom} raised the strongest among them on a white felt: {ruler}.",
+        "{When}, {ruler} won the horsetail standard of {kingdom} by strength of arm, as {old} had before.",
+        "{When}, there was no heir in {kingdom}, only the strongest: {ruler} took the place of {old}."
+    ],
+    "Horde Raid (sacked)": [
+        "{When}, riders of {other} fell on {village} without warning; {dead} were slain, families carried off, and the fields left burning.",
+        "{When}, the horsemen of {other} came out of the east and sacked {village}, killing {dead} and driving off the herds.",
+        "{When}, {village} burned: the horde of {other} took its grain and its people, and left {dead} dead behind."
+    ],
+    "Horde Raid (repelled)": [
+        "{When}, riders of {other} struck at {village}, but the village held, and the horsemen fled leaving {dead} dead on both sides.",
+        "{When}, the folk of {village} stood against the horde of {other}, and drove it off; {dead} fell."
+    ],
+    "Tribute (danegeld)": [
+        "{When}, weary of the raids, {ruler} agreed to pay {other} {gold} gold a year to leave {kingdom} in peace.",
+        "{When}, {kingdom} bought its peace from the horse lords of {other}: {gold} gold each year, and grain besides.",
+        "{When}, rather than see more villages burn, {kingdom} paid the khan of {other} {gold} gold a year."
     ]
 }

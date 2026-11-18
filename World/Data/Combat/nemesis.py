@@ -38,7 +38,7 @@ BUTCHER_KILLS = 4
 KILL_RENOWN = 1
 CHAMPION_KILL_WEIGHT = 2             # a champion claims kills twice as readily
 
-MONARCH_TITLES = ("King", "Queen", "Emperor", "Empress", "Doge")
+MONARCH_TITLES = ("King", "Queen", "Emperor", "Empress", "Khan", "Khanum", "Doge")
 LORD_TITLES = ("Count", "Countess")
 RANK_RENOWN = {"monarch": 30, "lord": 15, "mayor": 5, "knight": 5, "captain": 5, "champion": 5}
 

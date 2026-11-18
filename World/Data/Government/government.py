@@ -33,6 +33,13 @@ def assign_city_ruler(conn, city):
             doge = elect_doge(conn, city)
             city["ruler"] = doge["id"] if doge else None
             return doge
+        # A horde's khan is chosen by strength, not birth (Data.Government.horde).
+        from Data.Government.horde import is_horde, choose_khan
+        if is_horde(conn, city["kingdom"]):
+            previous = get_npc(conn, city["ruler"]) if city.get("ruler") else None
+            khan = choose_khan(conn, city, previous=previous or {})
+            city["ruler"] = khan["id"] if khan else None
+            return khan
 
     province = None if is_capital else seat_province(conn, city["id"])
 

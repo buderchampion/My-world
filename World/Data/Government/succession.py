@@ -19,7 +19,7 @@
 
 ADULT_AGE = 16
 
-MONARCH_TITLES = ("King", "Queen", "Emperor", "Empress", "Doge")   # no one heads two realms
+MONARCH_TITLES = ("King", "Queen", "Emperor", "Empress", "Khan", "Khanum", "Doge")   # no one heads two realms
 
 
 def monarch_title(conn, kingdom_id, gender):
@@ -27,6 +27,8 @@ def monarch_title(conn, kingdom_id, gender):
     row = conn.execute("SELECT type FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
     if row and row[0] == "Empire":
         return "Emperor" if gender == "Male" else "Empress"
+    if row and row[0] == "Horde":
+        return "Khan" if gender == "Male" else "Khanum"
     return "King" if gender == "Male" else "Queen"
 LORD_TITLES = ("Count", "Countess")
 

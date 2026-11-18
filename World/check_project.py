@@ -692,6 +692,18 @@ FEATURES = [
         "wired": {"Data/Simulation/simulation_manager.py": ["come_of_age(self.conn", "recruit(self.conn"]},
     },
     {
+        "name": "Horse lords: steppe tribes unite into hordes whose camps move with the seasons and are fed by their herds; riders raid in summer for grain, gold and captives, kingdoms may pay danegeld, and the strongest is raised khan -- a rival nearly as strong splits the horde",
+        "functions": {"Data/Government/horde.py": ["hordes", "is_horde", "riders", "free_steppe", "strength", "khan_title", "choose_khan",
+                                                   "split_horde", "found_horde", "rise_hordes", "herds_month", "move_camps", "raid",
+                                                   "raids_suffered", "danegeld_chance", "horde_raids"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["herds_month(self.conn", "horde_raids(self.conn", "move_camps(self.conn",
+                                                            "rise_hordes(self.conn", 'kingdom.get("type") == "Horde"'],
+                  "Data/Government/government.py": ["choose_khan(conn, city"],
+                  "Data/Government/military.py": ['kingdom.get("type") == "Horde"'],
+                  "Data/Economy/jobs.py": ['kingdom["type"] == "Horde"'],
+                  "Data/Government/empire.py": ['empire["type"] == "Horde"']},
+    },
+    {
         "name": "Tribute empires: a crown that wins wars is proclaimed an empire, and its weaker neighbours yield or are conquered into paying gold and grain each year; tributaries that fall behind are marched on, and those grown strong throw off the yoke",
         "functions": {"Data/Government/empire.py": ["soldiers", "conquests", "tribute_of", "proclaim_empires", "submit", "yield_chance",
                                                     "make_demands", "conquered_submit", "pay_tribute", "revolt_chance", "revolts", "empires_year"],
@@ -2146,7 +2158,7 @@ def _smoke_body(r, holder):
             saved_march = CA.start_campaign
             marched = []
             CA.start_campaign = lambda c, attacker, defender, d: marched.append((attacker["id"], defender["id"]))   # no real army raised
-            saved_consts = (EM.DEMAND_CHANCE, EM.REVOLT_CHANCE, EM.PUNISH_CHANCE)
+            saved_consts = (EM.DEMAND_CHANCE, EM.REVOLT_CHANCE, EM.PUNISH_CHANCE, EM.revolt_chance)
             try:
                 # proclamation: two towns taken by war make a crown an empire, and its monarch an emperor
                 conn.execute("UPDATE kingdoms SET type = 'Crown' WHERE id IN (?, ?)", pair)
@@ -2199,6 +2211,7 @@ def _smoke_body(r, holder):
                 # revolt: grown as strong as its empire, it throws off the yoke
                 EM.soldiers = lambda c, k: 50
                 EM.REVOLT_CHANCE, EM.PUNISH_CHANCE = 1.0, 0.0
+                EM.revolt_chance = lambda c, t, e: 1.0          # however warmly it once felt toward its empire
                 assert tid in EM.revolts(conn, world_id, day), "a tributary as strong as its empire did not revolt"
                 assert not EM.tribute_of(conn, eid, tid), "a tributary that revolted still pays"
 
@@ -2210,7 +2223,7 @@ def _smoke_body(r, holder):
             finally:
                 CA.start_campaign = saved_march
                 EM.soldiers = saved_soldiers
-                EM.DEMAND_CHANCE, EM.REVOLT_CHANCE, EM.PUNISH_CHANCE = saved_consts
+                EM.DEMAND_CHANCE, EM.REVOLT_CHANCE, EM.PUNISH_CHANCE, EM.revolt_chance = saved_consts
                 conn.execute("DELETE FROM tributaries")
                 conn.execute("DELETE FROM occupations WHERE occupier_kingdom_id = ? AND former_kingdom_id IN (?, ?)", (eid, pair[1], tid))
                 conn.execute("DELETE FROM campaigns WHERE attacker_kingdom_id = ? AND status != 'Over'", (eid,))
@@ -3506,8 +3519,13 @@ def _smoke_body(r, holder):
         seller_seat["resources"]["Food"] = 10.0 ** 6
         save_city(conn, seller_seat)
         conn.execute("UPDATE kingdoms SET treasury = 1000 WHERE id = ?", (rep["id"],))
+        # no siege on the republic's capital for this (a besieged office rightly waits -- armies recruit, so wars come)
+        sieges = [x[0] for x in conn.execute("SELECT id FROM campaigns WHERE target_city_id = ? AND status = 'Besieging'",
+                                             (rep["capital_city_id"],)).fetchall()]
+        conn.executemany("UPDATE campaigns SET status = 'Marching' WHERE id = ?", [(x,) for x in sieges])
         conn.commit()
         bought = [b for b in RP.run_grain_offices(conn, world_id) if b[0] == rep["name"]]
+        conn.executemany("UPDATE campaigns SET status = 'Besieging' WHERE id = ?", [(x,) for x in sieges])
         assert bought, "an empty grain reserve bought nothing abroad"
         assert sum(b[3] for b in bought) <= 1000 * RP.GRAIN_BUDGET_SHARE + 0.01, "the grain office spent more than its budget"
         assert conn.execute("SELECT COUNT(*) FROM caravans WHERE buyer_kingdom_id = ? AND destination_city_id = ? AND resource = 'Food'",
@@ -4625,6 +4643,97 @@ def _smoke_body(r, holder):
                 f"a new village sits {nearest_foreign:.0f} from another kingdom's settlement, inside the neutral ground ({EX.NEUTRAL_GROUND})"
 
     run_step(r, "villages grow; settlers found villages on empty land, keeping neutral ground between kingdoms", settlers_found_villages)
+
+    def hordes_ride():
+        import Data.Government.horde as H
+        import Data.Government.empire as EM
+        from Data.Combat import melee
+        from Data.Database.repository import get_city, get_kingdom
+        from Data.Government.edicts import today
+        saved = (H.RAID_CHANCE, H.SPLIT_CHANCE, H.RIVAL_CLOSE, H.SPLIT_PEOPLE, melee.battle, H.danegeld_chance)
+        try:
+            # a horde rises on empty steppe: its camp is its capital, its riders in the horse lines, its strongest made khan
+            places = [x for x in H.free_steppe(conn, world_id) if H._clear_of_towns(conn, world_id, x)] or H.free_steppe(conn, world_id)
+            assert places, "(setup) the world has no empty steppe"
+            kid, camp = H.found_horde(conn, world_id, places[0])
+            horde = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (kid,)).fetchone())
+            assert horde["type"] == "Horde" and horde["race"] in H.RACE_WEIGHTS and horde["capital_city_id"] == camp
+            assert len(H.riders(conn, kid)) >= 20, f"a new horde has only {len(H.riders(conn, kid))} riders"
+            khan = conn.execute("SELECT title FROM npcs WHERE id = ?", (horde["ruler_id"],)).fetchone()
+            assert khan and khan[0] in ("Khan", "Khanum"), "a new horde has no khan"
+            assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE kingdom_id = ?", (kid,)).fetchone()[0], "a horde rose unchronicled"
+
+            # the camp moves with the seasons; the herds feed it
+            region = conn.execute("SELECT region_id FROM cities WHERE id = ?", (camp,)).fetchone()[0]
+            if [m for m in H.move_camps(conn, world_id) if m[0] == kid]:
+                assert conn.execute("SELECT region_id FROM cities WHERE id = ?", (camp,)).fetchone()[0] != region, "the camp did not move"
+            food = get_city(conn, camp)["resources"].get("Food", 0)
+            H.herds_month(conn, world_id)
+            assert get_city(conn, camp)["resources"].get("Food", 0) > food, "the herds fed no one"
+
+            # a horde's riders draw no pay
+            from Data.Government.military import apply_military_upkeep
+            treasury = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0]
+            ms = [dict(n) for n in conn.execute("SELECT * FROM npcs WHERE city_id = ? AND profession = 'Soldier' AND alive = 1", (camp,))]
+            apply_military_upkeep(conn, get_kingdom(conn, kid), ms, get_city(conn, camp))
+            assert conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0] == treasury, "a horde paid its riders in gold"
+
+            # a summer raid the riders win: grain to the camp, gold to the khan, captives taken, fields burned
+            H.RAID_CHANCE = 1.0
+            melee.battle = lambda a, b, **kw: {"winner": "a", "dead_a": [], "dead_b": [], "rounds": 1}
+            H.danegeld_chance = lambda *a: 0.0
+            village = H._target(conn, world_id, horde)
+            if not village:                                 # no village within reach of this steppe: ride the camp up to one
+                near = conn.execute("""SELECT c.map_x, c.map_y FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                                       WHERE k.world_id = ? AND c.type = 'Village' AND k.id != ? LIMIT 1""", (world_id, kid)).fetchone()
+                conn.execute("UPDATE cities SET map_x = ?, map_y = ? WHERE id = ?", (near[0] + 200, near[1], camp))
+                village = H._target(conn, world_id, horde)
+            assert village, "(setup) no village anywhere for the horde to raid"
+            conn.execute("UPDATE cities SET households = MAX(households, 60), wealth = 1000 WHERE id = ?", (village["id"],))
+            before = dict(conn.execute("SELECT households, wealth FROM cities WHERE id = ?", (village["id"],)).fetchone())
+            camp_food = get_city(conn, camp)["resources"].get("Food", 0)
+            folk = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1", (camp,)).fetchone()[0]
+            assert H.horde_raids(conn, world_id, 1) == [], "a horde rode out in winter"
+            reports = [x for x in H.horde_raids(conn, world_id, H.RAID_MONTHS[0]) if x["horde"] == kid]
+            assert reports and reports[0]["won"], "a horde with its riders did not ride in summer"
+            after = dict(conn.execute("SELECT households, wealth FROM cities WHERE id = ?", (village["id"],)).fetchone())
+            assert after["households"] < before["households"] and after["wealth"] < before["wealth"], "the sacked village lost nothing"
+            assert get_city(conn, camp)["resources"].get("Food", 0) >= camp_food, "the riders brought no grain home"
+            assert conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1", (camp,)).fetchone()[0] > folk, "no captives were carried off"
+
+            # danegeld: the sacked kingdom pays the khan, and its villages are spared from then on
+            H.danegeld_chance = lambda *a: 1.0
+            reports = [x for x in H.horde_raids(conn, world_id, H.RAID_MONTHS[0]) if x["horde"] == kid]
+            payer = village["kingdom_id"]
+            assert EM.tribute_of(conn, kid, payer) and EM.tribute_of(conn, kid, payer)["how"] == "danegeld", "a sacked kingdom never paid danegeld"
+            subjects = conn.execute("""SELECT (SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1)
+                                              + (SELECT COALESCE(SUM(households), 0) FROM cities WHERE kingdom_id = ?) * 5""", (payer, payer)).fetchone()[0]
+            assert abs(EM.tribute_of(conn, kid, payer)["tribute_gold"] - max(EM.MIN_TRIBUTE, subjects * H.DANEGELD_PER_HEAD)) < 1, \
+                "danegeld is not priced at so much a subject"
+            target = H._target(conn, world_id, horde)
+            assert not target or target["kingdom_id"] != payer, "the horde still rides on a kingdom that pays it"
+            # ...and a payer that stops paying is not marched on: the payments simply end
+            day = today(conn, world_id)
+            conn.execute("UPDATE kingdoms SET treasury = 0 WHERE id = ?", (payer,))
+            for _ in range(EM.MISSED_LIMIT):
+                EM.pay_tribute(conn, world_id, day)
+            assert not EM.tribute_of(conn, kid, payer), "danegeld two years unpaid still stands"
+            assert not conn.execute("SELECT 1 FROM campaigns WHERE attacker_kingdom_id = ? AND status != 'Over'", (kid,)).fetchone(), \
+                "a horde marched on a kingdom behind with its danegeld"
+
+            # the khan dies: the strongest takes the horsetail standard; a rival nearly as strong rides off with a horde of their own
+            H.SPLIT_CHANCE, H.RIVAL_CLOSE, H.SPLIT_PEOPLE = 1.0, 0.0, 0
+            old = conn.execute("SELECT ruler_id FROM kingdoms WHERE id = ?", (kid,)).fetchone()[0]
+            conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (old,))
+            hordes_before = len(H.hordes(conn, world_id))
+            new_khan = H.choose_khan(conn, get_city(conn, camp), previous={"name": "the old khan"})
+            assert new_khan and new_khan["id"] != old and new_khan["title"] in ("Khan", "Khanum"), "no new khan was raised"
+            assert len(H.hordes(conn, world_id)) == hordes_before + 1, "a rival as strong as the new khan did not ride off"
+        finally:
+            H.RAID_CHANCE, H.SPLIT_CHANCE, H.RIVAL_CLOSE, H.SPLIT_PEOPLE, melee.battle, H.danegeld_chance = saved
+            conn.commit()
+
+    run_step(r, "hordes: tribes unite on the steppe, camps move, herds feed them, riders raid in summer, danegeld, khan by strength and splits", hordes_ride)
 
     # --- invariants that should hold after any amount of simulation ----------
 

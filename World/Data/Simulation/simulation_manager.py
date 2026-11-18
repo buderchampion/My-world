@@ -489,6 +489,12 @@ class SimulationManager:
         from Data.Monsters.raids import monster_raids
         monster_raids(self.conn, self.world_id)
 
+        # Horse lords (Data.Government.horde): the herds feed each camp, and in
+        # summer the hordes ride on their neighbours' villages.
+        from Data.Government.horde import herds_month, horde_raids
+        herds_month(self.conn, self.world_id)
+        horde_raids(self.conn, self.world_id, self.clock.month)
+
         # A plague may break out somewhere: the Red Pox now and then, the Great Pestilence a few times a century.
         from Data.NPCS.sickness import plagues_break_out
         plagues_break_out(self.conn, self.world_id)
@@ -521,6 +527,10 @@ class SimulationManager:
         # Every ruler reviews the realm and may issue an edict (Data.Government.edicts).
         from Data.Government.edicts import review
         review(self.conn, self.world_id)
+
+        # The hordes' camps move on across the steppe (Data.Government.horde).
+        from Data.Government.horde import move_camps
+        move_camps(self.conn, self.world_id)
 
     def on_year(self) -> None:
         from Data.NPCS.aging import apply_aging
@@ -575,6 +585,10 @@ class SimulationManager:
         from Data.Government.empire import empires_year
         empires_year(self.conn, self.world_id, self.clock.year)
 
+        # Now and then a warlord unites the steppe tribes into a horde (Data.Government.horde).
+        from Data.Government.horde import rise_hordes
+        rise_hordes(self.conn, self.world_id)
+
         # Kingdom wars. Whether a kingdom goes to war this year depends on its
         # grievances (a kingdom with no enemies rarely does), and who it
         # attacks favors near neighbors it also resents -- see
@@ -583,6 +597,9 @@ class SimulationManager:
         trade_routes = [r for r in get_world_roads(self.conn, self.world_id) if r["kind"] == "Trade Route"]
 
         for kingdom in kingdoms:
+
+            if kingdom.get("type") == "Horde":
+                continue        # hordes raid, they do not yet march to conquer (Data.Government.horde)
 
             candidates = war_candidates(self.conn, kingdom, trade_routes, self.clock.year)
 

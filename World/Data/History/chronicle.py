@@ -16,6 +16,7 @@ REQUIRED_TEMPLATE_KEYS = (
     "Grand Building Raised", "Merchant Ennobled",
     "Empire Proclaimed", "Tribute (yielded)", "Tribute (conquered)", "Tribute (received)",
     "Tribute (refused)", "Tribute (behind)", "Tribute (thrown off)", "Tribute (lost)",
+    "Horde Risen", "Horde Split", "Khan Chosen", "Horde Raid (sacked)", "Horde Raid (repelled)", "Tribute (danegeld)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -72,7 +73,8 @@ TEMPLATE_FIELDS = (
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
- "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building", "gold")
+ "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building", "gold",
+ "region", "rival", "old")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".

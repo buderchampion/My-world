@@ -58,16 +58,24 @@ def come_of_age(conn, world_id):
     return len(grown)
 
 
-def recruit(conn, world_id):
-    """Monthly: barracks and guard posts with room take young jobless as Soldiers and Guards, while the crown can pay. Returns how many."""
+def recruit(conn, world_id, only=None):
+    """
+    Monthly: barracks and guard posts with room take young jobless as Soldiers and Guards, while the
+    crown can pay -- a horde's riders are not paid, so its horse lines take all they have room for.
+    `only`: just this kingdom. Returns how many.
+    """
     from Data.Government.military import MILITARY_PROFESSIONS, UPKEEP_GOLD_PER_SOLDIER_PER_DAY
     marks = ",".join("?" * len(MILITARY_PROFESSIONS))
     taken = 0
-    for kingdom in conn.execute("SELECT id, treasury FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall():
+    for kingdom in conn.execute("SELECT id, treasury, type FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchall():
+        if only is not None and kingdom["id"] != only:
+            continue
         army = conn.execute(
             f"""SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id
                 WHERE c.kingdom_id = ? AND n.alive = 1 AND n.profession IN ({marks})""", (kingdom["id"], *MILITARY_PROFESSIONS)).fetchone()[0]
         afford = int((kingdom["treasury"] or 0) / (UPKEEP_GOLD_PER_SOLDIER_PER_DAY * RECRUIT_RESERVE_DAYS)) - army
+        if kingdom["type"] == "Horde":
+            afford = 10 ** 6
         if afford <= 0:
             continue
         for post in conn.execute(

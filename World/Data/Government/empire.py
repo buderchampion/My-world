@@ -127,10 +127,10 @@ def proclaim_empires(conn, world_id):
 
 
 # ------------------------------------------------------------------ submission
-def submit(conn, world_id, empire, tributary, how, day):
-    """The tributary begins paying. Returns the tributary record."""
+def submit(conn, world_id, empire, tributary, how, day, owed=None):
+    """The tributary begins paying (owed a year: TRIBUTE_SHARE of its treasury unless given). Returns the tributary record."""
     from Data.Database.repository import create_event
-    owed = round(max(MIN_TRIBUTE, (tributary["treasury"] or 0) * TRIBUTE_SHARE), 2)
+    owed = round(max(MIN_TRIBUTE, (tributary["treasury"] or 0) * TRIBUTE_SHARE if owed is None else owed), 2)
     cursor = conn.execute(
         """INSERT INTO tributaries (empire_id, tributary_id, since_day, how, tribute_gold) VALUES (?, ?, ?, ?, ?)""",
         (empire["id"], tributary["id"], day, how, owed))
@@ -266,7 +266,10 @@ def pay_tribute(conn, world_id, day):
         adjust_kingdom_favor(conn, tributary["id"], empire["id"], -RESENTMENT)
         paid.append((tributary["id"], gold, round(food, 2), full))
 
-        if missed >= MISSED_LIMIT and not active_campaign(conn, empire["id"]):
+        if missed >= MISSED_LIMIT and empire["type"] == "Horde":
+            # a horde does not march to collect: it simply rides again once the payments stop
+            conn.execute("UPDATE tributaries SET status = 'Revolted', ended_day = ? WHERE id = ?", (day, t["id"]))
+        elif missed >= MISSED_LIMIT and not active_campaign(conn, empire["id"]):
             conn.execute("UPDATE tributaries SET missed = 0 WHERE id = ?", (t["id"],))
             _chronicle(conn, world_id, tributary["id"], "Tribute", "Tribute (behind)",
                        {"kingdom": tributary["name"], "other": empire["name"]}, (empire["id"], day))
@@ -306,7 +309,7 @@ def revolts(conn, world_id, day):
             adjust_kingdom_favor(conn, empire["id"], tributary["id"], -30)
         create_event(conn, "Tribute", f"{tributary['name']} threw off the yoke of {empire['name']}.", kingdom_id=tributary["id"])
         thrown.append(tributary["id"])
-        if not faltered and odds >= 1 and random.random() < PUNISH_CHANCE and not active_campaign(conn, empire["id"]):
+        if not faltered and empire["type"] != "Horde" and odds >= 1 and random.random() < PUNISH_CHANCE and not active_campaign(conn, empire["id"]):
             start_campaign(conn, get_kingdom(conn, empire["id"]), get_kingdom(conn, tributary["id"]), day)
     conn.commit()
     return thrown
