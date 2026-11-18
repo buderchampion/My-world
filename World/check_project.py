@@ -687,6 +687,22 @@ FEATURES = [
                   "Data/NPCS/contentment.py": ["level += CATHEDRAL"]},
     },
     {
+        "name": "Growing up and enlisting: children reach working age and join the jobless; barracks and guard posts recruit the young while the crown can pay",
+        "functions": {"Data/Economy/jobs.py": ["come_of_age", "recruit"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["come_of_age(self.conn", "recruit(self.conn"]},
+    },
+    {
+        "name": "Tribute empires: a crown that wins wars is proclaimed an empire, and its weaker neighbours yield or are conquered into paying gold and grain each year; tributaries that fall behind are marched on, and those grown strong throw off the yoke",
+        "functions": {"Data/Government/empire.py": ["soldiers", "conquests", "tribute_of", "proclaim_empires", "submit", "yield_chance",
+                                                    "make_demands", "conquered_submit", "pay_tribute", "revolt_chance", "revolts", "empires_year"],
+                      "Data/Government/succession.py": ["monarch_title"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["empires_year(self.conn"],
+                  "Data/Government/diplomacy.py": ["tribute_of(conn, kingdom"],
+                  "Data/Government/succession.py": ["monarch_title(conn, capital_city"],
+                  "Data/Government/government.py": ["monarch_title(conn, city"]},
+        "tables": ["tributaries"],
+    },
+    {
         "name": "Balance from the long test run: bigger harvests, families sell their spare, kingdoms buy Food ahead, capitals keep their bread, granaries spoil past a year, market fees on trade not hoard, every kingdom's land feeds it, food sold abroad ships from the villages; towns pay upkeep, full land sends families on, ordinary years ease prices, friends grow closer",
         "functions": {"Data/World/harvest.py": ["households_sell", "spoil_stores"], "Data/Economy/economy.py": ["market_value", "food_sources", "food_horizon"],
                       "long_run.py": ["advance_day", "snapshot", "year_events", "main"]},
@@ -2098,6 +2114,168 @@ def _smoke_body(r, holder):
             conn.commit()
 
         run_step(r, "crowns spend what they hoard beyond a reserve on court, castles and officials", crowns_spend_hoards)
+
+        def empires_and_tribute():
+            import Data.Government.empire as EM
+            from Data.Database.repository import get_world_roads, get_kingdom, get_city
+            from Data.Government.diplomacy import war_candidates
+            from Data.Government.campaigns import active_campaign
+            from Data.Government.succession import monarch_title
+            from Data.Government.edicts import today
+            day = today(conn, world_id)
+            year = conn.execute("SELECT clock_year FROM worlds WHERE id = ?", (world_id,)).fetchone()[0]
+            routes = [x for x in get_world_roads(conn, world_id) if x["kind"] == "Trade Route"]
+            pair = None
+            for k in conn.execute("SELECT id FROM kingdoms WHERE world_id = ? AND status != 'Fallen' AND capital_city_id IS NOT NULL",
+                                  (world_id,)).fetchall():
+                for _, other in war_candidates(conn, get_kingdom(conn, k[0]), routes, year):
+                    if not active_campaign(conn, k[0]):
+                        pair = (k[0], other)
+                        break
+                if pair:
+                    break
+            assert pair, "(setup) no two kingdoms with a road between them and no war under way"
+            eid, tid = pair
+            saved = {k[0]: (k[1], k[2]) for k in conn.execute("SELECT id, type, treasury FROM kingdoms WHERE world_id = ?", (world_id,))}
+            saved_food = {c[0]: c[1] for c in conn.execute("SELECT city_id, amount FROM city_resources WHERE resource_name = 'Food'")}
+            caravans_before = conn.execute("SELECT COALESCE(MAX(id), 0) FROM caravans").fetchone()[0]
+            titles = conn.execute("SELECT n.id, n.title FROM kingdoms k JOIN npcs n ON n.id = k.ruler_id WHERE k.world_id = ?", (world_id,)).fetchall()
+            chronicle_before = conn.execute("SELECT COALESCE(MAX(id), 0) FROM chronicle_entries").fetchone()[0]
+            saved_soldiers = EM.soldiers
+            import Data.Government.campaigns as CA
+            saved_march = CA.start_campaign
+            marched = []
+            CA.start_campaign = lambda c, attacker, defender, d: marched.append((attacker["id"], defender["id"]))   # no real army raised
+            saved_consts = (EM.DEMAND_CHANCE, EM.REVOLT_CHANCE, EM.PUNISH_CHANCE)
+            try:
+                # proclamation: two towns taken by war make a crown an empire, and its monarch an emperor
+                conn.execute("UPDATE kingdoms SET type = 'Crown' WHERE id IN (?, ?)", pair)
+                for _ in range(EM.EMPIRE_CONQUESTS):
+                    conn.execute("""INSERT INTO occupations (city_id, occupier_kingdom_id, former_kingdom_id, since_day, status)
+                                    VALUES ((SELECT capital_city_id FROM kingdoms WHERE id = ?), ?, ?, ?, 'Ended')""", (tid, eid, tid, day - 400))
+                assert eid in EM.proclaim_empires(conn, world_id), "a crown that had taken two towns by war was not proclaimed an empire"
+                assert conn.execute("SELECT type FROM kingdoms WHERE id = ?", (eid,)).fetchone()[0] == "Empire"
+                ruler = conn.execute("SELECT n.title, n.gender FROM kingdoms k JOIN npcs n ON n.id = k.ruler_id WHERE k.id = ?", (eid,)).fetchone()
+                if ruler:
+                    assert ruler["title"] in ("Emperor", "Empress"), f"the new empire's monarch is still titled {ruler['title']}"
+                assert monarch_title(conn, eid, "Female") == "Empress" and monarch_title(conn, tid, "Male") == "King"
+                assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE kingdom_id = ? AND event_type = 'Empire'", (eid,)).fetchone()[0]
+
+                # a demand the weak neighbour yields to: it pays from then on, and the two are no longer at each other's throats
+                EM.soldiers = lambda c, k: 100 if k == eid else 10
+                EM.DEMAND_CHANCE = 1.0
+                conn.execute("DELETE FROM tributaries")
+                happened = EM.make_demands(conn, world_id, day, year)
+                mine = [h for h in happened if h[0] == eid]
+                assert mine and mine[0][2] == "yielded", f"a neighbour at ten to one did not yield to the empire: {happened}"
+                tid = mine[0][1]                              # the weakest neighbour it could reach
+                assert EM.tribute_of(conn, eid, tid), "the neighbour that yielded owes no tribute"
+                assert all(o != tid for _, o in war_candidates(conn, get_kingdom(conn, eid), routes, year)), \
+                    "an empire may still go to war with a tributary that pays it"
+
+                # paying: gold to the empire, grain beyond the tributary's needs sent by caravan, resentment
+                owed = EM.tribute_of(conn, eid, tid)["tribute_gold"]
+                conn.execute("UPDATE kingdoms SET treasury = ? WHERE id = ?", (owed * 3, tid))
+                before = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (eid,)).fetchone()[0]
+                capital = get_city(conn, conn.execute("SELECT capital_city_id FROM kingdoms WHERE id = ?", (tid,)).fetchone()[0])
+                capital["resources"]["Food"] = 10.0 ** 7
+                from Data.Database.repository import save_city, get_kingdom_favor
+                save_city(conn, capital)
+                favor = get_kingdom_favor(conn, tid, eid)
+                paid = [p for p in EM.pay_tribute(conn, world_id, day) if p[0] == tid]
+                assert paid and abs(paid[0][1] - owed) < 0.01 and paid[0][3], f"the tributary did not pay its {owed} gold: {paid}"
+                assert abs(conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (eid,)).fetchone()[0] - before - owed) < 0.01
+                assert paid[0][2] > 0, "the tributary sent no grain from its full granary"
+                assert get_kingdom_favor(conn, tid, eid) < favor, "paying tribute bred no resentment"
+
+                # falling behind: a tributary with an empty treasury misses; MISSED_LIMIT years running and the empire marches
+                conn.execute("DELETE FROM campaigns WHERE attacker_kingdom_id = ? AND status != 'Over'", (eid,))
+                for _ in range(EM.MISSED_LIMIT):
+                    conn.execute("UPDATE kingdoms SET treasury = 0 WHERE id = ?", (tid,))
+                    EM.pay_tribute(conn, world_id, day)
+                assert (eid, tid) in marched, "a tributary two years behind in its tribute was not marched on"
+
+
+                # revolt: grown as strong as its empire, it throws off the yoke
+                EM.soldiers = lambda c, k: 50
+                EM.REVOLT_CHANCE, EM.PUNISH_CHANCE = 1.0, 0.0
+                assert tid in EM.revolts(conn, world_id, day), "a tributary as strong as its empire did not revolt"
+                assert not EM.tribute_of(conn, eid, tid), "a tributary that revolted still pays"
+
+                # conquest: losing a town to an empire this year makes a standing kingdom its tributary
+                conn.execute("""INSERT INTO occupations (city_id, occupier_kingdom_id, former_kingdom_id, since_day, status)
+                                VALUES ((SELECT capital_city_id FROM kingdoms WHERE id = ?), ?, ?, ?, 'Occupied')""", (tid, eid, tid, day - 10))
+                assert (eid, tid) in EM.conquered_submit(conn, world_id, day), "a kingdom beaten by an empire did not become its tributary"
+                assert EM.tribute_of(conn, eid, tid)["how"] == "conquered"
+            finally:
+                CA.start_campaign = saved_march
+                EM.soldiers = saved_soldiers
+                EM.DEMAND_CHANCE, EM.REVOLT_CHANCE, EM.PUNISH_CHANCE = saved_consts
+                conn.execute("DELETE FROM tributaries")
+                conn.execute("DELETE FROM occupations WHERE occupier_kingdom_id = ? AND former_kingdom_id IN (?, ?)", (eid, pair[1], tid))
+                conn.execute("DELETE FROM campaigns WHERE attacker_kingdom_id = ? AND status != 'Over'", (eid,))
+                for k, (kind, treasury) in saved.items():
+                    conn.execute("UPDATE kingdoms SET type = ?, treasury = ? WHERE id = ?", (kind, treasury, k))
+                conn.executemany("UPDATE city_resources SET amount = ? WHERE city_id = ? AND resource_name = 'Food'",
+                                 [(amount, city) for city, amount in saved_food.items()])
+                conn.execute("DELETE FROM caravans WHERE id > ?", (caravans_before,))
+                conn.executemany("UPDATE npcs SET title = ? WHERE id = ?", [(t, i) for i, t in titles])
+                conn.execute("DELETE FROM chronicle_entries WHERE id > ?", (chronicle_before,))
+                conn.commit()
+
+        run_step(r, "empires: a crown that wins wars becomes an empire; neighbours yield or are conquered into tribute, pay, fall behind, revolt", empires_and_tribute)
+
+        def children_grow_up_and_enlist():
+            import Data.Economy.jobs as JB
+            from Data.Government.military import MILITARY_PROFESSIONS
+            # a grown child joins the jobless; a young one stays a child
+            kids = conn.execute("""SELECT n.id FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                   WHERE k.world_id = ? AND n.alive = 1 AND n.profession = 'Child' LIMIT 2""", (world_id,)).fetchall()
+            assert len(kids) == 2, "(setup) no children in the world"
+            grown, young = kids[0][0], kids[1][0]
+            ages = {i: conn.execute("SELECT age FROM npcs WHERE id = ?", (i,)).fetchone()[0] for i in (grown, young)}
+            conn.execute("UPDATE npcs SET age = ? WHERE id = ?", (JB.WORKING_AGE + 1, grown))
+            conn.execute("UPDATE npcs SET age = ? WHERE id = ?", (JB.WORKING_AGE - 6, young))
+            JB.come_of_age(conn, world_id)
+            assert conn.execute("SELECT profession FROM npcs WHERE id = ?", (grown,)).fetchone()[0] == "Laborer", \
+                "a child of seventeen did not leave childhood for work"
+            assert conn.execute("SELECT profession FROM npcs WHERE id = ?", (young,)).fetchone()[0] == "Child", "a child of ten was sent to work"
+            assert not conn.execute("SELECT COUNT(*) FROM npcs WHERE alive = 1 AND profession = 'Child' AND age >= ?", (JB.WORKING_AGE,)).fetchone()[0], \
+                "grown folk are still counted as children"
+            for i, a in ages.items():
+                conn.execute("UPDATE npcs SET age = ? WHERE id = ?", (a, i))
+
+            # a barracks with room takes young jobless as soldiers while the crown can pay -- and none when it cannot
+            post = conn.execute("""SELECT b.id, b.city_id, c.kingdom_id, b.capacity FROM buildings b JOIN cities c ON c.id = b.city_id
+                                   JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND b.type = 'Barracks' LIMIT 1""",
+                                (world_id,)).fetchone()
+            assert post, "(setup) no barracks in the world"
+            saved_workers = conn.execute("SELECT id, profession, workplace_id FROM npcs WHERE workplace_id = ? AND alive = 1", (post["id"],)).fetchall()
+            saved_treasury = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (post["kingdom_id"],)).fetchone()[0]
+            conn.execute("UPDATE npcs SET workplace_id = NULL WHERE workplace_id = ?", (post["id"],))
+            young_jobless = conn.execute("""SELECT id, profession, workplace_id FROM npcs WHERE city_id = ? AND alive = 1
+                                            AND profession NOT IN ('Child') AND age BETWEEN ? AND ? LIMIT 3""",
+                                         (post["city_id"], JB.WORKING_AGE, JB.RECRUIT_MAX_AGE)).fetchall()
+            assert len(young_jobless) == 3, "(setup) too few young folk in the barracks town"
+            conn.executemany("UPDATE npcs SET profession = 'Laborer', workplace_id = NULL WHERE id = ?", [(y[0],) for y in young_jobless])
+            try:
+                conn.execute("UPDATE kingdoms SET treasury = 0 WHERE id = ?", (post["kingdom_id"],))
+                JB.recruit(conn, world_id)
+                assert not conn.execute("SELECT COUNT(*) FROM npcs WHERE workplace_id = ? AND alive = 1", (post["id"],)).fetchone()[0], \
+                    "a crown with an empty treasury still recruited"
+                conn.execute("UPDATE kingdoms SET treasury = 10000000 WHERE id = ?", (post["kingdom_id"],))
+                JB.recruit(conn, world_id)
+                joined = conn.execute("SELECT profession FROM npcs WHERE workplace_id = ? AND alive = 1", (post["id"],)).fetchall()
+                assert len(joined) == min(JB.RECRUITS_PER_POST, post["capacity"]) and all(j[0] == "Soldier" for j in joined), \
+                    f"a barracks with room and a paying crown took {[j[0] for j in joined]}, not {JB.RECRUITS_PER_POST} soldiers"
+            finally:
+                conn.executemany("UPDATE npcs SET profession = ?, workplace_id = ? WHERE id = ?", [(y[1], y[2], y[0]) for y in young_jobless])
+                conn.execute("UPDATE npcs SET workplace_id = NULL WHERE workplace_id = ?", (post["id"],))
+                conn.executemany("UPDATE npcs SET profession = ?, workplace_id = ? WHERE id = ?", [(w[1], w[2], w[0]) for w in saved_workers])
+                conn.execute("UPDATE kingdoms SET treasury = ? WHERE id = ?", (saved_treasury, post["kingdom_id"]))
+                conn.commit()
+
+        run_step(r, "children come of age into work; barracks and guard posts recruit the young jobless while the crown can pay", children_grow_up_and_enlist)
 
         def friends_grow_closer():
             import Data.NPCS.family as FA

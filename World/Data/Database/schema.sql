@@ -467,3 +467,19 @@ CREATE INDEX IF NOT EXISTS idx_buildings_city ON buildings(city_id);
 CREATE INDEX IF NOT EXISTS idx_buildings_type ON buildings(type);
 CREATE INDEX IF NOT EXISTS idx_cities_kingdom ON cities(kingdom_id);
 CREATE INDEX IF NOT EXISTS idx_relationships_b ON relationships(npc_b_id);
+-- Tribute: a kingdom paying a yearly share of gold and grain to an empire
+-- (Data.Government.empire). Paying, Revolted, or Ended (one side fell).
+CREATE TABLE IF NOT EXISTS tributaries (
+    id            INTEGER PRIMARY KEY,
+    empire_id     INTEGER NOT NULL REFERENCES kingdoms(id),
+    tributary_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    since_day     INTEGER NOT NULL,
+    how           TEXT NOT NULL,                 -- 'yielded' to a demand, or 'conquered'
+    tribute_gold  REAL NOT NULL,                 -- owed each year
+    missed        INTEGER NOT NULL DEFAULT 0,    -- years running it could not pay in full
+    paid_gold     REAL NOT NULL DEFAULT 0,
+    paid_food     REAL NOT NULL DEFAULT 0,
+    ended_day     INTEGER,
+    status        TEXT NOT NULL DEFAULT 'Paying'
+);
+CREATE INDEX IF NOT EXISTS idx_tributaries_status ON tributaries(status);

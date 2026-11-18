@@ -19,7 +19,15 @@
 
 ADULT_AGE = 16
 
-MONARCH_TITLES = ("King", "Queen", "Doge")   # no one heads two realms
+MONARCH_TITLES = ("King", "Queen", "Emperor", "Empress", "Doge")   # no one heads two realms
+
+
+def monarch_title(conn, kingdom_id, gender):
+    """King or Queen -- or, in an empire (Data.Government.empire), Emperor or Empress."""
+    row = conn.execute("SELECT type FROM kingdoms WHERE id = ?", (kingdom_id,)).fetchone()
+    if row and row[0] == "Empire":
+        return "Emperor" if gender == "Male" else "Empress"
+    return "King" if gender == "Male" else "Queen"
 LORD_TITLES = ("Count", "Countess")
 
 
@@ -229,7 +237,7 @@ def inherit_crown(conn, capital_city, previous):
         relocate_npc(conn, heir["id"], capital_city["id"])
         heir = get_npc(conn, heir["id"])
 
-    heir["title"] = "King" if heir["gender"] == "Male" else "Queen"
+    heir["title"] = monarch_title(conn, capital_city["kingdom"], heir["gender"])
     save_npc(conn, heir)
 
     kingdom = conn.execute("SELECT id, name, world_id FROM kingdoms WHERE id = ?", (capital_city["kingdom"],)).fetchone()

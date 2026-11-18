@@ -400,6 +400,11 @@ def war_candidates(conn, kingdom, trade_routes, current_year):
         if relation["status"] == "Allied" or _treaty_active(relation, current_year):
             continue
 
+        # an empire does not war on a tributary that pays, nor it on its empire (Data.Government.empire)
+        from Data.Government.empire import tribute_of
+        if tribute_of(conn, kingdom["id"], row["kingdom_id"]):
+            continue
+
         candidates.append((route, row["kingdom_id"]))
 
     return candidates

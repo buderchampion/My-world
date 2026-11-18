@@ -445,8 +445,12 @@ class SimulationManager:
         from Data.Buildings.upgrades import collect_town_taxes
         collect_town_taxes(self.conn, self.world_id)
 
-        # The job market: the jobless take free places in their town (Data.Economy.jobs).
-        from Data.Economy.jobs import hire_jobless
+        # The job market (Data.Economy.jobs): children grown to working age join the
+        # jobless; barracks and guard posts take a few young recruits while the crown
+        # can pay them; then the jobless take free places in their town.
+        from Data.Economy.jobs import come_of_age, recruit, hire_jobless
+        come_of_age(self.conn, self.world_id)
+        recruit(self.conn, self.world_id)
         hire_jobless(self.conn, self.world_id)
 
         # Republics' grain offices top up their reserves from abroad
@@ -564,6 +568,12 @@ class SimulationManager:
         apply_peace_dividend(self.conn, self.world_id, self.clock.year)
         end_failed_alliances(self.conn, self.world_id, self.clock.year)
         check_alliances(self.conn, self.world_id, self.clock.year)
+
+        # Empires: crowns grown great by war are proclaimed empires; beaten and
+        # threatened neighbours pay them tribute, or refuse and are marched on;
+        # tributaries grown strong throw off the yoke (Data.Government.empire).
+        from Data.Government.empire import empires_year
+        empires_year(self.conn, self.world_id, self.clock.year)
 
         # Kingdom wars. Whether a kingdom goes to war this year depends on its
         # grievances (a kingdom with no enemies rarely does), and who it

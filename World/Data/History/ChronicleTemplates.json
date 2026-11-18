@@ -286,5 +286,43 @@
         "{When}, {ruler}, of a house grown rich in trade, bought the {county} from the crown of {kingdom}, and was made its {title}.",
         "{When}, the crown of {kingdom}, wanting a lord for the {county}, sold it to the merchant {ruler}, now {title}.",
         "{When}, gold won what birth had not: {ruler} became {title} of the {county} in {kingdom}."
+    ],
+    "Empire Proclaimed": [
+        "{When}, grown great by the sword, {kingdom} was proclaimed an empire, and {ruler} took the imperial crown.",
+        "{When}, {ruler} put aside the title of king and was hailed by all {kingdom} as its emperor.",
+        "{When}, the lands won in war were joined under one throne, and {kingdom} named itself an empire."
+    ],
+    "Tribute (yielded)": [
+        "{When}, {ruler}, fearing the armies of {other}, bowed to its demand, and {kingdom} paid {gold} gold a year in tribute.",
+        "{When}, rather than face the host of {other}, {kingdom} agreed to send it {gold} gold each year, and grain besides.",
+        "{When}, the envoys of {other} came to {kingdom} demanding tribute, and {ruler}, with no army to answer them, paid."
+    ],
+    "Tribute (conquered)": [
+        "{When}, beaten in war, {kingdom} was made a tributary of {other}, owing it {gold} gold a year.",
+        "{When}, the price of defeat was set: {kingdom} would pay {other} {gold} gold each year, and send it grain.",
+        "{When}, {ruler} of {kingdom} bent the knee to {other}, and the tribute was fixed at {gold} gold a year."
+    ],
+    "Tribute (received)": [
+        "{When}, {other} bowed to {kingdom} and agreed to pay {gold} gold a year in tribute.",
+        "{When}, {kingdom} gained a tributary: {other}, owing {gold} gold each year.",
+        "{When}, the treasury of {kingdom} was promised {gold} gold a year from {other}, now its tributary."
+    ],
+    "Tribute (refused)": [
+        "{When}, {other} demanded tribute of {kingdom}, and {ruler} sent its envoys home empty-handed.",
+        "{When}, {ruler} would not pay {other} a single coin, and {kingdom} made ready for war.",
+        "{When}, {kingdom} refused the tribute {other} demanded, knowing that war would follow."
+    ],
+    "Tribute (behind)": [
+        "{When}, {kingdom} fell behind in its tribute to {other}, and the imperial host marched to collect it.",
+        "{When}, the tribute of {kingdom} went unpaid, and {other} came with an army to take what it was owed."
+    ],
+    "Tribute (thrown off)": [
+        "{When}, {ruler} would pay {other} no longer, and {kingdom} threw off the yoke of tribute.",
+        "{When}, {kingdom}, grown strong again, refused the tribute of {other}, and was its own master once more.",
+        "{When}, the tribute-carts did not leave {kingdom}; {ruler} had broken with {other}."
+    ],
+    "Tribute (lost)": [
+        "{When}, {other} stopped paying its tribute, and {kingdom} counted it an enemy.",
+        "{When}, {other} threw off the rule of {kingdom}, and the empire's coffers were the lighter for it."
     ]
 }

@@ -73,7 +73,8 @@ def assign_city_ruler(conn, city):
         return lord
 
     if city["type"] == "Capital":
-        ruler["title"] = "King" if ruler["gender"] == "Male" else "Queen"
+        from Data.Government.succession import monarch_title
+        ruler["title"] = monarch_title(conn, city["kingdom"], ruler["gender"])
         # a new dynasty: no regency carries over from the old one
         conn.execute("UPDATE kingdoms SET regent_id = NULL WHERE id = ?", (city["kingdom"],))
     else:

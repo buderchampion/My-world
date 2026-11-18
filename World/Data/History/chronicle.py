@@ -14,6 +14,8 @@ REQUIRED_TEMPLATE_KEYS = (
     "Great Fire", "Flood", "Earthquake", "Locusts", "Ruler Died (disaster)",
     "Tournament", "Thieves' Guild (founded)", "Thieves' Guild (broken)",
     "Grand Building Raised", "Merchant Ennobled",
+    "Empire Proclaimed", "Tribute (yielded)", "Tribute (conquered)", "Tribute (received)",
+    "Tribute (refused)", "Tribute (behind)", "Tribute (thrown off)", "Tribute (lost)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -70,7 +72,7 @@ TEMPLATE_FIELDS = (
     "ruler", "title", "predecessor", "age", "age_ordinal", "possessive",
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
- "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building")
+ "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building", "gold")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".
