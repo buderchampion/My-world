@@ -250,7 +250,9 @@ def found_horde(conn, world_id, region, race=None, people=None, chronicle=True):
     used = {row[0] for row in conn.execute("SELECT color FROM kingdoms WHERE world_id = ?", (world_id,))}
     color = next((c for c in KINGDOM_COLORS if c not in used), "#%06X" % random.randint(0, 0xFFFFFF))
     kingdom_id = create_kingdom(conn, world_id, name, color)["id"]
-    conn.execute("UPDATE kingdoms SET type = 'Horde', race = ?, treasury = 0 WHERE id = ?", (race, kingdom_id))
+    from Data.Government.edicts import today
+    conn.execute("UPDATE kingdoms SET type = 'Horde', race = ?, treasury = 0, founded_day = ? WHERE id = ?",
+                 (race, today(conn, world_id), kingdom_id))
 
     people = random.randint(*HORDE_PEOPLE) if people is None else people
     x = region["center_x"] + random.randint(-40, 40)
@@ -299,14 +301,16 @@ def rise_hordes(conn, world_id):
 
 # ------------------------------------------------------------------ the camp
 def herds_month(conn, world_id):
-    """Monthly: the herds feed each camp. Returns Food added."""
+    """Monthly: the herds feed each camp -- and a horse kingdom's towns on the steppe
+    (Data.Government.horse_kingdom). Returns Food added."""
+    from Data.Government.horse_kingdom import herd_towns
     added = 0.0
-    for h in hordes(conn, world_id):
-        people = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1", (h["capital_city_id"],)).fetchone()[0]
+    for city_id in [h["capital_city_id"] for h in hordes(conn, world_id)] + herd_towns(conn, world_id):
+        people = conn.execute("SELECT COUNT(*) FROM npcs WHERE city_id = ? AND alive = 1", (city_id,)).fetchone()[0]
         food = round(people * HERD_FOOD * 30, 2)
         conn.execute("""INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, 'Food', ?)
                         ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = city_resources.amount + excluded.amount""",
-                     (h["capital_city_id"], food))
+                     (city_id, food))
         added += food
     conn.commit()
     return round(added, 2)
@@ -320,6 +324,9 @@ def move_camps(conn, world_id):
         camp = conn.execute("SELECT id, map_x, map_y, region_id FROM cities WHERE id = ?", (h["capital_city_id"],)).fetchone()
         if conn.execute("SELECT 1 FROM campaigns WHERE target_city_id = ? AND status != 'Over'", (camp["id"],)).fetchone():
             continue                                            # besieged: it cannot slip away
+        from Data.Government.campaigns import active_campaign
+        if active_campaign(conn, h["id"]):
+            continue                                            # its riders are away at war: the camp waits for them
         places = [r for r in free_steppe(conn, world_id)
                   if r["id"] != camp["region_id"] and math.dist((r["center_x"], r["center_y"]), (camp["map_x"], camp["map_y"])) <= MOVE_REACH]
         if not places:
@@ -386,6 +393,9 @@ def raid(conn, world_id, horde, village):
     defenders = defenders_of(conn, village)
     result = melee.battle(band, defenders) if defenders else {"winner": "a", "dead_a": [], "dead_b": [], "rounds": 0}
     won = result["winner"] == "a"
+    from Data.Government.horse_kingdom import mark_fought
+    from Data.Government.edicts import today
+    mark_fought(conn, horde["id"], today(conn, world_id))
 
     camp_id = horde["capital_city_id"]
     for f in result["dead_a"]:

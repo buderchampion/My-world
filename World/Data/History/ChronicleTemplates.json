@@ -352,5 +352,25 @@
         "{When}, weary of the raids, {ruler} agreed to pay {other} {gold} gold a year to leave {kingdom} in peace.",
         "{When}, {kingdom} bought its peace from the horse lords of {other}: {gold} gold each year, and grain besides.",
         "{When}, rather than see more villages burn, {kingdom} paid the khan of {other} {gold} gold a year."
+    ],
+    "Horde Settled (conquest)": [
+        "{When}, {ruler} rode no more: {kingdom} made {city} its seat, and the horde became a kingdom of horse lords.",
+        "{When}, the riders of {kingdom} tethered their horses at {city}; the khan's tent became a hall, and {ruler} a crowned lord.",
+        "{When}, {kingdom} took {city} and kept it, and {ruler} ruled from its walls as king of the horse lords."
+    ],
+    "Horde Settled (peace)": [
+        "{When}, after long years of peace, {ruler} let the wandering end: {kingdom} settled at {city} as a kingdom of horse lords.",
+        "{When}, the camp of {kingdom} stopped at {city} and did not move again; {ruler} raised a hall, and herders' villages grew around it.",
+        "{When}, {ruler} gave up the long ride, and {kingdom} put down roots at {city}."
+    ],
+    "Riders Answered": [
+        "{When}, the call came from {other}, and {kingdom} answered: {riders} riders rode to the defence of {city}.",
+        "{When}, {kingdom} kept its oath -- {riders} riders thundered down to {city} to stand beside {other}.",
+        "{When}, {other} was beset at {city}, and {riders} riders of {kingdom} came at the gallop."
+    ],
+    "Riders Came": [
+        "{When}, as {city} was assailed, {riders} riders of {other} came over the hills to fight beside {kingdom}.",
+        "{When}, {kingdom}'s hour was dark at {city} -- until {riders} riders of {other} answered the call.",
+        "{When}, the horns of {other} were heard at {city}: {riders} riders came to the aid of {kingdom}."
     ]
 }

@@ -704,6 +704,16 @@ FEATURES = [
                   "Data/Government/empire.py": ['empire["type"] == "Horde"']},
     },
     {
+        "name": "Horse kingdoms: strong hordes march to conquer the town nearest their camp; a horde that holds a town, or keeps a long peace, settles into a kingdom of horse lords whose herds still feed it, which swears oaths with its neighbours and sends its riders when an ally is attacked",
+        "functions": {"Data/Government/horse_kingdom.py": ["is_horse_people", "horse_kingdoms", "mark_fought", "nearest_town", "horde_wars",
+                                                           "settle", "settle_hordes", "herd_towns", "swear_oaths", "horse_kingdoms_year",
+                                                           "riders_answer"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["horse_kingdoms_year(self.conn"],
+                  "Data/Government/campaigns.py": ["riders_answer(conn", "CAVALRY_EDGE", "nearest_town(conn"],
+                  "Data/Government/horde.py": ["herd_towns(conn", "mark_fought(conn"],
+                  "Data/Database/database.py": ['"founded_day"', '"last_fought_day"']},
+    },
+    {
         "name": "Tribute empires: a crown that wins wars is proclaimed an empire, and its weaker neighbours yield or are conquered into paying gold and grain each year; tributaries that fall behind are marched on, and those grown strong throw off the yoke",
         "functions": {"Data/Government/empire.py": ["soldiers", "conquests", "tribute_of", "proclaim_empires", "submit", "yield_chance",
                                                     "make_demands", "conquered_submit", "pay_tribute", "revolt_chance", "revolts", "empires_year"],
@@ -4734,6 +4744,121 @@ def _smoke_body(r, holder):
             conn.commit()
 
     run_step(r, "hordes: tribes unite on the steppe, camps move, herds feed them, riders raid in summer, danegeld, khan by strength and splits", hordes_ride)
+
+    def horse_kingdoms_settle():
+        import Data.Government.horde as H
+        import Data.Government.horse_kingdom as HK
+        import Data.Government.campaigns as CA
+        import Data.Government.empire as EM
+        from Data.Database.repository import get_city, get_kingdom, get_kingdom_favor
+        from Data.Combat.combat import transfer_conquest
+        from Data.Government.edicts import today
+        saved = (HK.CONQUEST_RIDERS, HK.CONQUEST_CHANCE, HK.PEACE_SETTLE_CHANCE, HK.VILLAGE_REACH, HK.FRIEND_REACH, HK.AID_REACH,
+                 CA.start_campaign)
+        relations = [dict(x) for x in conn.execute("SELECT * FROM kingdom_relations")]
+        try:
+            hs = H.hordes(conn, world_id)
+            if not hs:
+                places = H.free_steppe(conn, world_id)
+                assert places, "(setup) the world has no empty steppe for a horde"
+                H.found_horde(conn, world_id, places[0])
+                hs = H.hordes(conn, world_id)
+            horde = hs[0]
+            day = today(conn, world_id)
+            trade_routes = [x for x in conn.execute("SELECT * FROM roads WHERE kind = 'Trade Route'")]
+
+            # a strong horde marches on the town nearest its camp, never on a kingdom that pays it
+            marched = []
+            CA.start_campaign = lambda conn_, a, d, day_: marched.append((a["id"], d["id"])) or {"id": -1}
+            HK.CONQUEST_RIDERS, HK.CONQUEST_CHANCE = 0, 1.0
+            HK.horde_wars(conn, world_id, [dict(x) for x in trade_routes], 9999)
+            ours = [m for m in marched if m[0] == horde["id"]]
+            if ours:
+                assert not EM.tribute_of(conn, horde["id"], ours[0][1]), "a horde marched on a kingdom that pays it"
+                assert HK.nearest_town(conn, horde, get_kingdom(conn, ours[0][1])), "a horde marched where it cannot ride"
+                assert conn.execute("SELECT last_fought_day FROM kingdoms WHERE id = ?", (horde["id"],)).fetchone()[0] == day, \
+                    "a horde's war did not break its peace"
+            CA.start_campaign = saved[-1]
+
+            # a horde that holds a town settles there: the town is its seat, the camp a horse town, the khan a king
+            town = conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+                                   WHERE k.world_id = ? AND c.type IN ('Town', 'City') AND k.type NOT IN ('Horde', 'Horse Kingdom')
+                                   AND k.status != 'Fallen' LIMIT 1""", (world_id,)).fetchone()
+            assert town, "(setup) no town for the horde to take"
+            loser = get_kingdom(conn, town["kingdom_id"])
+            transfer_conquest(conn, get_city(conn, town["id"]), get_kingdom(conn, horde["id"]), loser)
+            camp = horde["capital_city_id"]
+            settled = HK.settle_hordes(conn, world_id)
+            assert (horde["id"], "conquest") in settled, "a horde holding a town did not settle"
+            k = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (horde["id"],)).fetchone())
+            assert k["type"] == "Horse Kingdom" and k["capital_city_id"] == town["id"], "the taken town is not the horse kingdom's seat"
+            assert conn.execute("SELECT type FROM cities WHERE id = ?", (camp,)).fetchone()[0] == "City", "the old camp is not a fixed town"
+            assert conn.execute("SELECT type FROM cities WHERE id = ?", (town["id"],)).fetchone()[0] == "Capital"
+            ruler = conn.execute("SELECT title, city_id FROM npcs WHERE id = ?", (k["ruler_id"],)).fetchone()
+            assert ruler and ruler["title"] in ("King", "Queen") and ruler["city_id"] == town["id"], "the khan was not crowned at the new seat"
+            assert not conn.execute("SELECT 1 FROM tributaries WHERE empire_id = ? AND status = 'Paying'", (horde["id"],)).fetchone(), \
+                "a settled kingdom still takes danegeld"
+            assert horde["id"] not in [h["id"] for h in H.hordes(conn, world_id)], "a settled kingdom still rides as a horde"
+
+            # its herds still feed its towns on the steppe
+            if camp in HK.herd_towns(conn, world_id):
+                food = get_city(conn, camp)["resources"].get("Food", 0)
+                H.herds_month(conn, world_id)
+                assert get_city(conn, camp)["resources"].get("Food", 0) > food, "the horse town's herds fed no one"
+
+            # oaths: a horse kingdom and its neighbours warm to each other
+            HK.FRIEND_REACH = 10 ** 6
+            friend = next(x for x in conn.execute(
+                "SELECT id FROM kingdoms WHERE world_id = ? AND id != ? AND type NOT IN ('Horde') AND status != 'Fallen'",
+                (world_id, horde["id"])))[0]
+            if not conn.execute("""SELECT 1 FROM campaigns WHERE status != 'Over' AND ((attacker_kingdom_id = ? AND defender_kingdom_id = ?)
+                                   OR (attacker_kingdom_id = ? AND defender_kingdom_id = ?))""", (horde["id"], friend, friend, horde["id"])).fetchone():
+                favor = get_kingdom_favor(conn, friend, horde["id"])
+                HK.swear_oaths(conn, world_id)
+                assert get_kingdom_favor(conn, friend, horde["id"]) > favor or favor >= 100, "no oath warmed a neighbour"
+
+            # the riders answer an ally's call
+            HK.AID_REACH = 10 ** 6
+            a, b = sorted((horde["id"], friend))
+            conn.execute("""INSERT INTO kingdom_relations (kingdom_a_id, kingdom_b_id, status) VALUES (?, ?, 'Allied')
+                            ON CONFLICT(kingdom_a_id, kingdom_b_id) DO UPDATE SET status = 'Allied'""", (a, b))
+            conn.execute("""INSERT OR IGNORE INTO kingdom_relations (kingdom_a_id, kingdom_b_id, status) VALUES (?, ?, 'Allied')""", (b, a))
+            conn.execute("UPDATE kingdom_relations SET status = 'Allied' WHERE kingdom_a_id = ? AND kingdom_b_id = ?", (b, a))
+            target = get_city(conn, get_kingdom(conn, friend)["capital"])
+            entries = conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE kingdom_id = ? AND event_type = 'Alliance'", (friend,)).fetchone()[0]
+            aid = HK.riders_answer(conn, get_kingdom(conn, friend), target, attacker_id=-1, day=day)
+            assert aid and all(conn.execute("SELECT kingdom_id FROM cities WHERE id = ?", (n["city_id"],)).fetchone()[0] == horde["id"]
+                               for n in aid), "an ally's riders did not answer the call"
+            assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE kingdom_id = ? AND event_type = 'Alliance'",
+                                (friend,)).fetchone()[0] > entries, "the riders' coming went unchronicled"
+
+            # a horde long at peace settles where it stands, and its herders found villages
+            places = H.free_steppe(conn, world_id)
+            if places:
+                kid, camp2 = H.found_horde(conn, world_id, places[0])
+                conn.execute("UPDATE kingdoms SET founded_day = ?, last_fought_day = NULL WHERE id = ?", (day - HK.PEACE_YEARS * 360 - 1, kid))
+                HK.PEACE_SETTLE_CHANCE, HK.VILLAGE_REACH = 1.0, 10 ** 6
+                settled = HK.settle_hordes(conn, world_id)
+                assert (kid, "peace") in settled, "a horde long at peace did not settle"
+                k2 = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (kid,)).fetchone())
+                assert k2["type"] == "Horse Kingdom" and k2["capital_city_id"] == camp2
+                assert conn.execute("SELECT COUNT(*) FROM cities WHERE kingdom_id = ? AND type = 'Village'", (kid,)).fetchone()[0] >= 1, \
+                    "no herders' village was founded"
+                # ...and a horde that fought lately does not
+                places = H.free_steppe(conn, world_id)
+                if places:
+                    kid3, _ = H.found_horde(conn, world_id, places[0])
+                    conn.execute("UPDATE kingdoms SET founded_day = ?, last_fought_day = ? WHERE id = ?", (day - 9999, day, kid3))
+                    assert (kid3, "peace") not in HK.settle_hordes(conn, world_id), "a horde fresh from a raid settled for peace"
+        finally:
+            (HK.CONQUEST_RIDERS, HK.CONQUEST_CHANCE, HK.PEACE_SETTLE_CHANCE, HK.VILLAGE_REACH, HK.FRIEND_REACH, HK.AID_REACH,
+             CA.start_campaign) = saved
+            conn.execute("DELETE FROM kingdom_relations")
+            for x in relations:
+                conn.execute(f"INSERT INTO kingdom_relations ({', '.join(x)}) VALUES ({', '.join('?' * len(x))})", tuple(x.values()))
+            conn.commit()
+
+    run_step(r, "horse kingdoms: hordes march to conquer, settle after holding a town or a long peace, keep their herds, swear oaths and answer allies", horse_kingdoms_settle)
 
     # --- invariants that should hold after any amount of simulation ----------
 

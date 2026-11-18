@@ -95,6 +95,9 @@ def choose_target(conn, attacker, defender):
     capital = capital_of(defender)
     if capital and aims_at_capital(conn, attacker, defender) and find_route(conn, capital_of(attacker), capital):
         return get_city(conn, capital)
+    if attacker.get("type") == "Horde":                 # a horde rides on the town nearest its camp (Data.Government.horse_kingdom)
+        from Data.Government.horse_kingdom import nearest_town
+        return nearest_town(conn, dict(attacker, capital_city_id=capital_of(attacker)), defender)
 
     towns = [get_city(conn, row["id"]) for row in conn.execute(
         "SELECT id FROM cities WHERE kingdom_id = ? AND id != ?", (defender["id"], capital_of(defender) or -1))]
@@ -211,6 +214,15 @@ def fight(conn, campaign, defender_bonus=1.0, day=None):
     members = [r[0] for r in conn.execute("SELECT npc_id FROM army_members WHERE army_id = ?", (campaign["army_id"],))]
     attackers = [n for n in (get_npc(conn, i) for i in members) if n and n["alive"]]
     defenders = rally(conn, defender["id"], target["id"])
+
+    # horse lords (Data.Government.horse_kingdom): allied riders answer the call, and
+    # hordes and horse kingdoms fight from the saddle
+    from Data.Government.horse_kingdom import riders_answer, is_horse_people, CAVALRY_EDGE
+    defenders += riders_answer(conn, defender, target, attacker["id"], day)
+    if is_horse_people(attacker):
+        defender_bonus /= CAVALRY_EDGE
+    if is_horse_people(defender):
+        defender_bonus *= CAVALRY_EDGE
 
     # armor: the army's from its wagons; the defenders' from the towns they came from
     from Data.Combat.combat import armor_share, city_armor

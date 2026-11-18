@@ -142,6 +142,8 @@ def init_database():
         "martial_law_until": "INTEGER",
         "type": "TEXT NOT NULL DEFAULT 'Crown'",       # Crown or Republic (Data.Government.republic)
         "status": "TEXT NOT NULL DEFAULT 'Standing'",  # Standing, or Fallen (Data.Government.conquest)
+        "founded_day": "INTEGER",                       # a horde's founding (Data.Government.horse_kingdom)
+        "last_fought_day": "INTEGER",                   # a horde's last raid or war: its peace is counted from here
     })
 
     # who rules for a child lord (Data.Government.succession)

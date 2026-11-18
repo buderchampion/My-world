@@ -596,10 +596,16 @@ class SimulationManager:
         # is still under a Peace Treaty with are never candidates.
         trade_routes = [r for r in get_world_roads(self.conn, self.world_id) if r["kind"] == "Trade Route"]
 
+        # Horse lords (Data.Government.horse_kingdom): strong hordes march to
+        # conquer, hordes that held a town or long kept the peace settle into
+        # horse kingdoms, and horse kingdoms swear oaths with their neighbours.
+        from Data.Government.horse_kingdom import horse_kingdoms_year
+        horse_kingdoms_year(self.conn, self.world_id, trade_routes, self.clock.year)
+
         for kingdom in kingdoms:
 
             if kingdom.get("type") == "Horde":
-                continue        # hordes raid, they do not yet march to conquer (Data.Government.horde)
+                continue        # a horde chooses its wars above, by its own lights
 
             candidates = war_candidates(self.conn, kingdom, trade_routes, self.clock.year)
 

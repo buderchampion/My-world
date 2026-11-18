@@ -17,6 +17,7 @@ REQUIRED_TEMPLATE_KEYS = (
     "Empire Proclaimed", "Tribute (yielded)", "Tribute (conquered)", "Tribute (received)",
     "Tribute (refused)", "Tribute (behind)", "Tribute (thrown off)", "Tribute (lost)",
     "Horde Risen", "Horde Split", "Khan Chosen", "Horde Raid (sacked)", "Horde Raid (repelled)", "Tribute (danegeld)",
+    "Horde Settled (conquest)", "Horde Settled (peace)", "Riders Answered", "Riders Came",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
