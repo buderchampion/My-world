@@ -1,0 +1,1 @@
+"""Research: scholars in libraries, and the discoveries they make and spread (discoveries.py, Discoveries.json)."""

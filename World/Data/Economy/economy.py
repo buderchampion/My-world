@@ -125,7 +125,8 @@ def produce_resources(city):
     producing_workers = sum(
         len(b["workers"]) for b in city["buildings"] if building_production.get(b["type"])
     )
-    tools_needed = producing_workers * TOOLS_WEAR_PER_WORKER
+    from Data.Research.discoveries import bonus                 # what the kingdom's scholars have learned
+    tools_needed = producing_workers * TOOLS_WEAR_PER_WORKER * max(0.0, 1 + bonus(city.get("kingdom"), "tool_wear"))
     tools_on_hand = city["resources"].get("Tools", 0)
 
     if tools_needed > 0:
@@ -151,7 +152,7 @@ def produce_resources(city):
         # How well this building can work today: worn tools and a worn
         # building both slow it down, and it uses its inputs at that pace too.
         condition = building.get("condition", 100)
-        efficiency = tool_factor * (WORN_OUTPUT + (1 - WORN_OUTPUT) * condition / 100)
+        efficiency = tool_factor * (WORN_OUTPUT + (1 - WORN_OUTPUT) * condition / 100) * (1 + bonus(city.get("kingdom"), "output"))
 
         desired_amount = workers * rule["amount_per_worker"] * efficiency
         resource = rule["resource"]

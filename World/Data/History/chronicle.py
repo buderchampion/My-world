@@ -22,6 +22,7 @@ REQUIRED_TEMPLATE_KEYS = (
     "Dragon Guardian", "Dragon Revealed",
     "Succession Disputed", "Claim Withdrawn", "Claimant Exiled", "Heir Murdered", "Claimant Crowned",
     "Succession War (claimant won)", "Succession War (crown won)",
+    "Discovery Made", "Discovery Learned (trade)", "Discovery Learned (fair)", "Discovery Learned (conquest)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -79,7 +80,7 @@ TEMPLATE_FIELDS = (
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
  "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building", "gold",
- "region", "rival", "old", "dragon", "slayer")
+ "region", "rival", "old", "dragon", "slayer", "discovery")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".

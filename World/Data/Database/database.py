@@ -105,6 +105,8 @@ def init_database():
     _add_missing_columns(connection, "npcs", {"disease": "TEXT", "disease_days": "INTEGER NOT NULL DEFAULT 0",
                                               "disease_severity": "REAL"})
     _add_missing_columns(connection, "kingdoms", {"quarantine_until": "INTEGER"})
+    # research (Data.Research.discoveries): points toward the discovery being studied
+    _add_missing_columns(connection, "kingdoms", {"research": "REAL NOT NULL DEFAULT 0", "studying": "TEXT"})
     _add_missing_columns(connection, "cities", {"afraid_until": "INTEGER"})
     # prosperity (Data.Economy.prosperity): a town's score; a family's rise to merchant house and nobility
     _add_missing_columns(connection, "cities", {"prosperity": "REAL"})

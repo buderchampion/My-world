@@ -327,6 +327,11 @@ def transfer_conquest(conn, city, attacker_kingdom, defender_kingdom):
     else:
         conn.execute("UPDATE cities SET kingdom_id = ?, province_id = NULL WHERE id = ?", (attacker_kingdom["id"], city["id"]))
 
+    # the conqueror carries off the learning of the conquered (Data.Research.discoveries)
+    from Data.Research.discoveries import conquest_learn
+    world_id = conn.execute("SELECT world_id FROM kingdoms WHERE id = ?", (attacker_kingdom["id"],)).fetchone()[0]
+    conquest_learn(conn, world_id, attacker_kingdom["id"], defender_kingdom["id"])
+
 
 def resolve_kingdom_war(conn, attacker_kingdom, defender_kingdom, attacker_cities, defender_cities,
                         attacker_military=None, defender_military=None, target_city=None,

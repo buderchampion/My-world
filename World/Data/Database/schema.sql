@@ -501,3 +501,14 @@ CREATE TABLE IF NOT EXISTS dragons (
     slain_by      TEXT
 );
 CREATE INDEX IF NOT EXISTS idx_dragons_world ON dragons(world_id, status);
+-- Discoveries a kingdom knows (Data.Research.discoveries): made by its scholars, or learned
+-- by trade, at fairs, or by conquest (from_kingdom_id: who it was learned from).
+CREATE TABLE IF NOT EXISTS kingdom_discoveries (
+    id               INTEGER PRIMARY KEY,
+    kingdom_id       INTEGER NOT NULL REFERENCES kingdoms(id),
+    discovery        TEXT NOT NULL,
+    day              INTEGER NOT NULL,
+    how              TEXT NOT NULL,
+    from_kingdom_id  INTEGER REFERENCES kingdoms(id),
+    UNIQUE (kingdom_id, discovery)
+);

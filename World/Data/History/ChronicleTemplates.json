@@ -442,5 +442,25 @@
         "{When}, {rival} made war for the crown of {kingdom}, but {ruler} prevailed, and the rebels paid with their lives.",
         "{When}, the war of succession in {kingdom} ended with {rival} overthrown; {ruler} reigned secure.",
         "{When}, {ruler}'s loyal lords crushed {rival}, and the crown of {kingdom} was safe."
+    ],
+    "Discovery Made": [
+        "{When}, the scholars of {kingdom} brought forth a new learning, {discovery}: {reason}.",
+        "{When}, in the libraries of {kingdom} was discovered {discovery} -- {reason}.",
+        "{When}, {kingdom} was enriched by the wisdom of its scholars, who devised {discovery}: {reason}."
+    ],
+    "Discovery Learned (trade)": [
+        "{When}, merchants of {other} brought to {kingdom} the knowledge of {discovery}.",
+        "{When}, {kingdom} learned of {discovery} from the traders of {other}.",
+        "{When}, by way of trade with {other}, the learning of {discovery} came to {kingdom}."
+    ],
+    "Discovery Learned (fair)": [
+        "{When}, at the fairs where the folk of {kingdom} and {other} met, {kingdom} learned {discovery}.",
+        "{When}, travellers from {other} taught {kingdom} the secret of {discovery}.",
+        "{When}, {discovery}, long known in {other}, spread at last to {kingdom}."
+    ],
+    "Discovery Learned (conquest)": [
+        "{When}, among the spoils taken from {other}, {kingdom} gained the learning of {discovery}.",
+        "{When}, the conquerors of {kingdom} carried off from {other} the knowledge of {discovery}.",
+        "{When}, the books and scholars of {other} taught their conquerors in {kingdom} the art of {discovery}."
     ]
 }

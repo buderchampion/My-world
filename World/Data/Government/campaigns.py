@@ -362,7 +362,9 @@ def siege_day_passes(conn, campaign, army, soldiers, day):
 
     # siege works: labor, and Tools
     tools_used = min(army["tools"], TOOLS_PER_SOLDIER_DAY * soldiers)
-    progress = campaign["siege_progress"] + LABOR_PER_SOLDIER * soldiers + WORKS_PER_TOOL * tools_used
+    from Data.Research.discoveries import bonus                 # siegecraft
+    progress = campaign["siege_progress"] + (LABOR_PER_SOLDIER * soldiers + WORKS_PER_TOOL * tools_used) \
+        * (1 + bonus(campaign["attacker_kingdom_id"], "siege"))
     conn.execute("UPDATE armies SET tools = tools - ? WHERE id = ?", (round(tools_used, 2), army["id"]))
 
     # the blockaded town's stores

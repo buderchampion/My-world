@@ -146,7 +146,8 @@ def spread(conn, people, immune, season):
         d = diseases().get(s["disease"])
         if not d:
             continue
-        chance = d["contagion"] * d["seasons"].get(season, 1.0)
+        from Data.Research.discoveries import city_bonus             # physicians' learning keeps the sick apart
+        chance = d["contagion"] * d["seasons"].get(season, 1.0) * max(0.0, 1 + city_bonus(s["city_id"], "contagion"))
         house = by_home.get(s["home_id"], []) if s["home_id"] is not None else []
         work = by_work.get(s["workplace_id"], []) if s["workplace_id"] is not None else []
         near = set(random.sample(house, min(HOUSE_CONTACTS + 1, len(house)))) | set(random.sample(work, min(WORK_CONTACTS + 1, len(work))))
@@ -264,6 +265,8 @@ def run_course(conn, world_id, people, day, away):
         if not d:
             continue
         harm = d["harm"] * (p["disease_severity"] or 1.0) * _frailty(p)
+        from Data.Research.discoveries import city_bonus             # herbal lore and physicians' learning
+        harm *= max(0.1, 1 + city_bonus(p["city_id"], "sickness"))
         if (p["fed"] if p["fed"] is not None else 1.0) < HUNGRY_FED:
             harm *= d.get("worse_for", {}).get("hungry", 1.0)
         if p["id"] in tended:

@@ -619,6 +619,18 @@ FEATURES = [
                   "Data/Government/government.py": ["contest(conn, city[\"kingdom\"], ruler, None, old, relation=\"none\")"]},
     },
     {
+        "name": "Scholars and discoveries: libraries earn research toward discoveries that spread by trade, fairs and conquest",
+        "functions": {"Data/Research/discoveries.py": ["discoveries", "bonus", "city_bonus", "refresh", "known", "available", "partners",
+                                                        "learn", "choose", "scholars_research", "research_month", "spread_year", "conquest_learn"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["research_month(self.conn", "spread_year(self.conn", "bonus(kingdom[\"id\"], \"tax\")"],
+                  "Data/World/harvest.py": ["bonus(v[\"kingdom_id\"], \"harvest\")"],
+                  "Data/Economy/economy.py": ["bonus(city.get(\"kingdom\"), \"tool_wear\")", "bonus(city.get(\"kingdom\"), \"output\")"],
+                  "Data/NPCS/sickness.py": ["city_bonus(s[\"city_id\"], \"contagion\")", "city_bonus(p[\"city_id\"], \"sickness\")"],
+                  "Data/Government/campaigns.py": ["bonus(campaign[\"attacker_kingdom_id\"], \"siege\")"],
+                  "Data/Combat/combat.py": ["conquest_learn(conn, world_id, attacker_kingdom[\"id\"], defender_kingdom[\"id\"])"]},
+        "tables": ["kingdom_discoveries"],
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -1364,6 +1376,10 @@ def _smoke_body(r, holder):
     world_id = world["id"]
     conn = get_connection()
     holder["conn"] = conn
+    # a weak claim may be disputed at random (Data.Government.succession_crisis): the steps that crown heirs expect the
+    # plain line of succession, so disputes are off here and switched on only by the step that checks them
+    import Data.Government.succession_crisis as succession_crisis
+    succession_crisis.CRISIS_PER_POINT = 0.0
 
     kingdoms = get_world_kingdoms(conn, world_id)
     # Thieving is tested in its own step: in every other tick a thief jailed by chance would take a worker from
@@ -5219,6 +5235,60 @@ def _smoke_body(r, holder):
 
     run_step(r, "succession crises: a weak claim is disputed; loyal lords send the claimant into exile, disloyal ones crown them, a new house means war",
              succession_crises)
+
+    def discoveries_spread():
+        import Data.Research.discoveries as RS
+        saved = (RS.SPREAD_TRADE, RS.SPREAD_FAIR, RS.CONQUEST_LEARN)
+        ks = [dict(x) for x in conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id LIMIT 2", (world_id,))]
+        before = {k["id"]: (k.get("research"), k.get("studying")) for k in ks}
+        rows_before = conn.execute("SELECT COALESCE(MAX(id), 0) FROM kingdom_discoveries").fetchone()[0]
+        caravan = None
+        try:
+            a, b = ks
+            # what can be studied: a discovery's prerequisites come first
+            assert "Heavy Plough" not in RS.available(conn, a["id"]) or "Three-Field Rotation" in RS.known(conn, a["id"]), \
+                "the Heavy Plough can be studied before Three-Field Rotation"
+            # a kingdom whose food is dear studies farming
+            assert RS.discoveries()[RS.choose(conn, dict(a, price_level=2.0), RS.available(conn, a["id"]))]["kind"] == "farming" \
+                or not [o for o in RS.available(conn, a["id"]) if RS.discoveries()[o]["kind"] == "farming"], "a hungry kingdom did not study farming"
+            # enough research: the discovery is made, chronicled, and its effects reach the day's systems
+            conn.execute("UPDATE kingdoms SET research = 100000, studying = 'Hardened Tools' WHERE id = ?", (a["id"],))
+            made = RS.research_month(conn, world_id)
+            assert (a["id"], "Hardened Tools") in made, f"a kingdom with research to spare made no discovery: {made}"
+            assert abs(RS.bonus(a["id"], "tool_wear") - RS.discoveries()["Hardened Tools"]["effects"]["tool_wear"]) < 1e-9, \
+                "the discovery's effect did not reach the day's systems"
+            assert conn.execute("SELECT 1 FROM chronicle_entries WHERE kingdom_id = ? AND event_type = 'Discovery'", (a["id"],)).fetchone(), \
+                "the discovery was not chronicled"
+            # merchants carry it to a trading partner
+            RS.SPREAD_TRADE, RS.SPREAD_FAIR = 1.0, 0.0
+            ca, cb = (conn.execute("SELECT capital_city_id FROM kingdoms WHERE id = ?", (k["id"],)).fetchone()[0] for k in (a, b))
+            caravan = conn.execute("""INSERT INTO caravans (origin_city_id, destination_city_id, resource, amount, buyer_kingdom_id,
+                                      seller_kingdom_id, days_remaining, status) VALUES (?, ?, 'Food', 1, ?, ?, 0, 'Delivered')""",
+                                   (ca, cb, b["id"], a["id"])).lastrowid
+            spread = RS.spread_year(conn, world_id)
+            assert (b["id"], "Hardened Tools", "trade") in spread, f"a trading partner did not learn the discovery: {spread}"
+            # a conqueror carries off the learning of the conquered
+            lore = next((n for n, x in RS.discoveries().items() if not x["needs"] and n not in RS.known(conn, a["id"])), None)
+            if lore:
+                RS.learn(conn, world_id, b["id"], lore)
+                RS.CONQUEST_LEARN = 1.0
+                assert lore in RS.conquest_learn(conn, world_id, a["id"], b["id"]), "the conqueror learned nothing from the conquered"
+            # scholars earn research
+            scholars = conn.execute("""SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ?
+                                       AND n.alive = 1 AND n.profession = 'Scholar' AND n.workplace_id IS NOT NULL""", (a["id"],)).fetchone()[0]
+            if scholars:
+                assert RS.scholars_research(conn, a["id"]) >= scholars * RS.RESEARCH_PER_SCHOLAR, "the scholars earned too little research"
+        finally:
+            RS.SPREAD_TRADE, RS.SPREAD_FAIR, RS.CONQUEST_LEARN = saved
+            conn.execute("DELETE FROM kingdom_discoveries WHERE id > ?", (rows_before,))
+            if caravan:
+                conn.execute("DELETE FROM caravans WHERE id = ?", (caravan,))
+            for kid, (research, studying) in before.items():
+                conn.execute("UPDATE kingdoms SET research = ?, studying = ? WHERE id = ?", (research or 0, studying, kid))
+            RS.refresh(conn, world_id)
+            conn.commit()
+
+    run_step(r, "discoveries: research makes one (chronicled, its effects in force), merchants spread it, conquerors carry it off", discoveries_spread)
 
     # --- invariants that should hold after any amount of simulation ----------
 

@@ -38,6 +38,8 @@ class SimulationManager:
         self.conn = conn
         self.world_id = world_id
         self.clock = load_clock(conn, world_id)
+        from Data.Research.discoveries import refresh     # what each kingdom's scholars know, for the day's systems
+        refresh(conn, world_id)
 
     def tick(self) -> dict:
         rollover = self.clock.advance_minute()
@@ -274,7 +276,8 @@ class SimulationManager:
                             resolve_raid(self.conn, city, building)
 
             if tax_collected > 0:
-                add_treasury(self.conn, kingdom["id"], round(tax_collected, 2))
+                from Data.Research.discoveries import bonus             # ledgers: less slips through the crown's fingers
+                add_treasury(self.conn, kingdom["id"], round(tax_collected * (1 + bonus(kingdom["id"], "tax")), 2))
             if lords_takings:
                 from Data.Government.feudal import pay_lords
                 pay_lords(self.conn, lords_takings)
@@ -360,6 +363,10 @@ class SimulationManager:
         self.conn.commit()
 
     def on_month(self) -> None:
+        # Scholars research; a kingdom whose research is enough makes its discovery (Data.Research.discoveries).
+        from Data.Research.discoveries import research_month
+        research_month(self.conn, self.world_id)
+
         from Data.NPCS.family import form_families
         from Data.Government.government import assign_city_ruler, assign_kingdom_ruler
         from Data.Government.diplomacy import apply_succession_shock
@@ -614,6 +621,11 @@ class SimulationManager:
         # and carry gossip.
         from Data.Monsters.dragons import dragons_year
         dragons_year(self.conn, self.world_id)
+
+        # Discoveries spread (Data.Research.discoveries): to trading partners, to
+        # neighbours at peace who meet at each other's fairs.
+        from Data.Research.discoveries import spread_year
+        spread_year(self.conn, self.world_id)
 
         for kingdom in kingdoms:
 
