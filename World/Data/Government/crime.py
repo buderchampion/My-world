@@ -22,6 +22,20 @@ Guilds    where thieving thrives in a big town (GUILD_THEFTS in a year), the
           martial law the crown may crack down: the guildmaster is seized, and
           if they hang or go to jail the guild breaks -- or a new master
           takes it. Founding and breaking are chronicled.
+Dens      a Thieves Den is where a town's thieves and smugglers work. A Thief
+          by trade (working at a den) lives by stealing: THIEF_TRADE times
+          likelier to steal each month, and paid no wage (Wages.json). A den
+          is a safehouse: every thief of its town is caught DEN_HIDDEN as
+          often, and a guild forms there at half the thefts (DEN_GUILD).
+Smugglers each month every Smuggler at a den runs a load (SMUGGLE_LOAD) of
+          whatever good fetches the most more across a border: from their
+          town to the nearest town of another realm (no ally needed, no
+          customs paid, an export ban ignored), selling at the price there
+          and pocketing SMUGGLE_SHARE of the difference. Into a besieged town
+          of their own realm they carry Food through the lines instead, and
+          are paid by the town. The watch at home may catch them
+          (SMUGGLE_CAUGHT of their town's catch): the goods are seized and
+          they stand before the crown's justice like any thief.
 """
 
 from __future__ import annotations
@@ -56,6 +70,16 @@ GUILD_CUT = 0.3                  # the guild's share of every take
 BRIBE = 0.1                      # each month the guildmaster spends this share of the chest on the watch...
 BRIBED = 0.7                     # ...who then catch this share as often
 CRACKDOWN = 0.3                  # a month, under martial law: the crown moves against a guild
+
+THIEF_TRADE = 40                 # a Thief by trade steals this much more often (most months)
+DEN_HIDDEN = 0.7                 # the thieves of a town with a den are caught this share as often
+DEN_GUILD = 0.5                  # ...and a guild forms there at this share of GUILD_THEFTS
+SMUGGLE_LOAD = 20                # goods a smuggler carries a month
+SMUGGLE_SHARE = 0.5              # of the price gap, the smuggler's (the rest is the cost of the run)
+SMUGGLE_GOODS = ("Food", "Tools", "Weapons", "Cloth", "Steel", "Potions", "Armor")
+SMUGGLE_CAUGHT = 0.5             # a run is caught this share as often as a theft in their town
+SIEGE_RUN_PAY = 3.0              # gold a unit of Food a besieged town pays its smugglers
+DEN_RECRUITS = 1                 # each month a den with room takes on this many of its town's idle rogues
 
 
 def _day(conn, world_id):
@@ -100,7 +124,16 @@ def motive(p):
         m *= 1 + (HARD_HEART - 1) * (-(p["mercy"]) / 100)
     if p["guild_id"]:
         m *= GUILD_STEALS
+    if p.get("profession") == "Thief":
+        m *= THIEF_TRADE                         # a thief by trade (Thieves Den)
     return m
+
+
+def den_towns(conn, world_id):
+    """Towns with a Thieves Den."""
+    return {r[0] for r in conn.execute(
+        """SELECT DISTINCT b.city_id FROM buildings b JOIN cities c ON c.id = b.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+           WHERE k.world_id = ? AND b.type = 'Thieves Den'""", (world_id,))}
 
 
 def sentence(conn, thief, mercy, day):
@@ -151,6 +184,7 @@ def thefts_month(conn, world_id):
     mercy = {kid: _mercy(conn, kid) for kid in kingdoms}
     guilds = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM thieves_guilds WHERE world_id = ? AND status = 'Active'", (world_id,))}
     bribed = {g["city_id"] for g in guilds.values() if (g["chest"] or 0) > 0}
+    dens = den_towns(conn, world_id)
     thefts = []
     for city_id, folk in by_city.items():
         watchmen = sum(1 for p in folk if p["profession"] in WATCH)
@@ -166,7 +200,7 @@ def thefts_month(conn, world_id):
             victim = max(marks, key=lambda v: v["gold"] or 0)
             take = round(max(MIN_TAKE, victim["gold"] * random.uniform(*TAKE)), 2)
             take = min(take, victim["gold"])
-            caught = random.random() < catch * (GUILD_HIDDEN if thief["guild_id"] else 1)
+            caught = random.random() < catch * (GUILD_HIDDEN if thief["guild_id"] else 1) * (DEN_HIDDEN if city_id in dens else 1)
             punishment = None
             conn.execute("UPDATE npcs SET needs_happiness = MAX(0, needs_happiness - ?) WHERE id = ?", (VICTIM_GRIEF, victim["id"]))
             if caught:
@@ -204,7 +238,7 @@ def unsafe_towns(conn, world_id, day):
     """Towns robbed often in the last season (UNSAFE_THEFTS per 100 people)."""
     rows = conn.execute(
         """SELECT cr.city_id, COUNT(*), (SELECT COUNT(*) FROM npcs n WHERE n.city_id = cr.city_id AND n.alive = 1)
-           FROM crimes cr WHERE cr.world_id = ? AND cr.day >= ? GROUP BY cr.city_id""", (world_id, day - 90)).fetchall()
+           FROM crimes cr WHERE cr.world_id = ? AND cr.day >= ? AND cr.kind = 'Theft' GROUP BY cr.city_id""", (world_id, day - 90)).fetchall()
     return {r[0] for r in rows if r[2] and r[1] * 100 / r[2] >= UNSAFE_THEFTS}
 
 
@@ -222,9 +256,11 @@ def guilds_month(conn, world_id):
         """SELECT cr.city_id, COUNT(*) n, c.name, c.kingdom_id, k.name kingdom,
                   (SELECT COUNT(*) FROM npcs x WHERE x.city_id = cr.city_id AND x.alive = 1) people
            FROM crimes cr JOIN cities c ON c.id = cr.city_id JOIN kingdoms k ON k.id = c.kingdom_id
-           WHERE cr.world_id = ? AND cr.day >= ? AND c.type != 'Village' GROUP BY cr.city_id""", (world_id, day - 360)).fetchall()
+           WHERE cr.world_id = ? AND cr.day >= ? AND c.type != 'Village' AND cr.kind = 'Theft' GROUP BY cr.city_id""", (world_id, day - 360)).fetchall()
+    dens = den_towns(conn, world_id)
     for r in rows:
-        if r["city_id"] in active or r["n"] < GUILD_THEFTS or r["people"] < GUILD_MIN_PEOPLE:
+        needed = GUILD_THEFTS * (DEN_GUILD if r["city_id"] in dens else 1)      # a den is a guild half-made
+        if r["city_id"] in active or r["n"] < needed or r["people"] < GUILD_MIN_PEOPLE:
             continue
         master = conn.execute(
             """SELECT n.id, n.name FROM npcs n WHERE n.alive = 1 AND n.city_id = ? AND n.age >= 18 AND n.jailed_until IS NULL
@@ -297,11 +333,117 @@ def guild_name(city):
     return f"the {adj} {random.choice(GUILD_NOUNS)} of {city}"
 
 
+def smuggling_month(conn, world_id):
+    """Monthly: every smuggler at a den runs a load across a border (or Food into a besieged town of their realm).
+    Returns the runs."""
+    import math as _math
+    from Data.Database.repository import get_city, save_city
+    from Data.Economy.economy import get_price
+    from Data.Government.campaigns import besieged_city_ids
+    from Data.Government.edicts import martial_law_active
+    from Data.Infrastructure.travel import get_traveling_npc_ids
+    day = _day(conn, world_id)
+    away = set(get_traveling_npc_ids(conn, world_id))
+    smugglers = [dict(r) for r in conn.execute(
+        """SELECT n.id, n.name, n.city_id, n.gold, n.convictions, c.kingdom_id, c.map_x, c.map_y FROM npcs n
+           JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id JOIN buildings b ON b.id = n.workplace_id
+           WHERE k.world_id = ? AND k.status != 'Fallen' AND n.alive = 1 AND n.profession = 'Smuggler' AND b.type = 'Thieves Den'
+           AND n.jailed_until IS NULL""", (world_id,))]
+    if not smugglers:
+        return []
+    towns = [dict(r) for r in conn.execute(
+        """SELECT c.id, c.kingdom_id, c.map_x, c.map_y FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
+           WHERE k.world_id = ? AND k.status != 'Fallen' AND c.type != 'Village'""", (world_id,))]
+    besieged = besieged_city_ids(conn, world_id)
+    kingdoms = {r["id"]: dict(r) for r in conn.execute("SELECT * FROM kingdoms WHERE world_id = ?", (world_id,))}
+    mercy = {}
+    runs = []
+    for sm in smugglers:
+        if sm["id"] in away:
+            continue
+        home = get_city(conn, sm["city_id"])
+        under_siege = [t for t in towns if t["id"] in besieged and t["kingdom_id"] == sm["kingdom_id"]]
+        if under_siege:                                            # Food through the lines
+            dest = min(under_siege, key=lambda t: _math.dist((t["map_x"], t["map_y"]), (sm["map_x"], sm["map_y"])))
+            good, gain = "Food", SIEGE_RUN_PAY
+        else:
+            abroad = [t for t in towns if t["kingdom_id"] != sm["kingdom_id"] and t["id"] not in besieged]
+            if not abroad:
+                continue
+            dest = min(abroad, key=lambda t: _math.dist((t["map_x"], t["map_y"]), (sm["map_x"], sm["map_y"])))
+            there = get_city(conn, dest["id"])
+            gaps = [(get_price(g, there) - get_price(g, home), g) for g in SMUGGLE_GOODS
+                    if home.get("resources", {}).get(g, 0) >= SMUGGLE_LOAD]
+            if not gaps:
+                continue
+            gain, good = max(gaps)
+            if gain <= 0:
+                continue                                           # nothing worth the risk this month
+            gain *= SMUGGLE_SHARE
+        load = min(SMUGGLE_LOAD, home.get("resources", {}).get(good, 0))
+        if load <= 0:
+            continue
+        folk = conn.execute("SELECT COUNT(*), SUM(profession IN ('Guard', 'Soldier')) FROM npcs WHERE city_id = ? AND alive = 1",
+                            (sm["city_id"],)).fetchone()
+        kingdom = kingdoms[sm["kingdom_id"]]
+        catch = watch_catch(folk[1] or 0, folk[0] or 1, martial_law_active(kingdom, day)) * SMUGGLE_CAUGHT
+        caught = not under_siege and random.random() < catch          # no one turns back food for a besieged town
+        home["resources"][good] = round(home["resources"][good] - load, 2)
+        save_city(conn, home)
+        punishment, pay = None, 0.0
+        if caught:
+            conn.execute("UPDATE cities SET wealth = wealth + ? WHERE id = ?", (load, sm["city_id"]))   # seized and sold
+            mercy.setdefault(sm["kingdom_id"], _mercy(conn, sm["kingdom_id"]))
+            punishment = sentence(conn, sm, mercy[sm["kingdom_id"]], day)
+        else:
+            conn.execute("""INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, ?, ?)
+                            ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = city_resources.amount + excluded.amount""",
+                         (dest["id"], good, load))
+            pay = round(load * gain, 2)
+            conn.execute("UPDATE npcs SET gold = gold + ? WHERE id = ?", (pay, sm["id"]))
+            if under_siege:
+                conn.execute("UPDATE cities SET wealth = MAX(0, wealth - ?) WHERE id = ?", (pay, dest["id"]))
+        conn.execute("""INSERT INTO crimes (world_id, city_id, thief_id, victim_id, kind, amount, day, caught, punishment)
+                        VALUES (?, ?, ?, NULL, 'Smuggling', ?, ?, ?, ?)""",
+                     (world_id, sm["city_id"], sm["id"], pay, day, int(caught), punishment))
+        runs.append({"smuggler": sm["id"], "good": good, "load": load, "to": dest["id"], "pay": pay, "caught": caught,
+                     "siege": bool(under_siege)})
+    conn.commit()
+    return runs
+
+
+def recruit_dens(conn, world_id):
+    """Monthly: a Thieves Den with room takes on idle rogues of its town -- day laborers already convicted, Rogues,
+    or the hard-hearted -- as Thieves and Smugglers by turns (long_run.py: without it the jailed lost their trade,
+    and the smugglers of a world were gone in three years). Returns how many were taken on."""
+    taken = 0
+    for den in conn.execute(
+            """SELECT b.id, b.city_id, b.capacity, (SELECT COUNT(*) FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1) workers,
+                      (SELECT COUNT(*) FROM npcs n WHERE n.workplace_id = b.id AND n.alive = 1 AND n.profession = 'Smuggler') smugglers
+               FROM buildings b JOIN cities c ON c.id = b.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND k.status != 'Fallen' AND b.type = 'Thieves Den'""", (world_id,)).fetchall():
+        room = min(DEN_RECRUITS, (den["capacity"] or 0) - den["workers"])
+        if room <= 0:
+            continue
+        rogues = conn.execute(
+            """SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND age BETWEEN 16 AND 50 AND profession = 'Laborer'
+               AND jailed_until IS NULL AND (convictions > 0 OR class = 'Rogue' OR mercy < -30)
+               ORDER BY convictions DESC, mercy LIMIT ?""", (den["city_id"], room)).fetchall()
+        for (npc_id,) in rogues:
+            trade = "Smuggler" if den["smugglers"] * 2 < den["workers"] + 1 else "Thief"
+            conn.execute("UPDATE npcs SET profession = ?, workplace_id = ? WHERE id = ?", (trade, den["id"], npc_id))
+            den = dict(den, workers=den["workers"] + 1, smugglers=den["smugglers"] + (trade == "Smuggler"))
+            taken += 1
+    return taken
+
+
 def crime_month(conn, world_id):
-    """Monthly: thefts and justice, the jailed released, the guilds. Returns a report."""
+    """Monthly: thefts and justice, the jailed released, the guilds, the smugglers' runs. Returns a report."""
     released = release(conn, world_id)
     thefts = thefts_month(conn, world_id)
     founded, broken = guilds_month(conn, world_id)
-    return {"thefts": len(thefts), "caught": sum(t["caught"] for t in thefts),
+    recruit_dens(conn, world_id)
+    runs = smuggling_month(conn, world_id)
+    return {"thefts": len(thefts), "caught": sum(t["caught"] for t in thefts), "smuggled": len(runs),
             "hanged": sum(t["punishment"] == "gallows" for t in thefts), "released": released,
             "founded": founded, "broken": broken}

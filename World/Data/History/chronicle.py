@@ -18,7 +18,7 @@ REQUIRED_TEMPLATE_KEYS = (
     "Tribute (refused)", "Tribute (behind)", "Tribute (thrown off)", "Tribute (lost)",
     "Horde Risen", "Horde Split", "Khan Chosen", "Horde Raid (sacked)", "Horde Raid (repelled)", "Tribute (danegeld)",
     "Horde Settled (conquest)", "Horde Settled (peace)", "Riders Answered", "Riders Came",
-    "Dragon Attack (burned)", "Dragon Slain (town)", "Dragon Slain (by a dragon)", "Dragon Hunt (slain)", "Dragon Hunt (failed)",
+    "Dragon Attack (burned)", "Dragon Attack (driven off)", "Dragon Slain (town)", "Dragon Slain (by a dragon)", "Dragon Hunt (slain)", "Dragon Hunt (failed)",
     "Dragon Guardian", "Dragon Revealed",
     "Succession Disputed", "Claim Withdrawn", "Claimant Exiled", "Heir Murdered", "Claimant Crowned",
     "Succession War (claimant won)", "Succession War (crown won)",

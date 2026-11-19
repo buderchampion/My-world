@@ -462,5 +462,10 @@
         "{When}, among the spoils taken from {other}, {kingdom} gained the learning of {discovery}.",
         "{When}, the conquerors of {kingdom} carried off from {other} the knowledge of {discovery}.",
         "{When}, the books and scholars of {other} taught their conquerors in {kingdom} the art of {discovery}."
+    ],
+    "Dragon Attack (driven off)": [
+        "{When}, the dragon {dragon} fell upon {city}, but the folk of {kingdom} stood fast and drove it off, though {dead} were slain.",
+        "{When}, {city} was beset by {dragon}; the wyrm was wounded and fled with nothing, and {dead} of {kingdom}'s folk lay dead.",
+        "{When}, {kingdom} turned back {dragon} from the walls of {city}, at the cost of {dead} lives."
     ]
 }

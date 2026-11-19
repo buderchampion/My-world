@@ -303,7 +303,7 @@ def town_details(conn, city_id):
         rows.append(("Sick", ", ".join(f"{n} of {d}" for d, n in sick)))
     try:                                                   # crime (worlds from before it: nothing to show)
         day = conn.execute("SELECT (clock_year - 1) * 360 + (clock_month - 1) * 30 + clock_day - 1 FROM worlds LIMIT 1").fetchone()[0]
-        thefts = conn.execute("SELECT COUNT(*), SUM(caught) FROM crimes WHERE city_id = ? AND day >= ?", (city_id, day - 360)).fetchone()
+        thefts = conn.execute("SELECT COUNT(*), SUM(caught) FROM crimes WHERE kind = 'Theft' AND city_id = ? AND day >= ?", (city_id, day - 360)).fetchone()
         guild = conn.execute("SELECT name FROM thieves_guilds WHERE city_id = ? AND status = 'Active'", (city_id,)).fetchone()
     except Exception:
         thefts, guild = None, None

@@ -191,6 +191,10 @@ def _eligible(spell, foes):
 
 def _useful(spell, caster, allies, foes, mine):
     effect = spell["effect"]
+    if spell.get("after_hurt") and caster.hp >= caster.max_hp:
+        return False                                   # a rebuke answers a blow: none taken yet
+    if spell.get("chance") is not None and random.random() >= spell["chance"]:
+        return False                                   # not this round
     if effect in OFFENSIVE:
         return bool(_eligible(spell, foes))
     if effect == "heal":

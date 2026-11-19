@@ -26,8 +26,8 @@
     "Alchemist": 10,
     "Mage": 12,
 
-    "Thief": 4,
-    "Smuggler": 5,
+    "Thief": 0,
+    "Smuggler": 0,
     "Bandit": 0,
 
     "Laborer": 3

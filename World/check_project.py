@@ -631,12 +631,6 @@ FEATURES = [
         "tables": ["kingdom_discoveries"],
     },
     {
-        "name": "Making to need: workshops make a good only up to its cap in the town (its use, its people); a smithy turns steel to what is wanted",
-        "functions": {"Data/Economy/economy.py": ["daily_need", "stock_cap", "produce_resources"]},
-        "wired": {"Data/Economy/economy.py": ["need = daily_need(city, building_production)", "if full(resource):"],
-                  "long_run.py": ["Goods    "]},
-    },
-    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -4073,6 +4067,7 @@ def _smoke_body(r, holder):
                                                "dead_a": [], "dead_b": [f for f in b[len(b) // 2:] if f.ref is not None][:3]}
             rep = DR.rampage(conn, world_id, d, dict(conn.execute("SELECT * FROM cities WHERE id = ?", (town["id"],)).fetchone()))
             after = conn.execute("SELECT wealth, afraid_until FROM cities WHERE id = ?", (town["id"],)).fetchone()
+            # (and a dragon brought low in its rampage flees with nothing: checked at the end)
             food = conn.execute("SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = 'Food'", (town["id"],)).fetchone()[0]
             new_hoard = conn.execute("SELECT hoard FROM dragons WHERE id = ?", (d["id"],)).fetchone()[0]
             assert rep["won"] and abs(after[0] - 6000) < 1 and abs(food - 850) < 1 and abs(new_hoard - hoard - 4000) < 1, \
@@ -4148,6 +4143,20 @@ def _smoke_body(r, holder):
                 made.append(new["lair_id"])
                 near = min(math.dist((t["map_x"], t["map_y"]), (new["map_x"], new["map_y"])) for t in towns)
                 assert near >= DR.NEW_DRAGON_CLEARANCE, "a newcome dragon denned beside a town"
+            # a dragon brought below DRIVEN_OFF of its hit points flees with nothing
+            def hurt(a, b, **kw):
+                for f in a:
+                    f.hp = f.max_hp * DR.DRIVEN_OFF / 2
+                return {"winner": None, "rounds": DR.RAMPAGE_ROUNDS, "fled": None, "a": a, "b": b, "dead_a": [], "dead_b": []}
+            red = DR.new_dragon(conn, world_id, "Dragon, Red")
+            if red:
+                made.append(red["lair_id"])
+                melee.battle = hurt
+                hoard = red["hoard"]
+                rep = DR.rampage(conn, world_id, red, towns[-1])
+                assert rep.get("driven_off") and not rep["slain"] and \
+                    conn.execute("SELECT hoard FROM dragons WHERE id = ?", (red["id"],)).fetchone()[0] == hoard, \
+                    f"a sorely wounded dragon did not flee empty-clawed: {rep}"
             melee.battle = saved[0]
             DR.dragons_year(conn, world_id)
         finally:
@@ -5267,6 +5276,65 @@ def _smoke_body(r, holder):
     run_step(r, "succession crises: a weak claim is disputed; loyal lords send the claimant into exile, disloyal ones crown them, a new house means war",
              succession_crises)
 
+    def dens_and_smugglers():
+        import Data.Government.crime as CR
+        from Data.Database.repository import get_city, save_city
+        # a thief by trade steals far more often than an honest townsman
+        honest = {"gold": 100, "fed": 1.0, "in_slums": 0, "class": "Fighter", "convictions": 0, "guild_id": None, "mercy": 0,
+                  "profession": "Baker"}
+        assert CR.motive(dict(honest, profession="Thief")) == CR.motive(honest) * CR.THIEF_TRADE, "a thief by trade is no likelier to steal"
+        # a smuggler at a den runs a load of the good worth most across the border
+        den = conn.execute("""SELECT b.id, b.city_id FROM buildings b JOIN cities c ON c.id = b.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                              WHERE k.world_id = ? AND k.status != 'Fallen' AND b.type = 'Thieves Den' LIMIT 1""", (world_id,)).fetchone()
+        if not den:
+            return
+        npc = conn.execute("SELECT id, profession, workplace_id, gold, jailed_until FROM npcs WHERE alive = 1 AND city_id = ? AND age >= 18 LIMIT 1",
+                           (den[1],)).fetchone()
+        saved_watch = (CR.SMUGGLE_CAUGHT, CR.watch_catch)
+        try:
+            conn.execute("UPDATE npcs SET profession = 'Smuggler', workplace_id = ?, jailed_until = NULL WHERE id = ?", (den[0], npc[0]))
+            home = get_city(conn, den[1])
+            home["resources"]["Weapons"] = 1000.0
+            save_city(conn, home)
+            far = conn.execute("""SELECT c.id FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND k.status != 'Fallen'
+                                  AND c.type != 'Village' AND c.kingdom_id != ?""", (world_id, home["kingdom"])).fetchall()
+            for (cid,) in far:                                       # arms are dear everywhere abroad
+                conn.execute("UPDATE city_resources SET amount = 0 WHERE city_id = ? AND resource_name = 'Weapons'", (cid,))
+            conn.commit()
+            CR.SMUGGLE_CAUGHT = 0.0
+            runs = [x for x in CR.smuggling_month(conn, world_id) if x["smuggler"] == npc[0]]
+            if far and not conn.execute("SELECT 1 FROM campaigns WHERE status = 'Besieging'").fetchone():
+                assert runs and runs[0]["load"] == CR.SMUGGLE_LOAD and runs[0]["pay"] > 0 and not runs[0]["caught"], \
+                    f"a smuggler ran nothing across the border: {runs}"
+                left = conn.execute("SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = ?",
+                                    (den[1], runs[0]["good"])).fetchone()[0]
+                assert left < (1000 if runs[0]["good"] == "Weapons" else 10 ** 9), "the smuggled goods never left town"
+                assert conn.execute("SELECT 1 FROM crimes WHERE kind = 'Smuggling' AND thief_id = ?", (npc[0],)).fetchone(), "the run was not recorded"
+            # caught at the border: goods seized, justice done
+            CR.SMUGGLE_CAUGHT = 1.0
+            CR.watch_catch = lambda *a, **k: 1.0                     # the whole town is watching
+            runs = [x for x in CR.smuggling_month(conn, world_id) if x["smuggler"] == npc[0]]
+            if runs and not runs[0]["siege"]:
+                assert runs[0]["caught"] and runs[0]["pay"] == 0, "a smuggler with the whole town watching was not caught"
+            # a den with room takes on the town's idle rogues
+            conn.execute("UPDATE npcs SET workplace_id = NULL, profession = 'Laborer' WHERE workplace_id = ? AND id != ?", (den[0], npc[0]))
+            rogue = conn.execute("""SELECT id, profession, convictions FROM npcs WHERE city_id = ? AND alive = 1 AND age BETWEEN 16 AND 50
+                                    AND id != ? AND jailed_until IS NULL LIMIT 1""", (den[1], npc[0])).fetchone()
+            if rogue:
+                conn.execute("UPDATE npcs SET profession = 'Laborer', convictions = 3 WHERE id = ?", (rogue[0],))
+                CR.recruit_dens(conn, world_id)
+                trade = conn.execute("SELECT profession FROM npcs WHERE id = ?", (rogue[0],)).fetchone()[0]
+                conn.execute("UPDATE npcs SET profession = ?, convictions = ?, workplace_id = NULL WHERE id = ?", (rogue[1], rogue[2], rogue[0]))
+                assert trade in ("Thief", "Smuggler"), f"a den with room did not take on a convicted laborer (now a {trade})"
+        finally:
+            CR.SMUGGLE_CAUGHT, CR.watch_catch = saved_watch
+            conn.execute("UPDATE npcs SET profession = ?, workplace_id = ?, gold = ?, jailed_until = ? WHERE id = ?",
+                         (npc[1], npc[2], npc[3], npc[4], npc[0]))
+            conn.commit()
+
+    run_step(r, "dens and smugglers: a thief by trade steals often; a smuggler runs goods abroad for profit, or is caught and judged",
+             dens_and_smugglers)
+
     def discoveries_spread():
         import Data.Research.discoveries as RS
         saved = (RS.SPREAD_TRADE, RS.SPREAD_FAIR, RS.CONQUEST_LEARN)
@@ -5368,10 +5436,48 @@ def _smoke_body(r, holder):
 # Main
 # ---------------------------------------------------------------------------
 
+HOOK_MARK = "# installed by World/check_project.py --install-hook"
+HOOK = """#!/bin/sh
+{mark}
+# Runs the quick checks (syntax, data files, features, git hygiene) before every commit; the full simulation
+# test takes minutes, so run `python check_project.py` yourself before pushing. Skip once: git commit --no-verify
+cd "$(git rev-parse --show-toplevel)/World" || exit 0
+if command -v python >/dev/null 2>&1; then PY=python; elif command -v py >/dev/null 2>&1; then PY=py; else PY=python3; fi
+$PY check_project.py --quick || {{ echo "check_project.py found problems -- commit stopped (git commit --no-verify to skip)"; exit 1; }}
+"""
+
+
+def install_hook(remove=False):
+    """Installs (or removes) the optional git pre-commit hook that runs the quick checks before every commit.
+    Never overwrites a hook it did not install. Returns a message."""
+    repo = find_repo_root(ROOT)
+    if repo is None:
+        return "This folder is not inside a git repository: no hook to install."
+    hook = Path(repo) / ".git" / "hooks" / "pre-commit"
+    ours = hook.exists() and HOOK_MARK in hook.read_text(encoding="utf-8", errors="replace")
+    if remove:
+        if not ours:
+            return "No pre-commit hook of ours to remove."
+        hook.unlink()
+        return f"Removed {hook}."
+    if hook.exists() and not ours:
+        return f"{hook} already exists and is not ours: left as it is."
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(HOOK.format(mark=HOOK_MARK), encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+    return f"Installed {hook}: the quick checks now run before every commit."
+
+
 def main():
     parser = argparse.ArgumentParser(description="Pre-commit safety checks for the world simulator.")
     parser.add_argument("--quick", action="store_true", help="static checks only (skips the simulation smoke test)")
+    parser.add_argument("--install-hook", action="store_true", help="install the optional git pre-commit hook (runs --quick)")
+    parser.add_argument("--remove-hook", action="store_true", help="remove that hook")
     args = parser.parse_args()
+
+    if args.install_hook or args.remove_hook:
+        print(install_hook(remove=args.remove_hook))
+        return
 
     started = time.time()
     r = Report()

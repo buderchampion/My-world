@@ -108,7 +108,7 @@ def scores(conn, world_id):
                    AVG(needs_happiness), SUM(disease IS NOT NULL), COUNT(*)
             FROM npcs WHERE alive = 1 AND city_id IN ({marks}) GROUP BY city_id""", ids)}
     thefts = {r[0]: r[1] for r in conn.execute(
-        f"SELECT city_id, COUNT(*) FROM crimes WHERE day >= ? AND city_id IN ({marks}) GROUP BY city_id", (day - 90, *ids))} \
+        f"SELECT city_id, COUNT(*) FROM crimes WHERE kind = 'Theft' AND day >= ? AND city_id IN ({marks}) GROUP BY city_id", (day - 90, *ids))} \
         if conn.execute("SELECT 1 FROM sqlite_master WHERE name = 'crimes'").fetchone() else {}
     purse_rank, trade_rank = _rank(purse), _rank(trade)
     out = {}

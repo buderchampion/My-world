@@ -14,7 +14,8 @@ import random
 # and food to sell to the towns, where about a third of the people live (more
 # with their children). Measured with the long test run (long_run.py): at the
 # old 3,600 the towns ran dry a hundred days after every harvest while the
-# villages sat on their stores, and starved.
+# villages sat on their stores, and starved. (Any less and a kingdom on poor
+# land -- farmland 0.6 -- cannot feed itself at all.)
 HARVEST_PER_HOUSEHOLD = 5000
 
 # What a family keeps back: its food until the next harvest, and a reserve of
@@ -28,9 +29,11 @@ SELL_PRICE = 1.0       # coin a family takes for each Food sold (Food's base pri
 
 # Grain keeps, but not forever: each month a town's Food beyond KEEP_DAYS of its
 # people's eating loses SPOIL_SHARE to rats and rot. Measured with long_run.py:
-# without it the towns' granaries grew by millions every year.
-KEEP_DAYS = 360
-SPOIL_SHARE = 0.05
+# without it the towns' granaries grew by millions every year; at a year's keep
+# and 5% a month -- with druids tending fields and farming discoveries on top --
+# they still grew by about 5 million a year for five years, so no bad year bit.
+KEEP_DAYS = 180
+SPOIL_SHARE = 0.10
 
 # A new world opens as though last year's harvest was a fair one: the stores
 # hold food until the first harvest and this much beyond.
