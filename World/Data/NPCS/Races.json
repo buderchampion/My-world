@@ -156,7 +156,11 @@
         },
         "abilities": {
             "to_hit": 1,
-            "resist_sleep": 0.9
+            "resist_sleep": 0.9,
+            "resist_charm": 0.9,
+            "immune": [
+                "ghoul paralysis"
+            ]
         },
         "attitudes": {
             "Dwarf": -15,
@@ -197,7 +201,8 @@
             "Rogue": null
         },
         "abilities": {
-            "resist_sleep": 0.3
+            "resist_sleep": 0.3,
+            "resist_charm": 0.3
         },
         "attitudes": {
             "Dwarf": -15,
@@ -340,7 +345,8 @@
                 "Titan",
                 "Ettin"
             ],
-            "save_vs_magic": 4
+            "save_vs_magic": 4,
+            "save_vs_poison": 4
         },
         "attitudes": {
             "Elf": -15,
@@ -473,7 +479,8 @@
         },
         "abilities": {
             "to_hit": 1,
-            "save_vs_magic": 4
+            "save_vs_magic": 4,
+            "save_vs_poison": 4
         },
         "attitudes": {
             "Dwarf": 10,

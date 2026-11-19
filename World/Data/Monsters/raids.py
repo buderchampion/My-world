@@ -76,14 +76,14 @@ def defenders_of(conn, village):
     return fighters
 
 
-def kill(conn, npc_id, city_id):
-    """A named villager slain in a raid: dead, recorded, and mourned."""
+def kill(conn, npc_id, city_id, cause="Monster raid"):
+    """A named villager slain in a raid: dead, recorded (how, if a special attack did it), and mourned."""
     from Data.Database.repository import get_npc
     from Data.Events.events import death_event
     from Data.Relationships.relationships import apply_grief
     conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (npc_id,))
     npc = get_npc(conn, npc_id)
-    death_event(conn, npc, "Monster raid", city_id=city_id)
+    death_event(conn, npc, cause or "Monster raid", city_id=city_id)
     apply_grief(conn, npc)
 
 
@@ -109,8 +109,11 @@ def raid(conn, world_id, lair, village):
     # the village: its named dead, its militia's dead, its Food
     named_dead = [f.ref for f in result["dead_b"] if f.ref is not None]
     militia_dead = sum(1 for f in result["dead_b"] if f.ref is None)
-    for npc_id in named_dead:
-        kill(conn, npc_id, village["id"])
+    for f in result["dead_b"]:
+        if f.ref is not None:
+            kill(conn, f.ref, village["id"], f.cause)
+    from Data.Combat.specials import aftermath
+    aftermath(conn, defenders)                  # drained levels, ghostly years and sickness carried home
     if militia_dead:
         conn.execute("UPDATE cities SET households = MAX(0, households - ?) WHERE id = ?", (militia_dead / FAMILY_SIZE, village["id"]))
     taken = 0.0

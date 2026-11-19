@@ -17,8 +17,10 @@ swinging -- healing, harm, sleep and holding, blessings; bards sing their side
 into battle. Sleeping and held fighters do not fight and are hit by every
 blow; a routed one has left the field (alive, but out of the fight).
 
-Kept for later: special attacks (breath weapons, poison, paralysis) are text
-in the book and need their own rules; monsters fight with their attacks only.
+Special attacks (Data.Combat.specials): breath weapons, gazes, poison,
+paralysis, petrification, energy drain, swallowing, hugs and rakes and the
+rest of the book. Stunned fighters lose their turn but are not helpless; the
+swallowed are out of the fight until their monster falls.
 """
 
 from __future__ import annotations
@@ -97,13 +99,18 @@ class Fighter:
     guarded: bool = False          # has cast their shield (or their club) already
     cast: int = 0                  # spells cast this fight
     race: str = ""                 # a person's people (Data.NPCS.races): the book's edge in a fight; "" for monsters
+    specials: list = field(default_factory=list)   # a monster's special attacks (Data.Combat.specials)
+    stunned: int = 0               # rounds that lose their turn (surprised, confused, blinded) without being helpless
+    swallowed_by: object = None    # the Fighter it is inside of
+    cause: str = ""                # how it died, when a special attack killed it
+    fx: dict = field(default_factory=dict)         # what specials have left on it: drained levels, grips, sickness...
 
     def __post_init__(self):
         self.max_hp = self.max_hp or self.hp
 
     @property
     def alive(self):
-        return self.hp > 0 and not self.out
+        return self.hp > 0 and not self.out and self.swallowed_by is None
 
     @property
     def fallen(self):
@@ -122,7 +129,8 @@ def monster_fighters(monster, count, hp_each, side="monsters", ref=None):
     hd = stats.get("hit_dice") or 1
     kind = monster.get("kind")
     nature = "beast" if kind in ("beast", "mundane") else "humanoid" if kind in ("raider", "people") and hd <= 4 else "monster"
-    return [Fighter(monster["name"], side, hp_each, ac, thac0, attacks, mindless, ref, hit_dice=hd, nature=nature)
+    from Data.Combat.specials import arm
+    return [arm(Fighter(monster["name"], side, hp_each, ac, thac0, attacks, mindless, ref, hit_dice=hd, nature=nature), monster)
             for _ in range(count)]
 
 
@@ -156,15 +164,23 @@ def roll(lo, hi):
     return random.randint(min(lo, hi), max(lo, hi))
 
 
-def attack_all(attacker, target):
+def attack_all(attacker, target, rnd=0):
     """All of one fighter's attacks on one target this round. Returns the damage done."""
     done = 0
     from Data.NPCS.races import to_hit_bonus
+    from Data.Combat.specials import on_hit, after_attacks
     edge = to_hit_bonus(attacker, target)          # an elf's sword arm, a dwarf against orcs, a giant swinging at a gnome
-    for lo, hi in attacker.attacks:
+    hits = []
+    for i, (lo, hi) in enumerate(attacker.attacks):
         die = random.randint(1, 20)
         if target.held or die == 20 or (die != 1 and die + attacker.to_hit + edge >= attacker.thac0 - target.ac):
-            done += roll(lo, hi) * attacker.damage_scale
+            blow = roll(lo, hi) * attacker.damage_scale
+            done += blow
+            hits.append(i)
+            if attacker.specials:
+                done += on_hit(attacker, target, i, die, blow, rnd)
+    if attacker.specials and hits:
+        done += after_attacks(attacker, target, hits, len(attacker.attacks)) * attacker.damage_scale
     return done
 
 
@@ -172,11 +188,13 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
     """Fights it out. Returns {"winner": "a" | "b" | None, "rounds", "fled": "a" | "b" | None, "a": survivors, "b": survivors,
     "dead_a": [...], "dead_b": [...]}."""
     from Data.Magic.magic import cast_in_battle, inspire
+    from Data.Combat import specials
     start = {"a": len(side_a), "b": len(side_b)}
     sides = {"a": side_a, "b": side_b}
     state = {k: {"morale": morale, "blessed": set()} for k in sides}
     for k in sides:                                                # bards sing their side into the fight
         inspire(sides[k], state[k])
+    specials.opening(side_a, side_b)                               # ambushes, terrors, stenches
     fled = None
     rounds = 0
     for rounds in range(1, max_rounds + 1):
@@ -186,16 +204,21 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
             if not foes:
                 break
             for fighter in sides[me]:
-                if fighter.alive and not fighter.held:
+                if fighter.alive and not fighter.held and not fighter.stunned:
+                    if fighter.specials and specials.act(fighter, sides[me], sides[them], rounds):
+                        continue                                   # a breath, a volley, a wail: instead of its blows
                     if fighter.spells and cast_in_battle(fighter, sides[me], sides[them], state[me], state[them]):
                         continue                                   # a spell, this round, instead of a blow
-                    targets = [f for f in foes if f.alive] or foes
+                    targets = [f for f in foes if f.alive]
+                    if not targets:
+                        continue
                     target = random.choice(targets)
-                    harm[id(target)] = harm.get(id(target), 0) + attack_all(fighter, target)
+                    harm[id(target)] = harm.get(id(target), 0) + attack_all(fighter, target, rounds)
         for fighter in side_a + side_b:                            # blows land together
             fighter.hp -= harm.get(id(fighter), 0)
             if fighter.held:
                 fighter.held -= 1
+        specials.round_end(side_a + side_b)                        # the gripped bleed, the swallowed are digested
         alive = {k: [f for f in v if f.alive] for k, v in sides.items()}
         if not alive["a"] or not alive["b"]:
             break
@@ -215,5 +238,7 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
         winner = "b"
     else:
         winner = None
+    specials.finish(side_a, side_b, winner)                        # the swallowed are lost, the slimed may be saved
+    alive = {k: [f for f in v if f.alive] for k, v in sides.items()}
     return {"winner": winner, "rounds": rounds, "fled": fled, "a": alive["a"], "b": alive["b"],
             "dead_a": [f for f in side_a if f.fallen], "dead_b": [f for f in side_b if f.fallen]}

@@ -1,5 +1,5 @@
 {
-    "_about": "Sicknesses of the world (Data.NPCS.sickness). contagion: the chance a day that one sick person passes it to each person they live, work or mingle with. days: how long it lasts. harm: health lost a day at full strength (each case is milder or worse, SEVERITY). onset: the chance a day that anyone falls sick of it with no one to catch it from (everyday sicknesses only). outbreak: the chance a year that it breaks out somewhere in the world (plagues only). immune_days: how long the recovered cannot catch it again (null: for life). seasons: how much likelier it is to start and spread in each season. worse_for: how much harder it falls on the hungry and the slum-dwellers. A plague is chronicled when it comes to a kingdom and when it leaves.",
+    "_about": "Sicknesses of the world (Data.NPCS.sickness). contagion: the chance a day that one sick person passes it to each person they live, work or mingle with. days: how long it lasts. harm: health lost a day at full strength (each case is milder or worse, SEVERITY). onset: the chance a day that anyone falls sick of it with no one to catch it from (everyday sicknesses only). outbreak: the chance a year that it breaks out somewhere in the world (plagues only). immune_days: how long the recovered cannot catch it again (null: for life). seasons: how much likelier it is to start and spread in each season. worse_for: how much harder it falls on the hungry and the slum-dwellers. A plague is chronicled when it comes to a kingdom and when it leaves. kind wound: caught only from a monster's blow (Data.Combat.specials), never passed on.",
 
     "Winter Ague": {
         "kind": "common", "contagion": 0.005, "days": [5, 12], "harm": 2, "onset": 0.00012, "immune_days": 180,
@@ -20,5 +20,13 @@
         "kind": "plague", "contagion": 0.035, "days": [5, 10], "harm": 15, "outbreak": 0.03, "immune_days": null,
         "seasons": {"Summer": 1.5, "Autumn": 1.2, "Spring": 1.0, "Winter": 0.6},
         "worse_for": {"hungry": 1.5, "slums": 2.5}
+    },
+    "Wound Rot": {
+        "kind": "wound", "contagion": 0.0, "days": [10, 30], "harm": 2, "immune_days": 0,
+        "seasons": {}, "worse_for": {"hungry": 1.5}
+    },
+    "Mummy Rot": {
+        "kind": "wound", "contagion": 0.0, "days": [30, 120], "harm": 3, "immune_days": 0,
+        "seasons": {}, "worse_for": {}
     }
 }

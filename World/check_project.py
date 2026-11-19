@@ -587,6 +587,15 @@ FEATURES = [
         "functions": {"Data/Combat/melee.py": ["monster_thac0", "person_thac0", "monster_fighters", "person_fighter", "attack_all", "battle"]},
     },
     {
+        "name": "Monster special attacks: breath, gazes, poison, paralysis, stone, energy drain, swallowing, hugs and more, with saving throws",
+        "functions": {"Data/Combat/specials.py": ["save", "save_number", "arm", "opening", "act", "on_hit", "after_attacks", "round_end",
+                                                   "finish", "aftermath", "afflict"]},
+        "wired": {"Data/Combat/melee.py": ["specials.opening(side_a, side_b)", "specials.act(fighter", "on_hit(attacker, target",
+                                            "specials.round_end(", "specials.finish(", "arm(Fighter("],
+                  "Data/Monsters/raids.py": ["aftermath(conn, defenders)", "kill(conn, f.ref, village[\"id\"], f.cause)"],
+                  "Data/Monsters/travelers.py": ["aftermath(conn, defenders)"]},
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -1635,6 +1644,97 @@ def _smoke_body(r, holder):
             assert r["fled"] != "a" and not r["a"], "mindless skeletons broke and fled"
 
         run_step(r, "fighting by the book: to hit by THAC0 against armor class, monsters' own damage, armor helps, morale breaks the living", fighting_by_the_book)
+
+        def special_attacks():
+            import Data.Combat.melee as ML
+            from Data.Combat import specials as SP
+            from Data.Monsters.bestiary import by_name
+            # saving throws by the book, with the peoples' edges
+            assert (SP.save_number(0, "breath"), SP.save_number(1, "poison"), SP.save_number(9, "spell"), SP.save_number(20, "death")) \
+                == (20, 14, 11, 3), "the saving throw table is wrong"
+            commoner = lambda race="Human": ML.person_fighter({"id": None, "name": "c", "profession": "Farmer", "race": race}, skills={})
+            plain = sum(SP.save(commoner(), "poison") for _ in range(3000))
+            stout = sum(SP.save(commoner("Dwarf"), "poison") for _ in range(3000))
+            assert stout > plain + 300, f"a dwarf is no stouter against poison ({plain} saves for a man, {stout} for a dwarf)"
+            # every listed monster is in the book, every special known
+            known = {"breath", "gaze", "volley", "poison", "paralyze", "petrify", "sleep", "disease", "drain", "weaken", "age", "acid",
+                     "rust", "swallow", "grip", "envelop", "slime", "squeeze", "charge", "surprise", "fear", "stench", "roar", "song",
+                     "wail", "mindblast", "eyerays", "spells", "edge"}
+            for name, specs in SP.table().items():
+                assert by_name(name), f"special attacks are listed for {name}, who is not in the Monster Manual"
+                assert all(sp["type"] in known for sp in specs), f"{name} has a special attack no rule knows"
+            # a red dragon's fire: its own hit points, save for half -- a village burns
+            dragon = ML.monster_fighters(by_name("Dragon, Red"), 1, 60)[0]
+            assert any(sp["type"] == "breath" for sp in dragon.specials) and dragon.spells, "a red dragon came without its breath or its spells"
+            folk = [commoner() for _ in range(6)]
+            assert SP.act(dragon, [dragon], folk, 1), "a red dragon did not breathe in the first round"
+            assert all(f.hp <= 0 and "fire" in f.cause for f in folk), "a red dragon's fire did not burn six commoners"
+            # a basilisk's gaze turns to stone; a ghoul cannot freeze an elf
+            basilisk = ML.monster_fighters(by_name("Basilisk"), 1, 30)[0]
+            stoned = 0
+            for _ in range(200):
+                victim = commoner()
+                SP.act(basilisk, [basilisk], [victim], 2)
+                stoned += victim.hp <= 0 and victim.cause.startswith("turned to stone")
+            assert 100 < stoned < 200, f"a basilisk's gaze turned {stoned} of 200 to stone"
+            ghoul = ML.monster_fighters(by_name("Ghoul"), 1, 9)[0]
+            elves, men = [commoner("Elf") for _ in range(50)], [commoner() for _ in range(50)]
+            for v in elves + men:
+                SP.on_hit(ghoul, v, 0, 15, 2, 2)
+            assert not any(v.held for v in elves) and sum(1 for v in men if v.held) > 20, "a ghoul's touch froze elves, or not men"
+            # swallowed whole, and freed when the worm dies; a bear hugs when both paws land; a stirge drinks
+            worm = ML.monster_fighters(by_name("Purple Worm"), 1, 70)[0]
+            v = commoner()
+            v.hp = v.max_hp = 1000
+            SP.on_hit(worm, v, 0, 20, 5, 2)
+            assert v.swallowed_by is worm and not v.alive, "a purple worm did not swallow a man whole on a natural 20"
+            SP.round_end([v])
+            assert v.hp < 1000, "the swallowed man was not digested"
+            worm.hp = 0
+            SP.round_end([v])
+            assert v.swallowed_by is None and v.alive, "the swallowed man was not freed when the worm fell"
+            bear = ML.monster_fighters(by_name("Bear, Brown"), 1, 25)[0]
+            assert SP.after_attacks(bear, v, [0, 1], 3) > 0 and SP.after_attacks(bear, v, [0], 3) == 0, "a bear hugged with one paw, or not with two"
+            stirge = ML.monster_fighters(by_name("Stirge"), 1, 4)[0]
+            v.fx.clear()
+            hp = v.hp
+            SP.on_hit(stirge, v, 0, 15, 1, 2)
+            SP.round_end([v])
+            assert v.hp < hp, "a stirge latched on and drank nothing"
+            # a wight drains a knight's levels; the living carry it home (and years, and sickness)
+            wight = ML.monster_fighters(by_name("Wight"), 1, 18)[0]
+            knight = ML.person_fighter({"id": None, "name": "k", "profession": "Knight"}, skills={"Swordsmanship": 9})
+            level = knight.hit_dice
+            SP.on_hit(wight, knight, 0, 15, 3, 2)
+            assert knight.fx.get("drained") == 1 and knight.hit_dice == level - 1, "a wight's touch drained no level"
+            row = conn.execute("""SELECT n.id, n.age, n.disease, n.disease_days, n.disease_severity, s.level FROM npcs n
+                                  JOIN npc_skills s ON s.npc_id = n.id AND s.skill_name = 'Swordsmanship'
+                                  WHERE n.alive = 1 AND n.race IS NOT NULL AND s.level >= 5 LIMIT 1""").fetchone()
+            if row:
+                f = ML.person_fighter({"id": row[0], "name": "x", "profession": "Soldier", "race": "Human"}, skills={})
+                f.fx.update({"drained": 2, "aged": 20, "illness": "Mummy Rot"})
+                out = SP.aftermath(conn, [f])
+                after = conn.execute("""SELECT n.age, n.disease, s.level FROM npcs n JOIN npc_skills s ON s.npc_id = n.id
+                                        AND s.skill_name = 'Swordsmanship' WHERE n.id = ?""", (row[0],)).fetchone()
+                conn.execute("UPDATE npcs SET age = ?, disease = ?, disease_days = ?, disease_severity = ? WHERE id = ?",
+                             (row[1], row[2], row[3], row[4], row[0]))
+                conn.execute("UPDATE npc_skills SET level = ? WHERE npc_id = ? AND skill_name = 'Swordsmanship'", (row[5], row[0]))
+                assert out == {"drained": 1, "aged": 1, "sick": 1}, f"the aftermath carried home the wrong things: {out}"
+                assert after[0] == row[1] + 20 and after[1] == "Mummy Rot" and after[2] == max(1, row[5] - 4), \
+                    f"drained levels, years or sickness did not reach the survivor: {tuple(after)}"
+            # elves shrug off a harpy's song nine times in ten
+            harpy = ML.monster_fighters(by_name("Harpy"), 1, 13)[0]
+            listeners = [commoner("Elf") for _ in range(300)]
+            for v in listeners:
+                SP.act(harpy, [harpy], [v], 2)
+            charmed = sum(1 for v in listeners if v.fx.get("charmed"))
+            assert charmed < 60, f"{charmed} of 300 elves were charmed by a harpy's song"
+            # whole fights: a fight against wights and basilisks ends, and its dead say how they died
+            r = ML.battle(ML.monster_fighters(by_name("Basilisk"), 2, 30), [commoner() for _ in range(10)])
+            assert r["winner"] is not None and any(f.cause for f in r["dead_b"]), "a basilisk's victims died without a cause"
+
+        run_step(r, "special attacks: saving throws, a dragon's fire, a basilisk's gaze, ghouls and elves, swallowing, hugs, blood and energy drain",
+                 special_attacks)
 
         def skills_in_place():
             import Data.Combat.melee as ML
@@ -4783,7 +4883,8 @@ def _smoke_body(r, holder):
             # a horde that holds a town settles there: the town is its seat, the camp a horse town, the khan a king
             town = conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
                                    WHERE k.world_id = ? AND c.type IN ('Town', 'City') AND k.type NOT IN ('Horde', 'Horse Kingdom')
-                                   AND k.status != 'Fallen' LIMIT 1""", (world_id,)).fetchone()
+                                   AND k.status != 'Fallen' AND NOT EXISTS (SELECT 1 FROM occupations o WHERE o.city_id = c.id
+                                   AND o.status = 'Occupied') LIMIT 1""", (world_id,)).fetchone()
             assert town, "(setup) no town for the horde to take"
             loser = get_kingdom(conn, town["kingdom_id"])
             transfer_conquest(conn, get_city(conn, town["id"]), get_kingdom(conn, horde["id"]), loser)

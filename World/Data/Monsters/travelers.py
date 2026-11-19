@@ -116,11 +116,15 @@ def ambush(conn, world_id, lair, kind, ident, row):
             conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (npc["id"],))
             conn.execute("UPDATE npc_travels SET status = 'Completed', days_remaining = 0 WHERE id = ?", (ident,))
             npc = get_npc(conn, npc["id"])
-            death_event(conn, npc, f"slain by {plural(monster['name'], pack).lower()} on the road", city_id=npc["city_id"])
+            how = next((f.cause for f in result["dead_b"] if f.ref == npc["id"] and f.cause), "")
+            death_event(conn, npc, f"{how} on the road" if how else f"slain by {plural(monster['name'], pack).lower()} on the road",
+                        city_id=npc["city_id"])
             apply_grief(conn, npc)
             text = f"{npc['name']} was slain on the road from {place} by {pack_text}."
         else:
             text = f"{npc['name']} fought off {pack_text} on the road from {place}" + (f", slaying {fallen}." if fallen else ".")
+            from Data.Combat.specials import aftermath
+            aftermath(conn, defenders)          # drained levels, ghostly years and sickness carried on
         city_id = npc["city_id"]
     else:
         table = "caravans" if kind == "caravan" else "supply_caravans"
