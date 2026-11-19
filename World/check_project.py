@@ -631,6 +631,19 @@ FEATURES = [
         "tables": ["kingdom_discoveries"],
     },
     {
+        "name": "Making to need: workshops make a good only up to its cap in the town (its use, its people); a smithy turns steel to what is wanted",
+        "functions": {"Data/Economy/economy.py": ["daily_need", "stock_cap", "produce_resources"]},
+        "wired": {"Data/Economy/economy.py": ["need = daily_need(city, building_production)", "if full(resource):"],
+                  "long_run.py": ["Goods    "]},
+    },
+    {
+        "name": "Tooling: the world report (kingdoms, favor matrix, alliances, tribute, wars, dragons) and the optional git pre-commit hook",
+        "functions": {"world_report.py": ["kingdoms_section", "favor_section", "relations_section", "tribute_section", "wars_section",
+                                          "dragons_section", "main"],
+                      "check_project.py": ["install_hook"]},
+        "wired": {"check_project.py": ["install_hook(remove=args.remove_hook)"]},
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -3232,6 +3245,31 @@ def _smoke_body(r, holder):
 
     run_step(r, "walking: across town takes time and energy, by the size of the town; staying put costs nothing", walking_takes_time)
 
+    def making_to_need():
+        import Data.Economy.economy as EC
+        smithy = {"type": "Blacksmith Shop", "workers": [1, 2, 3, 4], "condition": 100}
+        farm = {"type": "Farm", "workers": [5, 6], "condition": 100}
+        town = lambda **res: {"id": -1, "kingdom": None, "population": 100, "buildings": [smithy, farm],
+                              "resources": dict({"Steel": 100.0, "Tools": 50.0, "Weapons": 0.0, "Grain": 0.0}, **res)}
+        need = EC.daily_need(town())
+        assert need["Steel"] == 4 * 2 and abs(need["Tools"] - 6 * EC.TOOLS_WEAR_PER_WORKER) < 1e-9, f"the town's daily need is wrong: {need}"
+        cap = EC.stock_cap("Weapons", town(), need)
+        assert cap == max(50 * EC.STOCK_FLOOR, 100 * EC.STOCK_PER_HEAD["Weapons"]) and EC.stock_cap("Food", town(), need) is None, \
+            "a good's cap is wrong, or Food is capped"
+        # both wanted: the smithy makes Tools and Weapons alike
+        c = EC.produce_resources(town())
+        assert c["resources"]["Weapons"] > 0 and c["resources"]["Tools"] > 50 - 1, "a smithy with both goods wanted made only one"
+        # Weapons at their cap: all its steel goes to Tools
+        c = EC.produce_resources(town(Weapons=10 ** 6))
+        made_tools = c["resources"]["Tools"] - (50 - 6 * EC.TOOLS_WEAR_PER_WORKER)
+        assert c["resources"]["Weapons"] == 10 ** 6 and made_tools > 4 * 1 * 1.5, f"a smithy with arms enough did not turn to Tools ({made_tools})"
+        # both at their caps: it rests and its steel is spared; a full granary stops the farm
+        c = EC.produce_resources(town(Weapons=10 ** 6, Tools=10 ** 6, Grain=10 ** 6))
+        assert c["resources"]["Steel"] == 100 and c["resources"]["Grain"] == 10 ** 6, "a workshop worked on with its goods at their caps"
+
+    run_step(r, "making to need: a smithy turns its steel to what is wanted, and rests (sparing its steel) when nothing is; a full granary stops the farm",
+             making_to_need)
+
     def day_tick_pays_lords():
         counties = conn.execute(
             "SELECT COUNT(*), COALESCE(SUM(p.treasury), 0) FROM provinces p JOIN kingdoms k ON k.id = p.kingdom_id WHERE k.world_id = ?",
@@ -5337,10 +5375,48 @@ def _smoke_body(r, holder):
 # Main
 # ---------------------------------------------------------------------------
 
+HOOK_MARK = "# installed by World/check_project.py --install-hook"
+HOOK = """#!/bin/sh
+{mark}
+# Runs the quick checks (syntax, data files, features, git hygiene) before every commit; the full simulation
+# test takes minutes, so run `python check_project.py` yourself before pushing. Skip once: git commit --no-verify
+cd "$(git rev-parse --show-toplevel)/World" || exit 0
+if command -v python >/dev/null 2>&1; then PY=python; elif command -v py >/dev/null 2>&1; then PY=py; else PY=python3; fi
+$PY check_project.py --quick || {{ echo "check_project.py found problems -- commit stopped (git commit --no-verify to skip)"; exit 1; }}
+"""
+
+
+def install_hook(remove=False):
+    """Installs (or removes) the optional git pre-commit hook that runs the quick checks before every commit.
+    Never overwrites a hook it did not install. Returns a message."""
+    repo = find_repo_root(ROOT)
+    if repo is None:
+        return "This folder is not inside a git repository: no hook to install."
+    hook = Path(repo) / ".git" / "hooks" / "pre-commit"
+    ours = hook.exists() and HOOK_MARK in hook.read_text(encoding="utf-8", errors="replace")
+    if remove:
+        if not ours:
+            return "No pre-commit hook of ours to remove."
+        hook.unlink()
+        return f"Removed {hook}."
+    if hook.exists() and not ours:
+        return f"{hook} already exists and is not ours: left as it is."
+    hook.parent.mkdir(parents=True, exist_ok=True)
+    hook.write_text(HOOK.format(mark=HOOK_MARK), encoding="utf-8", newline="\n")
+    hook.chmod(0o755)
+    return f"Installed {hook}: the quick checks now run before every commit."
+
+
 def main():
     parser = argparse.ArgumentParser(description="Pre-commit safety checks for the world simulator.")
     parser.add_argument("--quick", action="store_true", help="static checks only (skips the simulation smoke test)")
+    parser.add_argument("--install-hook", action="store_true", help="install the optional git pre-commit hook (runs --quick)")
+    parser.add_argument("--remove-hook", action="store_true", help="remove that hook")
     args = parser.parse_args()
+
+    if args.install_hook or args.remove_hook:
+        print(install_hook(remove=args.remove_hook))
+        return
 
     started = time.time()
     r = Report()

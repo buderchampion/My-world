@@ -9,7 +9,7 @@
     "Blacksmith Shop":    {"resource": "Tools",   "amount_per_worker": 1, "secondary_resource": "Weapons", "secondary_amount_per_worker": 1, "input_resource": "Steel", "input_per_worker": 2},
     "Armory":             {"resource": "Armor",   "amount_per_worker": 1, "input_resource": "Steel", "input_per_worker": 2},
     "Quarry":             {"resource": "Stone",   "amount_per_worker": 3},
-    "Tailor Shop":        {"resource": "Cloth",   "amount_per_worker": 2},
+    "Tailor Shop":        {"resource": "Cloth",   "amount_per_worker": 3},
     "Carpenter Workshop": {"resource": "Wood",    "amount_per_worker": 3},
     "Alchemist Lab":      {"resource": "Potions", "amount_per_worker": 1}
 }
