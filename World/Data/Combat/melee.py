@@ -104,6 +104,7 @@ class Fighter:
     swallowed_by: object = None    # the Fighter it is inside of
     cause: str = ""                # how it died, when a special attack killed it
     fx: dict = field(default_factory=dict)         # what specials have left on it: drained levels, grips, sickness...
+    max_engaged: int = 0           # at most this many foes can strike it in a round (a dragon on the wing); 0: no limit
 
     def __post_init__(self):
         self.max_hp = self.max_hp or self.hp
@@ -195,10 +196,12 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
     for k in sides:                                                # bards sing their side into the fight
         inspire(sides[k], state[k])
     specials.opening(side_a, side_b)                               # ambushes, terrors, stenches
+    start = {k: max(1, sum(1 for f in v if not f.out)) for k, v in sides.items()}   # who ran at the sight never stood in the line
     fled = None
     rounds = 0
     for rounds in range(1, max_rounds + 1):
         harm = {}
+        engaged = {}                                               # blows aimed at each fighter this round
         for me, them in (("a", "b"), ("b", "a")):
             foes = [f for f in sides[them] if f.alive]
             if not foes:
@@ -209,10 +212,11 @@ def battle(side_a, side_b, morale=MORALE, max_rounds=MAX_ROUNDS):
                         continue                                   # a breath, a volley, a wail: instead of its blows
                     if fighter.spells and cast_in_battle(fighter, sides[me], sides[them], state[me], state[them]):
                         continue                                   # a spell, this round, instead of a blow
-                    targets = [f for f in foes if f.alive]
+                    targets = [f for f in foes if f.alive and not (f.max_engaged and engaged.get(id(f), 0) >= f.max_engaged)]
                     if not targets:
-                        continue
+                        continue                                   # no foe it can reach this round
                     target = random.choice(targets)
+                    engaged[id(target)] = engaged.get(id(target), 0) + 1
                     harm[id(target)] = harm.get(id(target), 0) + attack_all(fighter, target, rounds)
         for fighter in side_a + side_b:                            # blows land together
             fighter.hp -= harm.get(id(fighter), 0)

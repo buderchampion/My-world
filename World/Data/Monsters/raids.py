@@ -94,10 +94,17 @@ def raid(conn, world_id, lair, village):
     band = min(lair["count"], max(MIN_BAND, round(lair["count"] * BAND_SHARE)))
     raiders = melee.monster_fighters(monster, band, lair["hit_points_each"], side="raiders", ref=lair["id"])
     defenders = defenders_of(conn, village)
-    if not defenders:
+    from Data.Monsters.dragons import raid_guise
+    guise = raid_guise(conn, world_id, village)        # a good dragon living here in mortal form throws off its disguise
+    side = defenders + ([guise] if guise else [])
+    if not side:
         result = {"winner": "a", "dead_a": [], "dead_b": [], "rounds": 0}
     else:
-        result = melee.battle(raiders, defenders)
+        result = melee.battle(raiders, side)
+    if guise and guise.hp <= 0:
+        from Data.Monsters.dragons import _slain, _today, full_name
+        d = conn.execute("SELECT d.*, 0 AS count FROM dragons d WHERE d.id = ?", (guise.fx["dragon"],)).fetchone()
+        _slain(conn, dict(d), _today(conn, world_id), f"slain by {plural(monster['name'])} defending {village['name']}")
     raiders_won = result["winner"] == "a"
 
     # the lair loses its dead
@@ -149,9 +156,12 @@ def raid(conn, world_id, lair, village):
 def monster_raids(conn, world_id):
     """Monthly: each raider lair may raid the nearest village in reach. Returns the raids' reports."""
     reports = []
+    from Data.Monsters.dragons import is_dragon
     lairs = [dict(r) for r in conn.execute(
         "SELECT * FROM monster_lairs WHERE world_id = ? AND status = 'Active' AND kind = 'raider' AND count > 0", (world_id,))]
     for lair in lairs:
+        if is_dragon(lair["monster"]):
+            continue                                    # dragons do not raid: they wake and burn (Data.Monsters.dragons)
         if random.random() >= RAID_CHANCE or by_name(lair["monster"]) is None:
             continue
         village = nearest_village(conn, world_id, lair)

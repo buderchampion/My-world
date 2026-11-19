@@ -18,6 +18,8 @@ REQUIRED_TEMPLATE_KEYS = (
     "Tribute (refused)", "Tribute (behind)", "Tribute (thrown off)", "Tribute (lost)",
     "Horde Risen", "Horde Split", "Khan Chosen", "Horde Raid (sacked)", "Horde Raid (repelled)", "Tribute (danegeld)",
     "Horde Settled (conquest)", "Horde Settled (peace)", "Riders Answered", "Riders Came",
+    "Dragon Attack (burned)", "Dragon Slain (town)", "Dragon Slain (by a dragon)", "Dragon Hunt (slain)", "Dragon Hunt (failed)",
+    "Dragon Guardian", "Dragon Revealed",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -75,7 +77,7 @@ TEMPLATE_FIELDS = (
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
  "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building", "gold",
- "region", "rival", "old")
+ "region", "rival", "old", "dragon", "slayer")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".

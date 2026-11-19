@@ -205,6 +205,8 @@ def opening(side_a, side_b):
                 elif t == "fear":
                     done.add(key)
                     for foe in _alive(theirs):
+                        if spec.get("max_level") is not None and (foe.hit_dice or 0) > spec["max_level"]:
+                            continue                                # dragon awe: only the untrained break at the sight
                         if not foe.mindless and not save(foe, spec.get("save", "spell")):
                             afflict(foe, "fear", f)
                             if spec.get("age"):

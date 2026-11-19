@@ -483,3 +483,21 @@ CREATE TABLE IF NOT EXISTS tributaries (
     status        TEXT NOT NULL DEFAULT 'Paying'
 );
 CREATE INDEX IF NOT EXISTS idx_tributaries_status ON tributaries(status);
+-- Dragons: each dragon lair's eldest, named, with its hoard (Data.Monsters.dragons).
+-- good: a metallic dragon; guise_npc_id: the mortal form it lives in, if any. Alive or Slain.
+CREATE TABLE IF NOT EXISTS dragons (
+    id            INTEGER PRIMARY KEY,
+    world_id      INTEGER NOT NULL REFERENCES worlds(id),
+    lair_id       INTEGER NOT NULL REFERENCES monster_lairs(id),
+    name          TEXT NOT NULL,
+    monster       TEXT NOT NULL,                 -- its kind, by its name in Data/Monsters/Monsters.json
+    good          INTEGER NOT NULL DEFAULT 0,
+    hoard         REAL NOT NULL DEFAULT 0,       -- gold
+    attacks       INTEGER NOT NULL DEFAULT 0,    -- towns it has fallen on
+    woke_day      INTEGER,
+    guise_npc_id  INTEGER REFERENCES npcs(id),
+    status        TEXT NOT NULL DEFAULT 'Alive',
+    slain_day     INTEGER,
+    slain_by      TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_dragons_world ON dragons(world_id, status);

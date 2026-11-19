@@ -224,6 +224,11 @@ def fight(conn, campaign, defender_bonus=1.0, day=None):
     if is_horse_people(defender):
         defender_bonus *= CAVALRY_EDGE
 
+    # a bronze dragon hates a tyrant: it may fight for a town an empire or a horde assails (Data.Monsters.dragons)
+    from Data.Monsters.dragons import bronze_aid, BRONZE_AID
+    if bronze_aid(conn, attacker["world_id"], attacker, target):
+        defender_bonus *= BRONZE_AID
+
     # armor: the army's from its wagons; the defenders' from the towns they came from
     from Data.Combat.combat import armor_share, city_armor
     army = get_army(conn, campaign["army_id"])

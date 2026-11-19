@@ -372,5 +372,40 @@
         "{When}, as {city} was assailed, {riders} riders of {other} came over the hills to fight beside {kingdom}.",
         "{When}, {kingdom}'s hour was dark at {city} -- until {riders} riders of {other} answered the call.",
         "{When}, the horns of {other} were heard at {city}: {riders} riders came to the aid of {kingdom}."
+    ],
+    "Dragon Attack (burned)": [
+        "{When}, the dragon {dragon} came down upon {city} in fire and ruin; {dead} of {kingdom}'s folk perished, and its gold was borne away to the hoard.",
+        "{When}, {city} burned beneath the wings of {dragon}, who slew {dead} and carried off the town's treasure.",
+        "{When}, woe came to {kingdom}: {dragon} fell upon {city}, and {dead} died in the flames."
+    ],
+    "Dragon Slain (town)": [
+        "{When}, {dragon} fell upon {city}, but there it met its doom: {slayer} slew the wyrm, and {gold} gold of its hoard came to {kingdom}.",
+        "{When}, at {city}, {slayer} struck down {dragon}; the hoard, {gold} gold, was carried home in triumph.",
+        "{When}, {kingdom} was delivered: {dragon} perished at {city} by the hand of {slayer}, and its gold, {gold} pieces, was the realm's."
+    ],
+    "Dragon Slain (by a dragon)": [
+        "{When}, as {dragon} assailed {city}, {slayer} came out of the sky and slew it, and gave the town {gold} gold from the hoard.",
+        "{When}, two wyrms fought above {city}: {slayer} cast down {dragon}, and from its hoard gave {kingdom}'s town {gold} gold.",
+        "{When}, {city} was saved when {slayer} slew {dragon} in the air above it; {gold} gold of the slain wyrm's hoard was the town's reward."
+    ],
+    "Dragon Hunt (slain)": [
+        "{When}, the hunters of {kingdom} sought out {dragon} in its lair and slew it; {slayer} struck the last blow, and {gold} gold came home.",
+        "{When}, {kingdom} avenged its burned towns: {dragon} was slain in its den by {slayer}, and its hoard of {gold} gold won.",
+        "{When}, {slayer} and the hunters of {kingdom} slew {dragon}; {dead} fell, but {gold} gold was carried home."
+    ],
+    "Dragon Hunt (failed)": [
+        "{When}, hunters of {kingdom} went out against {dragon}, and {dead} of them did not return.",
+        "{When}, {kingdom} sent its best against {dragon} in its lair; the wyrm lives, and {dead} lie dead before its hoard.",
+        "{When}, the hunt for {dragon} failed: {dead} of {kingdom}'s champions perished in the dragon's den."
+    ],
+    "Dragon Guardian": [
+        "{When}, as {city} was assailed by {dragon}, {slayer} came to fight for {kingdom}.",
+        "{When}, {slayer} stood with {kingdom} at {city} against {dragon}.",
+        "{When}, there came to {city}'s aid against {dragon} a wyrm of good heart: {slayer}."
+    ],
+    "Dragon Revealed": [
+        "{When}, when {city} was beset, {slayer}, a stranger among its folk, cast off a mortal guise: it was {dragon}, and it fought for {kingdom}.",
+        "{When}, {city} learned that {slayer}, who had long dwelt among them, was in truth {dragon}, who rose in its own shape to defend them.",
+        "{When}, the folk of {city} beheld a wonder: {slayer} became {dragon} before their eyes and stood with {kingdom}."
     ]
 }

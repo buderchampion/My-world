@@ -596,6 +596,17 @@ FEATURES = [
                   "Data/Monsters/travelers.py": ["aftermath(conn, defenders)"]},
     },
     {
+        "name": "Dragons: named, with hoards; evil ones wake and burn towns, are hunted and slain; good ones guard, take mortal form, jest and gossip",
+        "functions": {"Data/Monsters/dragons.py": ["ensure_dragons", "dragons", "fighter_of", "town_defenders", "choose_town", "rampage",
+                                                    "hunt", "hunts", "new_dragon", "take_guises", "reveal", "guardians", "bronze_aid",
+                                                    "raid_guise", "pranks_and_gossip", "dragons_year"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["dragons_year(self.conn"],
+                  "Data/Monsters/raids.py": ["raid_guise(conn, world_id, village)", "if is_dragon(lair[\"monster\"])"],
+                  "Data/Government/campaigns.py": ["bronze_aid(conn, attacker[\"world_id\"], attacker, target)"],
+                  "Data/Combat/melee.py": ["f.max_engaged and engaged.get(id(f), 0) >= f.max_engaged"]},
+        "tables": ["dragons"],
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -3921,6 +3932,134 @@ def _smoke_body(r, holder):
         conn.commit()
 
     run_step(r, "monster raids: the lair loses its fallen, the village its dead (mourned), households and Food; great raids are chronicled", monster_raids)
+
+    def dragons_live():
+        import math
+        import Data.Monsters.dragons as DR
+        import Data.Monsters.raids as RD
+        from Data.Combat import melee
+        saved = (melee.battle, DR.GUISE_REACH, dict(DR.KINDS["Dragon, Silver"]), dict(DR.KINDS["Dragon, Bronze"]),
+                 DR.PRANK_CHANCE, DR.GOSSIP_CHANCE, RD.RAID_CHANCE)
+        relations = [dict(x) for x in conn.execute("SELECT * FROM kingdom_relations")]
+        made = []
+        try:
+            towns = [dict(x) for x in conn.execute(
+                """SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND k.status != 'Fallen'
+                   AND c.type IN ('Town', 'City') ORDER BY c.population DESC""", (world_id,))]
+            town = towns[0]
+            # an evil dragon dens beside a village, and does not raid it like an orc: it is named, with a hoard
+            village = dict(conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ?
+                                           AND k.status != 'Fallen' AND c.type = 'Village' ORDER BY c.id LIMIT 1""", (world_id,)).fetchone())
+            lair = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                                   VALUES (?, 'Dragon, Red', 'raider', ?, ?, 1, 40.5, 'Active')""",
+                                (world_id, village["map_x"], village["map_y"])).lastrowid
+            made.append(lair)
+            RD.RAID_CHANCE = 1.0
+            assert not [x for x in RD.monster_raids(conn, world_id) if x["lair"] == lair], "a dragon raided a village like an orc"
+            DR.ensure_dragons(conn, world_id)
+            d = next(x for x in DR.dragons(conn, world_id) if x["lair_id"] == lair)
+            assert d["name"] and d["hoard"] > 0 and not d["good"], "the red dragon has no name or hoard"
+            beast = DR.fighter_of(d, "dragon")
+            assert beast.max_hp == (9 + DR.ELDER_DICE) * DR.HP_PER_DIE and beast.max_engaged == DR.ENGAGED, "the dragon is not ancient and on the wing"
+            # it burns a town: gold to the hoard, food taken, buildings burned, the town afraid, chronicled
+            conn.execute("UPDATE cities SET wealth = 10000 WHERE id = ?", (town["id"],))
+            conn.execute("""INSERT INTO city_resources (city_id, resource_name, amount) VALUES (?, 'Food', 1000)
+                            ON CONFLICT(city_id, resource_name) DO UPDATE SET amount = 1000""", (town["id"],))
+            hoard = d["hoard"]
+            melee.battle = lambda a, b, **kw: {"winner": "a", "rounds": 3, "fled": None, "a": a, "b": b[:len(b) // 2],
+                                               "dead_a": [], "dead_b": [f for f in b[len(b) // 2:] if f.ref is not None][:3]}
+            rep = DR.rampage(conn, world_id, d, dict(conn.execute("SELECT * FROM cities WHERE id = ?", (town["id"],)).fetchone()))
+            after = conn.execute("SELECT wealth, afraid_until FROM cities WHERE id = ?", (town["id"],)).fetchone()
+            food = conn.execute("SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = 'Food'", (town["id"],)).fetchone()[0]
+            new_hoard = conn.execute("SELECT hoard FROM dragons WHERE id = ?", (d["id"],)).fetchone()[0]
+            assert rep["won"] and abs(after[0] - 6000) < 1 and abs(food - 850) < 1 and abs(new_hoard - hoard - 4000) < 1, \
+                f"the dragon did not carry off the town's gold and food to its hoard: {rep}, purse {after[0]}, food {food}"
+            assert after[1] and rep["burned"] > 0, "the burned town is not afraid, or nothing burned"
+            assert conn.execute("SELECT 1 FROM chronicle_entries WHERE event_type = 'Dragon' AND kingdom_id = ? AND text LIKE ?",
+                                (town["kingdom_id"], f"%{d['name']}%")).fetchone(), "the dragon's attack was not chronicled"
+            # a silver dragon near the town takes mortal form there, and throws it off when the town is attacked
+            silver_lair = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                                          VALUES (?, 'Dragon, Silver', 'peaceful', ?, ?, 1, 40.5, 'Active')""",
+                                       (world_id, town["map_x"] + 50, town["map_y"])).lastrowid
+            made.append(silver_lair)
+            DR.ensure_dragons(conn, world_id)
+            DR.KINDS["Dragon, Silver"].update(guise=1.0, guard=1.0)
+            DR.take_guises(conn, world_id)
+            silver = next(x for x in DR.dragons(conn, world_id) if x["lair_id"] == silver_lair)
+            npc = conn.execute("SELECT city_id, alive FROM npcs WHERE id = ?", (silver["guise_npc_id"],)).fetchone() if silver["guise_npc_id"] else None
+            assert npc and npc[1], "the silver dragon did not take mortal form"
+            town = dict(conn.execute("SELECT * FROM cities WHERE id = ?", (npc[0],)).fetchone())        # the town it lives in
+            assert town["type"] != "Village" and math.dist((town["map_x"], town["map_y"]), (silver["map_x"], silver["map_y"])) <= DR.GUISE_REACH, \
+                "the silver dragon took mortal form far from its lair, or in a village"
+            # this time the dragon falls, slain by the silver dragon, who gives the town a share of the hoard
+            def lose(a, b, **kw):
+                for f in a:
+                    f.hp = 0
+                return {"winner": "b", "rounds": 4, "fled": None, "a": [], "b": b, "dead_a": a, "dead_b": []}
+            melee.battle = lose
+            purse = conn.execute("SELECT wealth FROM cities WHERE id = ?", (town["id"],)).fetchone()[0]
+            hoard = conn.execute("SELECT hoard FROM dragons WHERE id = ?", (d["id"],)).fetchone()[0]
+            rep = DR.rampage(conn, world_id, next(x for x in DR.dragons(conn, world_id) if x["id"] == d["id"]),
+                             dict(conn.execute("SELECT * FROM cities WHERE id = ?", (town["id"],)).fetchone()))
+            assert rep["slain"] and silver["id"] in rep["helpers"], f"the silver dragon did not come to the town's defence: {rep}"
+            assert conn.execute("SELECT status FROM dragons WHERE id = ?", (d["id"],)).fetchone()[0] == "Slain", "the slain dragon lives on"
+            assert conn.execute("SELECT 1 FROM events WHERE type = 'Dragon' AND description LIKE '%threw off a mortal guise%' AND city_id = ?",
+                                (town["id"],)).fetchone(), "the disguised dragon was not revealed"
+            gift = conn.execute("SELECT wealth FROM cities WHERE id = ?", (town["id"],)).fetchone()[0] - purse
+            assert abs(gift - hoard * DR.GIFT_SHARE["Dragon, Silver"]) < 1, f"the silver dragon gave the town {gift:.0f}, not half the hoard"
+            # a kingdom hunts a dragon in its lair: the crown takes its share, the slayer is named
+            lair = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                                   VALUES (?, 'Dragon, White', 'raider', ?, ?, 2, 22.5, 'Active')""", (world_id, 1, 1)).lastrowid
+            made.append(lair)
+            DR.ensure_dragons(conn, world_id)
+            white = next(x for x in DR.dragons(conn, world_id) if x["lair_id"] == lair)
+            treasury = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (town["kingdom_id"],)).fetchone()[0]
+            rep = DR.hunt(conn, world_id, town["kingdom_id"], white)
+            if rep:
+                after = conn.execute("SELECT treasury FROM kingdoms WHERE id = ?", (town["kingdom_id"],)).fetchone()[0]
+                assert rep["won"] and abs(after - treasury - white["hoard"] * DR.HUNT_CROWN_SHARE) < 1, "the crown did not take its share of the hoard"
+                assert conn.execute("SELECT status, count FROM monster_lairs WHERE id = ?", (lair,)).fetchone()[0] == "Cleared", "the hunted lair stands"
+                assert conn.execute("SELECT 1 FROM npcs WHERE epithet = 'the Dragonslayer'").fetchone(), "no one was named the Dragonslayer"
+            # a bronze dragon fights an empire's war on a town near it, never an honest crown's
+            bronze_lair = conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                                          VALUES (?, 'Dragon, Bronze', 'peaceful', ?, ?, 1, 36, 'Active')""",
+                                       (world_id, town["map_x"], town["map_y"] + 50)).lastrowid
+            made.append(bronze_lair)
+            DR.ensure_dragons(conn, world_id)
+            DR.KINDS["Dragon, Bronze"]["guard"] = 1.0
+            target = dict(conn.execute("SELECT * FROM cities WHERE id = ?", (town["id"],)).fetchone(), kingdom=town["kingdom_id"])
+            assert DR.bronze_aid(conn, world_id, {"name": "the Empire", "type": "Empire"}, target), "no bronze dragon fought an empire's war"
+            assert not DR.bronze_aid(conn, world_id, {"name": "a Crown", "type": "Crown"}, target), "a bronze dragon fought an honest war"
+            # good dragons' ways: a copper dragon's pranks, a brass dragon's gossip warms two kingdoms
+            DR.PRANK_CHANCE = DR.GOSSIP_CHANCE = 1.0
+            for kind in ("Dragon, Copper", "Dragon, Brass"):
+                made.append(conn.execute("""INSERT INTO monster_lairs (world_id, monster, kind, map_x, map_y, count, hit_points_each, status)
+                                            VALUES (?, ?, 'peaceful', ?, ?, 1, 30, 'Active')""",
+                                         (world_id, kind, town["map_x"], town["map_y"] - 50)).lastrowid)
+            DR.ensure_dragons(conn, world_id)
+            out = DR.pranks_and_gossip(conn, world_id)
+            assert out["pranks"] >= 1 and out["gossip"] >= 1, f"no copper dragon's pranks or brass dragon's gossip: {out}"
+            # dragons come from far away to an empty world, and the year runs
+            new = DR.new_dragon(conn, world_id, "Dragon, Black")
+            if new:
+                made.append(new["lair_id"])
+                near = min(math.dist((t["map_x"], t["map_y"]), (new["map_x"], new["map_y"])) for t in towns)
+                assert near >= DR.NEW_DRAGON_CLEARANCE, "a newcome dragon denned beside a town"
+            melee.battle = saved[0]
+            DR.dragons_year(conn, world_id)
+        finally:
+            (melee.battle, DR.GUISE_REACH, silver_kind, bronze_kind, DR.PRANK_CHANCE, DR.GOSSIP_CHANCE, RD.RAID_CHANCE) = saved
+            DR.KINDS["Dragon, Silver"], DR.KINDS["Dragon, Bronze"] = silver_kind, bronze_kind
+            for lair_id in made:
+                conn.execute("UPDATE monster_lairs SET status = 'Cleared', count = 0 WHERE id = ?", (lair_id,))
+                conn.execute("UPDATE dragons SET status = 'Slain' WHERE lair_id = ?", (lair_id,))
+            conn.execute("DELETE FROM kingdom_relations")
+            for x in relations:
+                conn.execute(f"INSERT INTO kingdom_relations ({', '.join(x)}) VALUES ({', '.join('?' * len(x))})", tuple(x.values()))
+            conn.commit()
+
+    run_step(r, "dragons: an evil one burns a town for its hoard, is slain by a good dragon in mortal guise, is hunted; bronze hates tyrants",
+             dragons_live)
 
     def beasts_and_travelers():
         import Data.Monsters.travelers as TV

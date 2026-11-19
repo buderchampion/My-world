@@ -602,6 +602,12 @@ class SimulationManager:
         from Data.Government.horse_kingdom import horse_kingdoms_year
         horse_kingdoms_year(self.conn, self.world_id, trade_routes, self.clock.year)
 
+        # Dragons (Data.Monsters.dragons): evil ones wake and burn a town, kingdoms
+        # hunt the ones that burned them, good ones take mortal form, play pranks
+        # and carry gossip.
+        from Data.Monsters.dragons import dragons_year
+        dragons_year(self.conn, self.world_id)
+
         for kingdom in kingdoms:
 
             if kingdom.get("type") == "Horde":
