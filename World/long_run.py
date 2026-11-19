@@ -126,6 +126,13 @@ def snapshot(conn, world_id):
     s["guilds"] = conn.execute("SELECT COUNT(*) FROM thieves_guilds WHERE world_id = ? AND status = 'Active'", (world_id,)).fetchone()[0]
     s["lairs"] = conn.execute("SELECT COUNT(*), COALESCE(SUM(count), 0) FROM monster_lairs WHERE world_id = ? AND status = 'Active'",
                               (world_id,)).fetchone()
+    s["goods"] = dict(conn.execute("""SELECT r.resource_name, SUM(r.amount) FROM city_resources r JOIN cities c ON c.id = r.city_id
+                                      JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND r.resource_name != 'Food'
+                                      GROUP BY 1 ORDER BY 1""", (world_id,)).fetchall())
+    s["dragons"] = conn.execute("""SELECT COALESCE(SUM(good = 0), 0), COALESCE(SUM(good = 1), 0), COALESCE(SUM(hoard), 0)
+                                   FROM dragons WHERE world_id = ? AND status = 'Alive'""", (world_id,)).fetchone()
+    s["discoveries"] = conn.execute("""SELECT COUNT(*) FROM kingdom_discoveries d JOIN kingdoms k ON k.id = d.kingdom_id
+                                       WHERE k.world_id = ?""", (world_id,)).fetchone()[0]
     return s
 
 
@@ -179,7 +186,8 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
              f"Peoples  " + ", ".join(f"{r} {n:,}" for r, n in s["peoples"].items()),
              f"Food     {s['food']:,.0f} in town stores ({s['food'] - prev['food']:+,.0f}), "
              f"{s['store']:,.0f} in village stores ({s['store'] - prev['store']:+,.0f})",
-             f"Gold     people {s['gold_people']:,.0f}, town purses {s['gold_towns']:,.0f}, crowns {s['gold_crowns']:,.0f}"]
+             f"Gold     people {s['gold_people']:,.0f}, town purses {s['gold_towns']:,.0f}, crowns {s['gold_crowns']:,.0f}",
+             f"Goods    " + ", ".join(f"{g} {v:,.0f} ({v - prev.get('goods', {}).get(g, 0):+,.0f})" for g, v in s.get("goods", {}).items())]
     p = s["prosperity"]
     if p and p[0] is not None:
         lines.append(f"Towns    prosperity avg {p[0]:.0f} (from {p[1]:.0f} to {p[2]:.0f}); {s['grand']} grand buildings; "
@@ -189,13 +197,15 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
     ev = e["events"]
     notable = [(k, ev[k]) for k in ("Fire", "Flood", "Earthquake", "Locusts", "Monster Raid", "Beast Attack", "Raid", "Famine",
                                     "Famine Flight", "Turned Bandit", "Wedding", "Coronation", "Election", "Tournament", "Fair",
-                                    "Grand Building", "Ennobled", "Edict", "Assassination") if ev.get(k)]
+                                    "Grand Building", "Ennobled", "Edict", "Assassination", "Dragon Attack", "Dragon Slain",
+                                    "Dragon Hunt", "Succession Crisis", "Discovery") if ev.get(k)]
     if notable:
         lines.append("Events   " + ", ".join(f"{k} {n}" for k, n in notable))
     new_chronicle = e["chronicle"] - chronicle_before
     if new_chronicle:
         lines.append("Chronicle " + ", ".join(f"{k} {n}" for k, n in new_chronicle.most_common()))
-    lines.append(f"Monsters {s['lairs'][0]} lairs, {s['lairs'][1]:,} monsters")
+    lines.append(f"Monsters {s['lairs'][0]} lairs, {s['lairs'][1]:,} monsters; dragons {s['dragons'][0]} evil, {s['dragons'][1]} good, "
+                 f"hoards {s['dragons'][2]:,.0f} gold; {s['discoveries']} discoveries known")
     lines.append("Kingdoms")
     for k in s["kingdoms"]:
         if k["status"] == "Fallen":

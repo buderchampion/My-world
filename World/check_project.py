@@ -631,6 +631,12 @@ FEATURES = [
         "tables": ["kingdom_discoveries"],
     },
     {
+        "name": "Making to need: workshops make a good only up to its cap in the town (its use, its people); a smithy turns steel to what is wanted",
+        "functions": {"Data/Economy/economy.py": ["daily_need", "stock_cap", "produce_resources"]},
+        "wired": {"Data/Economy/economy.py": ["need = daily_need(city, building_production)", "if full(resource):"],
+                  "long_run.py": ["Goods    "]},
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -3231,6 +3237,31 @@ def _smoke_body(r, holder):
         assert W.walk({}, 1, 1, district_of, "Town", meal) == meal, "staying put cost something"
 
     run_step(r, "walking: across town takes time and energy, by the size of the town; staying put costs nothing", walking_takes_time)
+
+    def making_to_need():
+        import Data.Economy.economy as EC
+        smithy = {"type": "Blacksmith Shop", "workers": [1, 2, 3, 4], "condition": 100}
+        farm = {"type": "Farm", "workers": [5, 6], "condition": 100}
+        town = lambda **res: {"id": -1, "kingdom": None, "population": 100, "buildings": [smithy, farm],
+                              "resources": dict({"Steel": 100.0, "Tools": 50.0, "Weapons": 0.0, "Grain": 0.0}, **res)}
+        need = EC.daily_need(town())
+        assert need["Steel"] == 4 * 2 and abs(need["Tools"] - 6 * EC.TOOLS_WEAR_PER_WORKER) < 1e-9, f"the town's daily need is wrong: {need}"
+        cap = EC.stock_cap("Weapons", town(), need)
+        assert cap == max(50 * EC.STOCK_FLOOR, 100 * EC.STOCK_PER_HEAD["Weapons"]) and EC.stock_cap("Food", town(), need) is None, \
+            "a good's cap is wrong, or Food is capped"
+        # both wanted: the smithy makes Tools and Weapons alike
+        c = EC.produce_resources(town())
+        assert c["resources"]["Weapons"] > 0 and c["resources"]["Tools"] > 50 - 1, "a smithy with both goods wanted made only one"
+        # Weapons at their cap: all its steel goes to Tools
+        c = EC.produce_resources(town(Weapons=10 ** 6))
+        made_tools = c["resources"]["Tools"] - (50 - 6 * EC.TOOLS_WEAR_PER_WORKER)
+        assert c["resources"]["Weapons"] == 10 ** 6 and made_tools > 4 * 1 * 1.5, f"a smithy with arms enough did not turn to Tools ({made_tools})"
+        # both at their caps: it rests and its steel is spared; a full granary stops the farm
+        c = EC.produce_resources(town(Weapons=10 ** 6, Tools=10 ** 6, Grain=10 ** 6))
+        assert c["resources"]["Steel"] == 100 and c["resources"]["Grain"] == 10 ** 6, "a workshop worked on with its goods at their caps"
+
+    run_step(r, "making to need: a smithy turns its steel to what is wanted, and rests (sparing its steel) when nothing is; a full granary stops the farm",
+             making_to_need)
 
     def day_tick_pays_lords():
         counties = conn.execute(

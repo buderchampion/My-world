@@ -39,6 +39,27 @@ WORN_OUTPUT = 0.5
 # this only keeps a long peace from piling them up forever.
 POTION_SPOILAGE_PER_DAY = 0.005
 
+# --- Making to need (the production rework) --------------------------------
+# A workshop makes what its town can use, not without end. Measured with the
+# long test run (goods_ledger, a fresh world's first year): the Tools drain
+# was long gone, but everything with no daily use piled up for ever --
+# Weapons from 600 to 60,000 in a year, Grain to 85,000, Stone to 62,000,
+# Armor to 13,000. Now each good has a cap in each town: the most of
+#     STOCK_FLOOR times its target stock (ResourceTypes.json),
+#     NEED_DAYS days of what the town's own trades use (a mill's Grain, a
+#         smith's Steel, everyone's Tools wear, Cloth worn, Wood and Stone
+#         for repairs),
+#     STOCK_PER_HEAD for each townsman (arms and armor for the muster, a
+#         stock of potions and building stone),
+# and a workshop whose good is at its cap makes nothing that day (its
+# workers are idle and still paid; it uses no inputs). A smithy whose Tools
+# are at their cap puts all its steel into Weapons, and the other way round.
+# Food is never capped: people eat it, and trade carries it where it is short.
+NEED_DAYS = 30
+STOCK_FLOOR = 3
+STOCK_PER_HEAD = {"Weapons": 0.5, "Armor": 0.25, "Potions": 0.1, "Stone": 3.0, "Wood": 3.0, "Tools": 2.0}
+UNCAPPED = ("Food",)
+
 # People in a peasant household (Data.World.countryside.FAMILY_SIZE).
 HOUSEHOLD_SIZE = 5
 
@@ -95,6 +116,35 @@ def get_target_stock(resource, city, resource_types=None, consumption_rates=None
     return eaters * rate * CONSUMABLE_BUFFER_DAYS
 
 
+def daily_need(city, building_production=None):
+    """What a town's own trades and people use of each good in a day."""
+    building_production = building_production or load_json(BUILDING_PRODUCTION)
+    need = {}
+    for b in city.get("buildings", []):
+        rule = building_production.get(b["type"])
+        if not rule:
+            continue
+        workers = len(b["workers"])
+        need["Tools"] = need.get("Tools", 0) + workers * TOOLS_WEAR_PER_WORKER
+        if rule.get("input_resource"):
+            need[rule["input_resource"]] = need.get(rule["input_resource"], 0) + workers * rule.get("input_per_worker", 0)
+    for resource, rate in load_json(CONSUMPTION_RATES).items():
+        need[resource] = need.get(resource, 0) + (city.get("population") or 0) * rate
+    built = len(city.get("buildings", []))
+    need["Wood"] = need.get("Wood", 0) + built * BUILDING_WEAR_PER_DAY * REPAIR_WOOD_PER_POINT
+    need["Stone"] = need.get("Stone", 0) + built * BUILDING_WEAR_PER_DAY * REPAIR_STONE_PER_POINT
+    return need
+
+
+def stock_cap(resource, city, need, resource_types=None):
+    """The most of a good a town's workshops make for: past it, they rest. None: no cap (Food)."""
+    if resource in UNCAPPED:
+        return None
+    resource_types = resource_types or load_json(RESOURCE_TYPES)
+    return max(resource_types[resource]["target_stock"] * STOCK_FLOOR, NEED_DAYS * need.get(resource, 0),
+               (city.get("population") or 0) * STOCK_PER_HEAD.get(resource, 0))
+
+
 def produce_resources(city):
     """
     One day of production: every worker in a producing building adds
@@ -137,6 +187,14 @@ def produce_resources(city):
 
     tool_factor = NO_TOOLS_OUTPUT + (1 - NO_TOOLS_OUTPUT) * tool_coverage
 
+    # making to need: what each good's cap is in this town today
+    need = daily_need(city, building_production)
+    resource_types = load_json(RESOURCE_TYPES)
+
+    def full(good):
+        cap = stock_cap(good, city, need, resource_types)
+        return cap is not None and city["resources"].get(good, 0) >= cap
+
     for building in city["buildings"]:
 
         rule = building_production.get(building["type"])
@@ -159,6 +217,14 @@ def produce_resources(city):
 
         secondary_resource = rule.get("secondary_resource")
         secondary_desired = workers * rule.get("secondary_amount_per_worker", 0) * efficiency if secondary_resource else 0
+
+        # making to need: a good at its cap is not made; a smithy turns all its steel to the other
+        if full(resource):
+            if not secondary_resource or full(secondary_resource):
+                continue                                     # nothing wanted: the workshop rests today
+            secondary_desired, desired_amount = secondary_desired + desired_amount, 0.0
+        elif secondary_resource and full(secondary_resource):
+            desired_amount, secondary_desired = desired_amount + secondary_desired, 0.0
 
         input_resource = rule.get("input_resource")
 
