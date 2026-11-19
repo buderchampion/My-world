@@ -607,6 +607,12 @@ FEATURES = [
         "tables": ["dragons"],
     },
     {
+        "name": "Travelers and walking: people on a journey earn no wage and get no temple's care at home; walking across town costs time and energy",
+        "functions": {"Data/DailyLife/walking.py": ["minutes", "walk"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["walk(npc, npc.get(\"location\"), location_id, district_of", "if not away:",
+                                                            "apply_healing(npc, has_temple and not away)"]},
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -3149,6 +3155,23 @@ def _smoke_body(r, holder):
 
     run_step(r, "(setup) mark everyone's meals before the day tick", mark_meals)
 
+    journey = {}
+
+    def send_a_traveler():
+        # a working townsman sets out on a journey just before the day tick: he must earn nothing and get no temple's care
+        row = conn.execute(
+            """SELECT n.id, n.city_id, n.gold FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND n.alive = 1 AND n.age >= 18 AND n.profession IN ('Blacksmith', 'Baker', 'Carpenter', 'Tailor', 'Miller')
+               AND n.disease IS NULL AND n.workplace_id IS NOT NULL ORDER BY n.id LIMIT 1""", (world_id,)).fetchone()
+        dest = conn.execute("SELECT id FROM cities WHERE id != ? LIMIT 1", (row[1],)).fetchone()[0]
+        conn.execute("""INSERT INTO npc_travels (npc_id, origin_city_id, destination_city_id, purpose, status, days_remaining, planned_stay_days)
+                        VALUES (?, ?, ?, 'Errand', 'Traveling Out', 20, 5)""", (row[0], row[1], dest))
+        conn.execute("UPDATE npcs SET health = 50 WHERE id = ?", (row[0],))
+        conn.commit()
+        journey.update(id=row[0], gold=row[2])
+
+    run_step(r, "(setup) a townsman sets out on a journey before the day tick", send_a_traveler)
+
     run_step(r, "day tick   (economy, wages, trade, caravans, travel)", manager.on_day)
 
     def day_tick_sells_food():
@@ -3159,6 +3182,33 @@ def _smoke_body(r, holder):
         assert unchanged <= total * 0.1, f"the day tick did not sell people their food ({unchanged} of {total} untouched)"
 
     run_step(r, "the day tick sells every household its food", day_tick_sells_food)
+
+    def travelers_earn_nothing():
+        from Data.NPCS.healing import BASE_HEAL_PER_DAY
+        gold, health = conn.execute("SELECT gold, health FROM npcs WHERE id = ?", (journey["id"],)).fetchone()
+        assert abs(gold - journey["gold"]) < 0.01, f"a man on a journey earned his wage at home ({journey['gold']:.2f} -> {gold:.2f})"
+        assert health <= 50 + BASE_HEAL_PER_DAY, f"a man on a journey was tended at his home temple (health 50 -> {health})"
+        conn.execute("UPDATE npc_travels SET status = 'Completed', days_remaining = 0 WHERE npc_id = ? AND purpose = 'Errand'", (journey["id"],))
+        conn.commit()
+
+    run_step(r, "people on a journey earn no wage at home and get no temple's care", travelers_earn_nothing)
+
+    def walking_takes_time():
+        from Data.DailyLife import walking as W
+        district_of = {1: 10, 2: 10, 3: 20}
+        assert W.minutes(1, 1, district_of, "Capital") == 0 and W.minutes(1, 2, district_of, "Capital") == W.WITHIN["Capital"], \
+            "staying put or crossing a street took the wrong time"
+        assert W.minutes(1, 3, district_of, "Capital") > W.minutes(1, 3, district_of, "Village"), "a capital is no longer to cross than a village"
+        npc = {}
+        meal = {"hunger": 30, "energy": 5, "social": 0}
+        after = W.walk(npc, 1, 3, district_of, "Capital", meal)
+        assert after["hunger"] < 30 and after["energy"] < 5 and npc["walked"] == W.ACROSS["Capital"], \
+            f"walking across a capital took nothing from the meal or the walker: {after}"
+        work = {"energy": -10}
+        assert W.walk({}, 1, 3, district_of, "Town", work)["energy"] < -10, "walking to work cost no energy"
+        assert W.walk({}, 1, 1, district_of, "Town", meal) == meal, "staying put cost something"
+
+    run_step(r, "walking: across town takes time and energy, by the size of the town; staying put costs nothing", walking_takes_time)
 
     def day_tick_pays_lords():
         counties = conn.execute(

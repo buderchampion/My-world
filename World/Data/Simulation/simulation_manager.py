@@ -83,6 +83,8 @@ class SimulationManager:
                 city = get_city(self.conn, city_summary["id"])
                 buildings = city.get("buildings", [])
                 building_types_by_id = {b["id"]: b["type"] for b in buildings}
+                district_of = {r[0]: r[1] for r in self.conn.execute(
+                    "SELECT id, district_id FROM buildings WHERE city_id = ?", (city["id"],))}
 
                 for npc in get_city_npcs(self.conn, city["id"]):
 
@@ -100,6 +102,9 @@ class SimulationManager:
                     building_type = building_types_by_id.get(location_id, "House")
                     effect = get_needs_effect(building_type)
 
+                    # walking there (Data.DailyLife.walking): across town takes time and breath
+                    from Data.DailyLife.walking import walk
+                    effect = walk(npc, npc.get("location"), location_id, district_of, city["type"], effect)
                     npc["location"] = location_id
 
                     for need, delta in effect.items():
@@ -218,19 +223,21 @@ class SimulationManager:
                     living_count += 1
 
                     changed = False
+                    away = npc["id"] in away_ids          # on a journey: not at work, not at the temple (Data.Infrastructure.travel)
 
                     if npc["profession"] != "Laborer":
-                        tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
-                        changed = True
-                    elif npc["id"] not in away_ids and npc.get("jailed_until") is None:
+                        if not away:
+                            tax_collected += apply_workday(npc, tax_rate=kingdom.get("tax_rate", 0.0))
+                            changed = True
+                    elif not away and npc.get("jailed_until") is None:
                         # no trade: a day's casual labour (Data.Economy.food_market); none in jail (Data.Government.crime)
                         npc["gold"] = round(npc["gold"] + LABOUR_WAGE, 2)
                         changed = True
 
-                    if drink_potion(npc, city):
+                    if not away and drink_potion(npc, city):
                         changed = True
 
-                    if apply_healing(npc, has_temple):
+                    if apply_healing(npc, has_temple and not away):   # the road mends slowly: no temple's care
                         changed = True
 
                     if npc["profession"] in MILITARY_PROFESSIONS:
