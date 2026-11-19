@@ -261,6 +261,14 @@ def inherit_crown(conn, capital_city, previous):
                      "regent": regent["name"], "age": heir["age"]}, seed_parts=(heir["id"],))
 
     conn.commit()
+
+    # a weak claim may be disputed (Data.Government.succession_crisis): the lords take sides, or it comes to war
+    from Data.Government.succession_crisis import contest
+    report = contest(conn, kingdom["id"], heir, regent, previous)
+    if report and report["outcome"] in ("crowned", "claimant won"):
+        return get_npc(conn, report["claimant"])
+    if report and report["outcome"] == "murdered":
+        return get_npc(conn, heir["id"])                     # dead: the crown passes on at the next month's choosing
     return heir
 
 

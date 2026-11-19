@@ -24,6 +24,8 @@ def assign_city_ruler(conn, city):
     from Data.Database.repository import get_npc
 
     is_capital = city["type"] == "Capital"
+    old = get_npc(conn, city["ruler"]) if city.get("ruler") else None
+    line_ended = bool(is_capital and old and not old["alive"])      # a dead monarch: if no heir is found, a new house
 
     # A republic's capital is never inherited: the Great Council elects a Doge
     # for life (Data.Government.republic).
@@ -102,6 +104,13 @@ def assign_city_ruler(conn, city):
     from Data.Events.events import coronation_event
     coronation_event(conn, ruler, city)
     conn.commit()
+
+    if line_ended:                                     # a new house with no claim: the lords may dispute it
+        from Data.Government.succession_crisis import contest
+        report = contest(conn, city["kingdom"], ruler, None, old, relation="none")
+        if report and report["outcome"] in ("crowned", "claimant won"):
+            city["ruler"] = report["claimant"]
+            return get_npc(conn, report["claimant"])
 
     return ruler
 

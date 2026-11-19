@@ -613,6 +613,12 @@ FEATURES = [
                                                             "apply_healing(npc, has_temple and not away)"]},
     },
     {
+        "name": "Succession crises: a weak claim may be disputed by a lord or passed-over kin; lords take sides, or it comes to war",
+        "functions": {"Data/Government/succession_crisis.py": ["weakness", "rival", "contest", "politics", "war", "crown", "exile", "execute"]},
+        "wired": {"Data/Government/succession.py": ["contest(conn, kingdom[\"id\"], heir, regent, previous)"],
+                  "Data/Government/government.py": ["contest(conn, city[\"kingdom\"], ruler, None, old, relation=\"none\")"]},
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -5149,6 +5155,70 @@ def _smoke_body(r, holder):
             conn.commit()
 
     run_step(r, "horse kingdoms: hordes march to conquer, settle after holding a town or a long peace, keep their herds, swear oaths and answer allies", horse_kingdoms_settle)
+
+    def succession_crises():
+        import Data.Government.succession_crisis as SC
+        from Data.Database.repository import get_npc
+        saved = (SC.CRISIS_PER_POINT, SC.PLOT_CHANCE)
+        try:
+            k = conn.execute(
+                """SELECT k.* FROM kingdoms k WHERE k.world_id = ? AND k.status != 'Fallen' AND k.type = 'Crown'
+                   AND (SELECT COUNT(*) FROM provinces p JOIN npcs n ON n.id = p.lord_id WHERE p.kingdom_id = k.id AND n.alive = 1) >= 2
+                   ORDER BY k.id LIMIT 1""", (world_id,)).fetchone()
+            if not k:
+                return
+            k = dict(k)
+            monarch = get_npc(conn, k["ruler_id"])
+            # how weak a claim is: a monarch's grown child has a sound one; a child, a sibling, a stranger do not
+            child = next((c for c in conn.execute("SELECT id FROM npcs WHERE (parent_a_id = ? OR parent_b_id = ?)", (monarch["id"], monarch["id"]))), None)
+            if child:
+                assert SC.weakness(conn, get_npc(conn, child[0]), None, monarch)[0] == 0, "a monarch's own child's claim was weak"
+                assert SC.weakness(conn, get_npc(conn, child[0]), {"id": -1}, monarch)[0] == SC.WEAKNESS["child"], "a child on the throne is no weaker"
+            assert SC.weakness(conn, monarch, None, None, relation="none")[0] == SC.WEAKNESS["none"], "a new house's claim is not the weakest"
+            # a sibling's claim, disputed by the boldest lord; the lords are loyal: the claim fails, the bold claimant goes into exile
+            SC.CRISIS_PER_POINT, SC.PLOT_CHANCE = 10.0, 0.0
+            conn.execute("UPDATE provinces SET loyalty = 90 WHERE kingdom_id = ?", (k["id"],))
+            conn.execute("""UPDATE npcs SET boldness = 60, mercy = 40 WHERE id IN (SELECT p.lord_id FROM provinces p
+                            WHERE p.kingdom_id = ?) AND id != ?""", (k["id"], monarch["id"]))   # bold lords: the timid do not claim crowns
+            claimant, province = SC.rival(conn, k["id"], monarch, None, None)
+            assert claimant and province, "no lord came forward as a rival"
+            county_of = {x[0]: x[1] for x in conn.execute("SELECT lord_id, id FROM provinces WHERE kingdom_id = ?", (k["id"],))}
+            rep = SC.contest(conn, k["id"], monarch, None, None, relation="sibling")
+            assert rep and rep["outcome"] == "exiled" and not rep["war"], f"a bold claimant facing loyal lords did not go into exile: {rep}"
+            gone = get_npc(conn, rep["claimant"])
+            home = conn.execute("SELECT kingdom_id FROM cities WHERE id = ?", (gone["city_id"],)).fetchone()[0]
+            assert gone["title"] is None and home != k["id"], "the exiled claimant kept their title or stayed in the realm"
+            assert conn.execute("SELECT lord_id FROM provinces WHERE id = ?", (county_of[gone["id"]],)).fetchone()[0] != gone["id"], \
+                "the exile kept their county"
+            assert conn.execute("SELECT 1 FROM chronicle_entries WHERE event_type = 'Succession' AND kingdom_id = ?", (k["id"],)).fetchone(), \
+                "the dispute was not chronicled"
+            # the lords are disloyal: they set the monarch aside and crown the claimant
+            conn.execute("UPDATE provinces SET loyalty = 10 WHERE kingdom_id = ?", (k["id"],))
+            claimant, province = SC.rival(conn, k["id"], monarch, None, None)
+            if claimant:
+                rep = SC.contest(conn, k["id"], monarch, None, None, relation="spouse")
+                kk = conn.execute("SELECT ruler_id FROM kingdoms WHERE id = ?", (k["id"],)).fetchone()[0]
+                if rep and rep["outcome"] == "crowned":
+                    assert kk == claimant["id"] and get_npc(conn, claimant["id"])["title"] in ("King", "Queen"), "the claimant was not crowned"
+                    assert get_npc(conn, monarch["id"])["title"] is None, "the monarch set aside kept the crown's title"
+                    monarch = get_npc(conn, kk)
+            # no claim at all: it comes to war, and either way the realm has one living monarch at the end
+            claimant, province = SC.rival(conn, k["id"], monarch, None, None)
+            if claimant:
+                rep = SC.contest(conn, k["id"], monarch, None, None, relation="none")
+                assert rep and rep["war"], f"a crown with no claim at all was not fought for: {rep}"
+                ruler = get_npc(conn, conn.execute("SELECT ruler_id FROM kingdoms WHERE id = ?", (k["id"],)).fetchone()[0])
+                assert ruler["alive"] and ruler["title"] in ("King", "Queen"), "after the war of succession the realm has no living monarch"
+                if rep["outcome"] == "crown won":
+                    assert not get_npc(conn, claimant["id"])["alive"], "the defeated claimant lives on"
+                else:
+                    assert ruler["id"] == claimant["id"], "the victorious claimant was not crowned"
+        finally:
+            SC.CRISIS_PER_POINT, SC.PLOT_CHANCE = saved
+            conn.commit()
+
+    run_step(r, "succession crises: a weak claim is disputed; loyal lords send the claimant into exile, disloyal ones crown them, a new house means war",
+             succession_crises)
 
     # --- invariants that should hold after any amount of simulation ----------
 

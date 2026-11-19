@@ -407,5 +407,40 @@
         "{When}, when {city} was beset, {slayer}, a stranger among its folk, cast off a mortal guise: it was {dragon}, and it fought for {kingdom}.",
         "{When}, {city} learned that {slayer}, who had long dwelt among them, was in truth {dragon}, who rose in its own shape to defend them.",
         "{When}, the folk of {city} beheld a wonder: {slayer} became {dragon} before their eyes and stood with {kingdom}."
+    ],
+    "Succession Disputed": [
+        "{When}, the crown of {kingdom} came to {ruler}, but {rival} would not bow, and claimed it for themselves.",
+        "{When}, {rival} disputed {ruler}'s right to the throne of {kingdom}, and the lords of the realm were sore divided.",
+        "{When}, no sooner was {ruler} crowned in {kingdom} than {rival} rose to claim the throne."
+    ],
+    "Claim Withdrawn": [
+        "{When}, finding the lords against them, {rival} bent the knee to {ruler}, and the dispute in {kingdom} was ended.",
+        "{When}, {rival} withdrew their claim, and {ruler} reigned in {kingdom} unchallenged.",
+        "{When}, the lords of {kingdom} stood by {ruler}, and {rival} yielded."
+    ],
+    "Claimant Exiled": [
+        "{When}, {rival}, spurned by the lords of {kingdom}, would not bow to {ruler}, and went into exile.",
+        "{When}, {rival} fled {kingdom} rather than kneel to {ruler}, and the county of {county} passed to another.",
+        "{When}, the claim of {rival} failed, and they departed {kingdom} in bitterness, never to kneel to {ruler}."
+    ],
+    "Heir Murdered": [
+        "{When}, {ruler} of {kingdom} was slain by hidden hands; men whispered the name of {rival}.",
+        "{When}, a dark deed was done in {kingdom}: {ruler} was murdered, and the plot was laid at the door of {rival}.",
+        "{When}, {kingdom} mourned {ruler}, struck down in a plot while {rival}'s claim yet stood."
+    ],
+    "Claimant Crowned": [
+        "{When}, the lords of {kingdom} set {ruler} aside, and crowned {rival} in their place.",
+        "{When}, {rival} won the lords of {kingdom} to their cause, and took the crown from {ruler}.",
+        "{When}, by the will of the great lords, {rival} was crowned in {kingdom}, and {ruler} was put aside."
+    ],
+    "Succession War (claimant won)": [
+        "{When}, war for the crown of {kingdom} was fought between {ruler} and {rival}; {rival} prevailed and was crowned.",
+        "{When}, {rival} raised the banners of {county} against {ruler}, won the field, and took the throne of {kingdom}.",
+        "{When}, the war of succession in {kingdom} ended in {rival}'s victory; {ruler} lost both crown and cause."
+    ],
+    "Succession War (crown won)": [
+        "{When}, {rival} made war for the crown of {kingdom}, but {ruler} prevailed, and the rebels paid with their lives.",
+        "{When}, the war of succession in {kingdom} ended with {rival} overthrown; {ruler} reigned secure.",
+        "{When}, {ruler}'s loyal lords crushed {rival}, and the crown of {kingdom} was safe."
     ]
 }

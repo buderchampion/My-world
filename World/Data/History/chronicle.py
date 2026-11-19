@@ -20,6 +20,8 @@ REQUIRED_TEMPLATE_KEYS = (
     "Horde Settled (conquest)", "Horde Settled (peace)", "Riders Answered", "Riders Came",
     "Dragon Attack (burned)", "Dragon Slain (town)", "Dragon Slain (by a dragon)", "Dragon Hunt (slain)", "Dragon Hunt (failed)",
     "Dragon Guardian", "Dragon Revealed",
+    "Succession Disputed", "Claim Withdrawn", "Claimant Exiled", "Heir Murdered", "Claimant Crowned",
+    "Succession War (claimant won)", "Succession War (crown won)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
