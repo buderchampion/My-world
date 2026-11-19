@@ -155,6 +155,7 @@ def run_harvest(conn, world_id, year):
     farmland = {r["id"]: r["farmland"] for r in regions}
     from Data.Magic.magic import druid_harvest_bonus           # druids tend the land
     from Data.Research.discoveries import bonus, refresh       # and what its scholars have learned
+    from Data.History.eras import effect as era_effect          # an Age of Want blights them all
     refresh(conn, world_id)
     tended = druid_harvest_bonus(conn, world_id)
     year_need = FAMILY_SIZE * DAYS_PER_YEAR
@@ -173,7 +174,7 @@ def run_harvest(conn, world_id, year):
 
         quality, factor, _ = weather[v["region_id"]]
         reaped = v["households"] * HARVEST_PER_HOUSEHOLD * farmland[v["region_id"]] * factor * (1 + tended.get(v["id"], 0)) \
-            * (1 + bonus(v["kingdom_id"], "harvest"))                       # the kingdom's farming discoveries
+            * (1 + bonus(v["kingdom_id"], "harvest")) * era_effect("harvest")  # its farming discoveries, and the age
         seed = reaped * SEED_SHARE
         tax = reaped * GRAIN_TAX_SHARE
         left = reaped - seed - tax

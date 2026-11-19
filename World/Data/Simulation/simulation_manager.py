@@ -40,6 +40,8 @@ class SimulationManager:
         self.clock = load_clock(conn, world_id)
         from Data.Research.discoveries import refresh     # what each kingdom's scholars know, for the day's systems
         refresh(conn, world_id)
+        from Data.History.eras import ensure_era          # the age of the world (a new or older world opens in one)
+        ensure_era(conn, world_id)
 
     def tick(self) -> dict:
         rollover = self.clock.advance_minute()
@@ -626,6 +628,10 @@ class SimulationManager:
         # neighbours at peace who meet at each other's fairs.
         from Data.Research.discoveries import spread_year
         spread_year(self.conn, self.world_id)
+
+        # The age of the world may turn, and each kingdom's own times begin or end (Data.History.eras).
+        from Data.History.eras import eras_year
+        eras_year(self.conn, self.world_id)
 
         for kingdom in kingdoms:
 

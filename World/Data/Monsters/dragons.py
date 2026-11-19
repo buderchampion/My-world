@@ -336,7 +336,8 @@ def new_dragon(conn, world_id, monster_name=None):
 
 def wake_chance(d):
     """A poor dragon wakes hungrier (up to half again as often), a rich one sleeps longer (down to half)."""
-    return WAKE_CHANCE * min(1.5, max(0.5, RICH_HOARD / 2 / max(1.0, d["hoard"])))
+    from Data.History.eras import effect                         # an Age of Dragons wakes them
+    return WAKE_CHANCE * min(1.5, max(0.5, RICH_HOARD / 2 / max(1.0, d["hoard"]))) * effect("dragons")
 
 
 def choose_town(conn, world_id, d):
@@ -667,7 +668,8 @@ def dragons_year(conn, world_id):
     """Yearly: dragons are named, evil ones wake and burn, kingdoms hunt them, good ones take mortal form,
     play pranks and carry gossip. Returns what happened."""
     ensure_dragons(conn, world_id)
-    if len(dragons(conn, world_id, good=False)) < MAX_EVIL and random.random() < NEW_DRAGON_CHANCE:
+    from Data.History.eras import effect
+    if len(dragons(conn, world_id, good=False)) < MAX_EVIL and random.random() < NEW_DRAGON_CHANCE * effect("dragons"):
         new_dragon(conn, world_id)
     rampages = []
     for d in dragons(conn, world_id, good=False):

@@ -467,5 +467,40 @@
         "{When}, the dragon {dragon} fell upon {city}, but the folk of {kingdom} stood fast and drove it off, though {dead} were slain.",
         "{When}, {city} was beset by {dragon}; the wyrm was wounded and fled with nothing, and {dead} of {kingdom}'s folk lay dead.",
         "{When}, {kingdom} turned back {dragon} from the walls of {city}, at the cost of {dead} lives."
+    ],
+    "Era Began": [
+        "{When}, there began {era}: {reason}.",
+        "{When}, the world turned, and {era} began; for {reason}.",
+        "{When}, the wise of {kingdom} marked the dawning of {era}: {reason}."
+    ],
+    "Period Began (golden)": [
+        "{When}, began {era}: {kingdom} prospered, and its people were content.",
+        "{When}, {kingdom} entered upon {era}, a time of plenty and good cheer.",
+        "{When}, under {ruler}, {kingdom} knew {era}, and its towns grew rich."
+    ],
+    "Period Began (troubles)": [
+        "{When}, began {era} in {kingdom}: the lords were restless and the realm divided.",
+        "{When}, {kingdom} fell into {era}, and none could say whom the lords would follow.",
+        "{When}, {era} came upon {kingdom} in the reign of {ruler}."
+    ],
+    "Period Began (hungry)": [
+        "{When}, began {era} in {kingdom}: bread was dear and the poor went hungry.",
+        "{When}, {kingdom} entered {era}, and want stalked its villages.",
+        "{When}, in the reign of {ruler}, came {era} upon {kingdom}."
+    ],
+    "Period Began (mourning)": [
+        "{When}, sickness carried off many of {kingdom}'s folk, and began {era}.",
+        "{When}, {kingdom} entered {era}, for death was in every street.",
+        "{When}, {era} fell upon {kingdom} in the reign of {ruler}."
+    ],
+    "Period Began (wars)": [
+        "{When}, began {era}: {kingdom} was seldom without an army in the field.",
+        "{When}, {kingdom} entered upon {era}, and its banners went out year upon year.",
+        "{When}, under {ruler}, {kingdom} knew {era}."
+    ],
+    "Period Ended": [
+        "{When}, {era} came to an end in {kingdom}.",
+        "{When}, {kingdom} saw the passing of {era}.",
+        "{When}, {era} was over, and {kingdom} went on."
     ]
 }

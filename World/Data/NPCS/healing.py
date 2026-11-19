@@ -26,7 +26,8 @@ def apply_healing(npc: dict, city_has_active_temple: bool) -> bool:
     if npc.get("disease"):          # the sick do not mend until they are well (Data.NPCS.sickness)
         return False
 
-    heal_amount = BASE_HEAL_PER_DAY + (TEMPLE_HEAL_BONUS if city_has_active_temple else 0)
+    from Data.History.eras import effect                         # an Age of Faith
+    heal_amount = BASE_HEAL_PER_DAY + (TEMPLE_HEAL_BONUS * effect("healing") if city_has_active_temple else 0)
 
     npc["health"] = min(100, npc["health"] + heal_amount)
 

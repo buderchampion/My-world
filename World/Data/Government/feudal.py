@@ -82,6 +82,10 @@ def loyalty_target(conn, province, kingdom, year):
     if abs(rate - STANDARD_TAX_RATE) > 1e-9:
         reasons["the crown's taxes"] = round((STANDARD_TAX_RATE - rate) * TAX_RATE_PER_POINT, 1)
 
+    from Data.History.eras import added                          # the age, and the kingdom's own times
+    if added("loyalty", kingdom["id"]):
+        reasons["the times"] = added("loyalty", kingdom["id"])
+
     if LORD_SHARE != STANDARD_LORD_SHARE:
         reasons["taxes"] = round((LORD_SHARE - STANDARD_LORD_SHARE) * TAX_PER_SHARE, 1)
 

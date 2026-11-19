@@ -162,7 +162,8 @@ def monster_raids(conn, world_id):
     for lair in lairs:
         if is_dragon(lair["monster"]):
             continue                                    # dragons do not raid: they wake and burn (Data.Monsters.dragons)
-        if random.random() >= RAID_CHANCE or by_name(lair["monster"]) is None:
+        from Data.History.eras import effect                     # an Age of Darkness stirs them
+        if random.random() >= RAID_CHANCE * effect("monsters") or by_name(lair["monster"]) is None:
             continue
         village = nearest_village(conn, world_id, lair)
         if village:

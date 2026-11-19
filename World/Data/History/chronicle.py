@@ -23,6 +23,8 @@ REQUIRED_TEMPLATE_KEYS = (
     "Succession Disputed", "Claim Withdrawn", "Claimant Exiled", "Heir Murdered", "Claimant Crowned",
     "Succession War (claimant won)", "Succession War (crown won)",
     "Discovery Made", "Discovery Learned (trade)", "Discovery Learned (fair)", "Discovery Learned (conquest)",
+    "Era Began", "Period Began (golden)", "Period Began (troubles)", "Period Began (hungry)", "Period Began (mourning)",
+    "Period Began (wars)", "Period Ended",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",
@@ -80,7 +82,7 @@ TEMPLATE_FIELDS = (
     "city", "sovereign", "regent", "county", "nature", "fate",
     "avenger", "nemesis", "reason",
  "monsters", "village", "dead", "disease", "champion", "riders", "guild", "building", "gold",
- "region", "rival", "old", "dragon", "slayer", "discovery")
+ "region", "rival", "old", "dragon", "slayer", "discovery", "era")
 
 # Which wording a monarch's death gets, by the cause death_event was given.
 # Anything not listed here falls back to "Ruler Died (other)".
@@ -192,15 +194,16 @@ def write_entry(conn, kingdom_id, event_type, template_key, year, season, fields
     when_capitalized, when = format_when(year, season)
 
     template = pick_template(template_key, kingdom_id, year, *seed_parts)
+    from Data.History.eras import era_name_of_kingdom            # every entry carries the age it was written in
 
     text = template.format(When=when_capitalized, when=when, **fields)
 
     cursor = conn.execute(
         """
-        INSERT INTO chronicle_entries (kingdom_id, event_type, text, year, season, source_event_id)
-        VALUES (?, ?, ?, ?, ?, ?)
+        INSERT INTO chronicle_entries (kingdom_id, event_type, text, year, season, source_event_id, era)
+        VALUES (?, ?, ?, ?, ?, ?, ?)
         """,
-        (kingdom_id, event_type, text, year, season, source_event_id)
+        (kingdom_id, event_type, text, year, season, source_event_id, era_name_of_kingdom(conn, kingdom_id))
     )
 
     return {

@@ -1,0 +1,17 @@
+{
+    "_about": "The world's eras (Data.History.eras). name: what the chronicle calls it (a second one is 'the Second Age of ...'). effects: multipliers (war, harvest, plague, monsters, dragons, research, spread, healing: 1.0 is no change) and additions (happiness: to everyone's contentment; loyalty: to every lord's loyalty). reason: why it began, in the chronicle's words. The hero and necromancer eras wait for quests.",
+    "Peace": {"name": "the Age of Peace", "effects": {"war": 0.5, "research": 1.2, "happiness": 3},
+              "reason": "the swords were long sheathed, and trade and harvest were the business of the realms"},
+    "War": {"name": "the Age of War", "effects": {"war": 2.0, "happiness": -3, "loyalty": -3},
+            "reason": "war followed war, and every realm looked to its walls"},
+    "Darkness": {"name": "the Age of Darkness", "effects": {"plague": 2.0, "monsters": 1.5, "dragons": 1.5, "happiness": -5},
+                 "reason": "pestilence and dark things walked the land"},
+    "Faith": {"name": "the Age of Faith", "effects": {"plague": 0.7, "healing": 1.5, "happiness": 4, "loyalty": 5},
+              "reason": "the people, having suffered, turned to the gods and the temples"},
+    "Dragons": {"name": "the Age of Dragons", "effects": {"dragons": 2.5, "monsters": 1.2},
+                "reason": "the great wyrms woke from their long sleep"},
+    "Wonders": {"name": "the Age of Wonders", "effects": {"research": 2.0, "spread": 2.0, "happiness": 2},
+                "reason": "the scholars' learning flowered as never before"},
+    "Want": {"name": "the Age of Want", "effects": {"harvest": 0.85, "happiness": -4, "loyalty": -5},
+             "reason": "the harvests failed and the granaries stood empty"}
+}

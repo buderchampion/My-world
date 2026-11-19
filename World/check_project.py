@@ -631,6 +631,44 @@ FEATURES = [
         "tables": ["kingdom_discoveries"],
     },
     {
+        "name": "Making to need: workshops make a good only up to its cap in the town (its use, its people); a smithy turns steel to what is wanted",
+        "functions": {"Data/Economy/economy.py": ["daily_need", "stock_cap", "produce_resources"]},
+        "wired": {"Data/Economy/economy.py": ["need = daily_need(city, building_production)", "if full(resource):"],
+                  "long_run.py": ["Goods    "]},
+    },
+    {
+        "name": "Tooling: the world report (kingdoms, favor matrix, alliances, tribute, wars, dragons) and the optional git pre-commit hook",
+        "functions": {"world_report.py": ["kingdoms_section", "favor_section", "relations_section", "tribute_section", "wars_section",
+                                          "dragons_section", "main"],
+                      "check_project.py": ["install_hook"]},
+        "wired": {"check_project.py": ["install_hook(remove=args.remove_hook)"]},
+    },
+    {
+        "name": "Thieves Dens and smugglers: thieves by trade steal for a living, a den hides its town's thieves; smugglers run goods across borders",
+        "functions": {"Data/Government/crime.py": ["den_towns", "smuggling_month", "recruit_dens"]},
+        "wired": {"Data/Government/crime.py": ["runs = smuggling_month(conn, world_id)", "m *= THIEF_TRADE", "DEN_HIDDEN if city_id in dens",
+                                               "recruit_dens(conn, world_id)"]},
+    },
+    {
+        "name": "Eras: the world's ages turn by what happens (war, darkness, want, dragons, wonders, faith, peace) and change it; kingdoms have their own periods",
+        "functions": {"Data/History/eras.py": ["eras", "effect", "added", "current", "refresh", "begin_era", "ensure_era", "signs",
+                                                "strengths", "choose_era", "eras_year", "kingdom_signs", "period_kind", "kingdom_periods",
+                                                "era_name_of_kingdom"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["eras_year(self.conn", "ensure_era(conn, world_id)"],
+                  "Data/Government/diplomacy.py": ["war_chance(favors) * effect(\"war\")"],
+                  "Data/World/harvest.py": ["era_effect(\"harvest\")"],
+                  "Data/NPCS/sickness.py": ["effect(\"plague\")"],
+                  "Data/Monsters/raids.py": ["RAID_CHANCE * effect(\"monsters\")"],
+                  "Data/Monsters/travelers.py": ["AMBUSH_CHANCE * effect(\"monsters\")"],
+                  "Data/Monsters/dragons.py": ["effect(\"dragons\")"],
+                  "Data/Research/discoveries.py": ["effect(\"research\")", "era_effect(\"spread\")"],
+                  "Data/NPCS/healing.py": ["effect(\"healing\")"],
+                  "Data/NPCS/contentment.py": ["era_added(\"happiness\", p[\"kingdom_id\"])"],
+                  "Data/Government/feudal.py": ["added(\"loyalty\", kingdom[\"id\"])"],
+                  "Data/History/chronicle.py": ["era_name_of_kingdom(conn, kingdom_id)"]},
+        "tables": ["world_eras", "kingdom_periods"],
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -5239,7 +5277,9 @@ def _smoke_body(r, holder):
             claimant, province = SC.rival(conn, k["id"], monarch, None, None)
             assert claimant and province, "no lord came forward as a rival"
             county_of = {x[0]: x[1] for x in conn.execute("SELECT lord_id, id FROM provinces WHERE kingdom_id = ?", (k["id"],))}
+            conn.execute("UPDATE cities SET households = households + 100000 WHERE id = ?", (k["capital_city_id"],))   # a great royal demesne
             rep = SC.contest(conn, k["id"], monarch, None, None, relation="sibling")
+            conn.execute("UPDATE cities SET households = households - 100000 WHERE id = ?", (k["capital_city_id"],))
             assert rep and rep["outcome"] == "exiled" and not rep["war"], f"a bold claimant facing loyal lords did not go into exile: {rep}"
             gone = get_npc(conn, rep["claimant"])
             home = conn.execute("SELECT kingdom_id FROM cities WHERE id = ?", (gone["city_id"],)).fetchone()[0]
@@ -5288,8 +5328,10 @@ def _smoke_body(r, holder):
                               WHERE k.world_id = ? AND k.status != 'Fallen' AND b.type = 'Thieves Den' LIMIT 1""", (world_id,)).fetchone()
         if not den:
             return
-        npc = conn.execute("SELECT id, profession, workplace_id, gold, jailed_until FROM npcs WHERE alive = 1 AND city_id = ? AND age >= 18 LIMIT 1",
-                           (den[1],)).fetchone()
+        from Data.Infrastructure.travel import get_traveling_npc_ids
+        away = set(get_traveling_npc_ids(conn, world_id))                 # one at home, not off on the road
+        npc = next(n for n in conn.execute("SELECT id, profession, workplace_id, gold, jailed_until FROM npcs WHERE alive = 1 AND city_id = ? AND age >= 18",
+                                           (den[1],)).fetchall() if n[0] not in away)
         saved_watch = (CR.SMUGGLE_CAUGHT, CR.watch_catch)
         try:
             conn.execute("UPDATE npcs SET profession = 'Smuggler', workplace_id = ?, jailed_until = NULL WHERE id = ?", (den[0], npc[0]))
@@ -5303,7 +5345,8 @@ def _smoke_body(r, holder):
             conn.commit()
             CR.SMUGGLE_CAUGHT = 0.0
             runs = [x for x in CR.smuggling_month(conn, world_id) if x["smuggler"] == npc[0]]
-            if far and not conn.execute("SELECT 1 FROM campaigns WHERE status = 'Besieging'").fetchone():
+            from Data.Government.campaigns import besieged_city_ids
+            if far and not besieged_city_ids(conn, world_id):
                 assert runs and runs[0]["load"] == CR.SMUGGLE_LOAD and runs[0]["pay"] > 0 and not runs[0]["caught"], \
                     f"a smuggler ran nothing across the border: {runs}"
                 left = conn.execute("SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = ?",
@@ -5321,8 +5364,11 @@ def _smoke_body(r, holder):
             rogue = conn.execute("""SELECT id, profession, convictions FROM npcs WHERE city_id = ? AND alive = 1 AND age BETWEEN 16 AND 50
                                     AND id != ? AND jailed_until IS NULL LIMIT 1""", (den[1], npc[0])).fetchone()
             if rogue:
-                conn.execute("UPDATE npcs SET profession = 'Laborer', convictions = 3 WHERE id = ?", (rogue[0],))
+                conn.execute("UPDATE npcs SET profession = 'Laborer', convictions = 999 WHERE id = ?", (rogue[0],))   # the town's worst
+                capacity = conn.execute("SELECT capacity FROM buildings WHERE id = ?", (den[0],)).fetchone()[0]
+                conn.execute("UPDATE buildings SET capacity = ? WHERE id = ?", (max(capacity or 0, 10), den[0]))     # with room
                 CR.recruit_dens(conn, world_id)
+                conn.execute("UPDATE buildings SET capacity = ? WHERE id = ?", (capacity, den[0]))
                 trade = conn.execute("SELECT profession FROM npcs WHERE id = ?", (rogue[0],)).fetchone()[0]
                 conn.execute("UPDATE npcs SET profession = ?, convictions = ?, workplace_id = NULL WHERE id = ?", (rogue[1], rogue[2], rogue[0]))
                 assert trade in ("Thief", "Smuggler"), f"a den with room did not take on a convicted laborer (now a {trade})"
@@ -5334,6 +5380,71 @@ def _smoke_body(r, holder):
 
     run_step(r, "dens and smugglers: a thief by trade steals often; a smuggler runs goods abroad for profit, or is caught and judged",
              dens_and_smugglers)
+
+    def eras_turn():
+        import Data.History.eras as EA
+        from Data.Government.edicts import today
+        day = today(conn, world_id)
+        first_era = conn.execute("SELECT COALESCE(MAX(id), 0) FROM world_eras").fetchone()[0]
+        first_period = conn.execute("SELECT COALESCE(MAX(id), 0) FROM kingdom_periods").fetchone()[0]
+        k = dict(conn.execute("SELECT * FROM kingdoms WHERE world_id = ? AND status != 'Fallen' ORDER BY id LIMIT 1", (world_id,)).fetchone())
+        try:
+            # a world opens in the Age of Peace, and its effects are in force; the chronicle carries the era's name
+            EA.ensure_era(conn, world_id)
+            era = EA.current(conn, world_id)
+            assert era, "the world has no era"
+            EA.refresh(conn, world_id)
+            assert EA.effect(next(iter(EA.eras()[era["era"]]["effects"]))) != 1.0 or EA.eras()[era["era"]]["effects"] == {}, \
+                "the era's effects are not in force"
+            assert EA.era_name_of_kingdom(conn, k["id"]) == era["name"], "a kingdom does not know the world's era"
+            # what the world has been through decides the next era: darkness before war, peace after long quiet
+            quiet = {"kingdoms": 4, "households": 4000, "campaigns": 0, "last_campaign": 0, "dark_dead": 0, "dragon_deeds": 0,
+                     "discoveries": 0, "bad": 0.0, "hungry": 0}
+            dark = EA.DARK_RATE * EA.LOOK_BACK * 4 * 2                      # twice what darkens an age
+            assert EA.choose_era(dict(quiet, dark_dead=dark, campaigns=2), "Peace", 10 ** 5) == "Darkness", \
+                "pestilence and monsters did not darken the age"
+            assert EA.choose_era(dict(quiet, campaigns=round(EA.WAR_PER_REALM * 4)), "Peace", 10 ** 5) == "War", "wars did not make an age of war"
+            assert EA.choose_era(quiet, "War", 10 ** 5) == "Peace", "long quiet did not bring peace"
+            assert EA.choose_era(dict(quiet, bad=0.5), "Peace", 10 ** 5) == "Want", "failed harvests did not bring want"
+            assert EA.choose_era(dict(quiet, hungry=3), "Peace", 10 ** 5) == "Want", "kingdoms starving did not bring want"
+            assert EA.choose_era(dict(quiet, dark_dead=dark, discoveries=round(EA.WONDERS_RATE * EA.LOOK_BACK * 4 * 1.2)),
+                                 "Darkness", 10 ** 5) is None, "a strong age gave way to a weaker one"
+            assert EA.choose_era(dict(quiet, campaigns=1, dark_dead=dark // 4), "Peace", 10 ** 5) is None, \
+                "an ordinary stretch of years turned the age"
+            # a new era begins: chronicled by every living kingdom, its effects in force; a second one is named so
+            living = conn.execute("SELECT COUNT(*) FROM kingdoms WHERE world_id = ? AND status != 'Fallen'", (world_id,)).fetchone()[0]
+            before = conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Era'").fetchone()[0]
+            EA.begin_era(conn, world_id, "Darkness", "a test of the dark")
+            assert abs(EA.effect("plague") - EA.eras()["Darkness"]["effects"]["plague"]) < 1e-9, "the Age of Darkness did not make plague likelier"
+            assert conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type = 'Era'").fetchone()[0] == before + living, \
+                "not every living kingdom chronicled the new era"
+            assert EA.begin_era(conn, world_id, "Darkness").startswith("the Second Age"), "a second Age of Darkness is not named so"
+            assert EA.added("happiness", k["id"]) == EA.eras()["Darkness"]["effects"]["happiness"] + \
+                EA.PERIOD.get(k["id"], {}).get("happiness", 0), "the age's mood does not reach the people"
+            # a kingdom's own times: bread dear -> the Hungry Years, with their effects; cheap again -> they end
+            conn.execute("UPDATE kingdom_periods SET ended_day = ? WHERE kingdom_id = ? AND ended_day IS NULL", (day, k["id"]))
+            conn.execute("UPDATE kingdoms SET price_level = 2.0 WHERE id = ?", (k["id"],))
+            changes = EA.kingdom_periods(conn, world_id, day)
+            assert (k["id"], "hungry", "began") in changes, f"a kingdom with bread twice as dear entered no hungry years: {changes}"
+            EA.refresh(conn, world_id)
+            assert EA.added("happiness", k["id"]) == EA.eras()["Darkness"]["effects"]["happiness"] + EA.PERIOD_EFFECTS["hungry"]["happiness"], \
+                "the hungry years did not darken the kingdom's mood"
+            conn.execute("UPDATE kingdoms SET price_level = 1.0 WHERE id = ?", (k["id"],))
+            assert (k["id"], "hungry", "ended") in EA.kingdom_periods(conn, world_id, day + 360), "the hungry years did not end"
+            assert conn.execute("SELECT 1 FROM chronicle_entries WHERE kingdom_id = ? AND event_type = 'Era' AND text LIKE '%Hungry Years%'",
+                                (k["id"],)).fetchone(), "the hungry years were not chronicled"
+            # the yearly turn runs
+            EA.eras_year(conn, world_id)
+        finally:
+            conn.execute("DELETE FROM world_eras WHERE id > ?", (first_era,))
+            conn.execute("UPDATE world_eras SET ended_day = NULL WHERE id = ?", (first_era,))
+            conn.execute("DELETE FROM kingdom_periods WHERE id > ?", (first_period,))
+            conn.execute("UPDATE kingdoms SET price_level = ? WHERE id = ?", (k["price_level"], k["id"]))
+            EA.ensure_era(conn, world_id)
+            conn.commit()
+
+    run_step(r, "eras: the world opens at peace; darkness, war, want and quiet turn the age; every kingdom chronicles it; kingdoms have their own times",
+             eras_turn)
 
     def discoveries_spread():
         import Data.Research.discoveries as RS

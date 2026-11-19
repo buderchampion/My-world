@@ -27,7 +27,7 @@ ADULT_AGE, OLD_AGE = 16, 60
 def life_levels(conn, world_id, day):
     """{npc_id: the happiness their life sets} for every living person."""
     people = conn.execute(
-        """SELECT n.id, n.age, n.fed, n.gold, n.home_id, n.profession, n.needs_stress, n.city_id, n.disease, n.jailed_until,
+        """SELECT n.id, n.age, n.fed, n.gold, n.home_id, n.profession, n.needs_stress, n.city_id, n.disease, n.jailed_until, c.kingdom_id,
                   (SELECT alive FROM npcs s WHERE s.id = n.spouse_id) spouse_alive
            FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
            WHERE k.world_id = ? AND n.alive = 1""", (world_id,)).fetchall()
@@ -55,6 +55,7 @@ def life_levels(conn, world_id, day):
     unsafe = unsafe_towns(conn, world_id, day)
     from Data.Economy.prosperity import grand_towns
     cathedrals = grand_towns(conn, "Cathedral")
+    from Data.History.eras import added as era_added
 
     levels = {}
     for p in people:
@@ -86,6 +87,7 @@ def life_levels(conn, world_id, day):
             level += UNSAFE
         if p["city_id"] in cathedrals:
             level += CATHEDRAL
+        level += era_added("happiness", p["kingdom_id"])     # the age of the world, and the kingdom's own times
         level -= STRESS_WEIGHT * (p["needs_stress"] or 0)
         if p["age"] >= ADULT_AGE and (p["gold"] or 0) < POOR_BELOW:
             level += POOR

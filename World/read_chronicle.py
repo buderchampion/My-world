@@ -59,7 +59,12 @@ def main():
             print()
             continue
 
+        era = None
         for entry in entries:
+            if entry.get("era") and entry["era"] != era:       # a heading for each age of the world (Data.History.eras)
+                era = entry["era"]
+                print(f"~~ {era.upper()} ~~")
+                print()
             print(entry["text"])
             print()
 

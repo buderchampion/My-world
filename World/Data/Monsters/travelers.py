@@ -149,7 +149,8 @@ def beasts_on_the_roads(conn, world_id):
         return []
     from Data.Magic.magic import druid_homes, calmed, CALM_SHARE
     homes = druid_homes(conn, world_id)
-    chance = {lair["id"]: AMBUSH_CHANCE * (CALM_SHARE if calmed(lair, homes) else 1) for lair in lairs}
+    from Data.History.eras import effect                         # an Age of Darkness stirs them
+    chance = {lair["id"]: AMBUSH_CHANCE * effect("monsters") * (CALM_SHARE if calmed(lair, homes) else 1) for lair in lairs}
     reports = []
     reach2 = AMBUSH_REACH ** 2
     for kind, ident, x, y, row in on_the_road(conn, world_id):

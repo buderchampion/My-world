@@ -160,7 +160,8 @@ def scholars_research(conn, kingdom_id):
         best = conn.execute("SELECT COALESCE(MAX(level), 1) FROM npc_skills WHERE npc_id = ?", (npc_id,)).fetchone()[0]
         points = RESEARCH_PER_SCHOLAR * (1 + best / SKILL_STEP)
         total += points * (GREAT_LIBRARY if city_id in great else 1.0)
-    return total * (1 + bonus(kingdom_id, "research"))
+    from Data.History.eras import effect                         # an Age of Wonders
+    return total * (1 + bonus(kingdom_id, "research")) * effect("research")
 
 
 def research_month(conn, world_id):
@@ -194,6 +195,7 @@ def research_month(conn, world_id):
 
 def spread_year(conn, world_id):
     """Yearly: discoveries spread to trading partners and to neighbours at peace. Returns [(kingdom, name, how)]."""
+    from Data.History.eras import effect as era_effect
     living = [dict(r) for r in conn.execute(
         """SELECT k.id, c.map_x, c.map_y FROM kingdoms k JOIN cities c ON c.id = k.capital_city_id
            WHERE k.world_id = ? AND k.status != 'Fallen'""", (world_id,))]
@@ -214,7 +216,7 @@ def spread_year(conn, world_id):
                 continue
             for name in knows[a["id"]] - knows[b["id"]]:
                 needs = discoveries()[name]["needs"]
-                if all(n in knows[b["id"]] for n in needs) and random.random() < chance:
+                if all(n in knows[b["id"]] for n in needs) and random.random() < chance * era_effect("spread"):
                     if learn(conn, world_id, b["id"], name, how, a["id"]):
                         knows[b["id"]].add(name)
                         spread.append((b["id"], name, how))

@@ -512,3 +512,22 @@ CREATE TABLE IF NOT EXISTS kingdom_discoveries (
     from_kingdom_id  INTEGER REFERENCES kingdoms(id),
     UNIQUE (kingdom_id, discovery)
 );
+-- The world's eras (Data.History.eras): one open at a time (ended_day NULL).
+CREATE TABLE IF NOT EXISTS world_eras (
+    id         INTEGER PRIMARY KEY,
+    world_id   INTEGER NOT NULL REFERENCES worlds(id),
+    era        TEXT NOT NULL,                -- its kind, by its key in Data/History/Eras.json
+    name       TEXT NOT NULL,                -- "the Second Age of War"
+    began_day  INTEGER NOT NULL,
+    ended_day  INTEGER,
+    cause      TEXT
+);
+-- Each kingdom's notable periods (Data.History.eras): golden, troubles, hungry, mourning or wars.
+CREATE TABLE IF NOT EXISTS kingdom_periods (
+    id          INTEGER PRIMARY KEY,
+    kingdom_id  INTEGER NOT NULL REFERENCES kingdoms(id),
+    kind        TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    began_day   INTEGER NOT NULL,
+    ended_day   INTEGER
+);

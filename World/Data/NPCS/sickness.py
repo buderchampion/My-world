@@ -406,7 +406,8 @@ def plagues_break_out(conn, world_id):
     """Monthly: each plague may break out somewhere (its `outbreak` chance a year). Returns [(disease, city id)]."""
     out = []
     for name in plagues():
-        if random.random() < diseases()[name]["outbreak"] / 12:
+        from Data.History.eras import effect                     # an Age of Darkness, or of Faith
+        if random.random() < diseases()[name]["outbreak"] / 12 * effect("plague"):
             city = outbreak(conn, world_id, name)
             if city:
                 out.append((name, city))

@@ -428,7 +428,8 @@ def choose_war_target(conn, kingdom_id, candidates):
 
     favors = [get_kingdom_favor(conn, kingdom_id, other_id) for _, other_id in candidates]
 
-    if random.random() >= war_chance(favors):
+    from Data.History.eras import effect                    # the age of the world (Data.History.eras)
+    if random.random() >= war_chance(favors) * effect("war"):
         return None
 
     weights = [
