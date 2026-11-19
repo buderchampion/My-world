@@ -799,10 +799,11 @@
         "abilities": {
             "breath": {
                 "dice": [
-                    2,
-                    12
+                    1,
+                    6
                 ],
-                "targets": 1
+                "targets": 1,
+                "chance": 0.3
             }
         },
         "attitudes": {
@@ -913,8 +914,8 @@
             "resist_fire": 0.5,
             "rebuke": {
                 "dice": [
-                    2,
-                    20
+                    1,
+                    10
                 ],
                 "targets": 1
             }

@@ -7,7 +7,10 @@ Evil dragons    (black, blue, green, red, white) sleep on their hoards and do
                 within RAMPAGE_REACH -- the richest it can see, nearer ones
                 likelier. The townsfolk fight it by the book with everything
                 they have (Data.Combat.melee and its special attacks: a red
-                dragon's fire is its own hit points). If the dragon wins, it
+                dragon's fire is its own hit points) for RAMPAGE_ROUNDS; then
+                the dragon flies home -- unless slain, or hurt below
+                DRIVEN_OFF of its hit points (driven off: it takes nothing,
+                and less of the town burns). If the dragon wins, it
                 burns a share of the town, kills, and carries off TAKEN_GOLD of
                 the town's purse and TAKEN_FOOD of its stores to its hoard; the
                 town is afraid. If it falls, its slayer is the Dragonslayer and
@@ -52,7 +55,10 @@ import random
 WAKE_CHANCE = 0.2              # a year, for an evil dragon with a middling hoard (more if poor, less if rich)
 RICH_HOARD = 60000             # a hoard this big makes a dragon sleep half as often; half this, wake half again as often
 RAMPAGE_REACH = 1600
-SWORDS_FEARED = 5              # a town's worth to a dragon falls by half for every this many soldiers and guards in it
+RAMPAGE_ROUNDS = 4             # a rampage lasts this many rounds: the dragon burns, wheels, and flies home (long_run.py: fought to
+                               # the death, dragons fell to every town's casters -- three of three in five years)
+DRIVEN_OFF = 0.3               # a dragon brought this low flees with nothing
+SWORDS_FEARED = 5              # a town's worth to a dragon falls by half for every this many soldiers, guards and casters in it
 TAKEN_GOLD = 0.4               # of the town's purse, if the dragon wins
 TAKEN_FOOD = 0.15              # of its stores (cattle and grain)
 BURNED = (0.15, 0.45)          # the share of the town's buildings it burns...
@@ -334,11 +340,12 @@ def wake_chance(d):
 
 
 def choose_town(conn, world_id, d):
-    """A dragon is cunning: the richest settlement in reach for the fewest swords -- nearer ones likelier.
+    """A dragon is cunning: the richest settlement in reach for the fewest swords and spells -- nearer ones likelier.
     None if none in reach."""
     best, best_score = None, 0
     for c in conn.execute("""SELECT c.*, (SELECT COUNT(*) FROM npcs n WHERE n.city_id = c.id AND n.alive = 1
-                                         AND n.profession IN ('Knight', 'Captain', 'Soldier', 'Guard')) AS swords
+                                         AND (n.profession IN ('Knight', 'Captain', 'Soldier', 'Guard')
+                                              OR n.class IN ('Wizard', 'Sorcerer', 'Warlock', 'Cleric', 'Druid'))) AS swords
                              FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id
                              WHERE k.world_id = ? AND k.status != 'Fallen'""", (world_id,)).fetchall():
         dist = math.dist((c["map_x"], c["map_y"]), (d["map_x"], d["map_y"]))
@@ -369,8 +376,14 @@ def rampage(conn, world_id, d, city):
         _event(conn, "Dragon", f"{full_name(g)} came out of the sky to fight {full_name(d)} over {city['name']}.",
                city_id=city["id"], kingdom_id=city["kingdom_id"])
     side = defenders + [f for _, f in helpers]
-    result = melee.battle([beast], side) if side else {"winner": "a", "a": [beast], "b": [], "dead_a": [], "dead_b": []}
-    won = result["winner"] == "a"
+    # a dragon does not fight to the death: it burns and wheels for RAMPAGE_ROUNDS, then flies home with what it took --
+    # unless it is slain first, or so hurt (below DRIVEN_OFF of its hit points) that it flees empty-clawed
+    result = melee.battle([beast], side, max_rounds=RAMPAGE_ROUNDS) if side else \
+        {"winner": "a", "a": [beast], "b": [], "dead_a": [], "dead_b": []}
+    slain = beast.hp <= 0
+    won = not slain and (result["winner"] == "a" or beast.hp >= DRIVEN_OFF * beast.max_hp)
+    if not won and not slain:
+        return driven_off(conn, world_id, d, city, result, helpers, day)
     dead = _bury(conn, result["dead_b"], city["id"], f"slain by {full_name(d)}")
     militia_dead = sum(1 for f in result["dead_b"] if f.ref is None and f.name == "militia")
     if militia_dead and city["type"] == "Village":
@@ -432,6 +445,27 @@ def rampage(conn, world_id, d, city):
                    {"city": city["name"], "dragon": full_name(d), "slayer": full_name(standing[0])}, (standing[0]["id"], d["id"], day))
     conn.commit()
     return report
+
+
+def driven_off(conn, world_id, d, city, result, helpers, day):
+    """The town held: the dragon fled, hurt and empty-clawed. Some of the town still burned."""
+    from Data.World.disasters import _damage, _afraid
+    from Data.Combat.specials import aftermath
+    dead = _bury(conn, result["dead_b"], city["id"], f"slain by {full_name(d)}")
+    for g, f in helpers:
+        if f.hp <= 0:
+            _slain(conn, g, day, f"slain by {full_name(d)} over {city['name']}")
+    aftermath(conn, [f for f in result.get("b", [])])
+    burned = _damage(conn, city["id"], random.uniform(*BURNED) / 2, BURN_DAMAGE)
+    _afraid(conn, city["id"], day)
+    conn.execute("UPDATE dragons SET woke_day = ?, attacks = attacks + 1 WHERE id = ?", (day, d["id"]))
+    text = f"{full_name(d)} fell on {city['name']} but was driven off, wounded, with nothing; {burned} buildings burned, {dead} killed."
+    event_id = _event(conn, "Dragon Attack", text, city_id=city["id"], kingdom_id=city["kingdom_id"])
+    _chronicle(conn, world_id, city["kingdom_id"], "Dragon Attack (driven off)",
+               {"city": city["name"], "dragon": full_name(d), "dead": dead}, (d["id"], day), event_id)
+    conn.commit()
+    return {"dragon": d["id"], "city": city["id"], "won": False, "dead": dead, "gold": 0.0, "slain": False, "driven_off": True,
+            "helpers": [g["id"] for g, _ in helpers]}
 
 
 def killer_of(report):

@@ -280,10 +280,10 @@ def racial_powers(race):
     out = []
     if a.get("breath"):
         out.append((0, "Dragon Breath", {"effect": "damage", "dice": a["breath"]["dice"], "targets": a["breath"]["targets"],
-                                         "save_half": True}))
+                                         "save_half": True, "chance": a["breath"].get("chance")}))
     if a.get("rebuke"):
         out.append((0, "Hellish Rebuke", {"effect": "damage", "dice": a["rebuke"]["dice"], "targets": a["rebuke"]["targets"],
-                                          "save_half": True}))
+                                          "save_half": True, "after_hurt": True}))     # a reaction: only once struck
     return out
 
 

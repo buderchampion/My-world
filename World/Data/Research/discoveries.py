@@ -41,12 +41,13 @@ from pathlib import Path
 
 DISCOVERIES_FILE = Path(__file__).resolve().parent / "Discoveries.json"
 
-RESEARCH_PER_SCHOLAR = 2.0     # research points a month, a scholar of little learning...
+RESEARCH_PER_SCHOLAR = 0.4     # research points a month, a scholar of little learning... (long_run.py: at 2.0, six
+                               # kingdoms knew 31 discoveries by the second year; now about one each every few years)
 SKILL_STEP = 10                # ...and as much again for every this many levels of their best skill
 GREAT_LIBRARY = 1.5            # scholars in a town with a Great Library work this much faster
 KNOWN_NEARBY = 0.5             # a discovery a trading partner knows costs this share
-SPREAD_TRADE = 0.15            # a year, for each discovery a trading partner knows
-SPREAD_FAIR = 0.05             # a year, for each discovery a neighbour at peace knows
+SPREAD_TRADE = 0.05            # a year, for each discovery a trading partner knows
+SPREAD_FAIR = 0.02             # a year, for each discovery a neighbour at peace knows
 FAIR_REACH = 2000
 CONQUEST_LEARN = 0.5           # each of the conquered's discoveries, when a town is taken
 DEAR_FOOD = 1.3                # a kingdom whose food is this dear studies farming first

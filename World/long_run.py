@@ -159,8 +159,11 @@ def year_events(conn, world_id, first_day, last_day, before_max_id):
     e["events"] = Counter(dict(conn.execute(
         "SELECT type, COUNT(*) FROM events WHERE day BETWEEN ? AND ? GROUP BY type", (first_day, last_day)).fetchall()))
     crimes = conn.execute("""SELECT COUNT(*), COALESCE(SUM(caught), 0), COALESCE(SUM(punishment = 'gallows'), 0)
-                             FROM crimes WHERE world_id = ? AND day BETWEEN ? AND ?""", (world_id, first_day, last_day)).fetchone()
+                             FROM crimes WHERE world_id = ? AND kind = 'Theft' AND day BETWEEN ? AND ?""",
+                          (world_id, first_day, last_day)).fetchone()
     e["thefts"], e["caught"], e["hanged"] = crimes
+    e["smuggled"] = conn.execute("""SELECT COUNT(*), COALESCE(SUM(caught), 0) FROM crimes WHERE world_id = ? AND kind = 'Smuggling'
+                                    AND day BETWEEN ? AND ?""", (world_id, first_day, last_day)).fetchone()
     e["plagues"] = conn.execute("""SELECT disease, COUNT(*), COALESCE(SUM(dead), 0) FROM outbreaks WHERE world_id = ?
                                    AND started_day BETWEEN ? AND ? GROUP BY disease""", (world_id, first_day, last_day)).fetchall()
     return e
@@ -191,7 +194,8 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
     p = s["prosperity"]
     if p and p[0] is not None:
         lines.append(f"Towns    prosperity avg {p[0]:.0f} (from {p[1]:.0f} to {p[2]:.0f}); {s['grand']} grand buildings; "
-                     f"{s['guilds']} thieves' guilds; thefts {e['thefts']}, caught {e['caught']}, hanged {e['hanged']}")
+                     f"{s['guilds']} thieves' guilds; thefts {e['thefts']}, caught {e['caught']}, hanged {e['hanged']}; "
+                     f"smuggling runs {e['smuggled'][0]}, caught {e['smuggled'][1]}")
     if e["plagues"]:
         lines.append("Plagues  " + ", ".join(f"{d} in {n} kingdom(s) ({dead} dead)" for d, n, dead in e["plagues"]))
     ev = e["events"]
