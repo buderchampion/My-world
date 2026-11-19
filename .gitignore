@@ -4,6 +4,7 @@ world.db-wal
 world.db-shm
 *.db-wal
 *.db-shm
+World/Saves/*
 
 # Python
 __pycache__/
