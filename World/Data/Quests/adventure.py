@@ -52,7 +52,10 @@ ADVENTURING_CLASSES = ("Fighter", "Barbarian", "Ranger", "Rogue", "Paladin", "Wi
                        "Cleric", "Druid", "Bard", "Monk")
 TAKE_UP = 0.15                  # a month, for each idle young person of an adventuring class in a town with room...
 TAKE_UP_WORKER = 0.08           # ...and for one who has a trade but would rather adventure
-ADVENTURERS_PER_TAVERN = 3
+ADVENTURERS_PER_TAVERN = 5     # (3 before the jobless could choose adventuring)
+JOBLESS_CHOOSE = 0.0087         # a month (about 1 in 10 a year), for a jobless youth to choose adventuring over day labour --
+JOBLESS_FROM, JOBLESS_TO = 16, 30   # more for the bold and curious (CHOOSE_PULL); they take an adventuring class they meet
+CHOOSE_PULL = 0.5
 KEEP_TO_TRADE = ("Child", "Adventurer", "Knight", "Captain", "Soldier", "Guard", "Priest", "Healer", "Mage", "Scholar",
                  "Thief", "Smuggler", "Bandit", "innkeeper")   # the sworn, the ordained, the learned and the criminal stay put
 YOUNGEST, OLDEST_RECRUIT = 18, 35
@@ -199,14 +202,17 @@ def reward(conn, ids, gold, renown, xp=0):
     for i in ids:
         conn.execute("UPDATE npcs SET gold = gold + ?, renown = COALESCE(renown, 0) + ? WHERE id = ?", (share, renown, i))
         if xp:
+            from Data.NPCS.abilities import prime_bonus, of     # a prime requisite of 16 or more: +10% (the book)
+            who = conn.execute("SELECT * FROM npcs WHERE id = ?", (i,)).fetchone()
+            gain = round(xp * (1 + prime_bonus(who["class"], of(who)))) if who else xp
             row = conn.execute("SELECT level, xp FROM npc_skills WHERE npc_id = ? AND skill_name = 'Swordsmanship'", (i,)).fetchone()
             if row:
                 skill = {"level": row[0], "xp": row[1] or 0}
-                add_skill_xp(skill, xp)
+                add_skill_xp(skill, gain)
                 conn.execute("UPDATE npc_skills SET level = ?, xp = ? WHERE npc_id = ? AND skill_name = 'Swordsmanship'",
                              (skill["level"], skill["xp"], i))
             else:
-                conn.execute("INSERT INTO npc_skills (npc_id, skill_name, level, xp) VALUES (?, 'Swordsmanship', 1, ?)", (i, xp))
+                conn.execute("INSERT INTO npc_skills (npc_id, skill_name, level, xp) VALUES (?, 'Swordsmanship', 1, ?)", (i, gain))
     from Data.Combat.nemesis import CHAMPION_RENOWN, display_name
     for i in ids:
         r = conn.execute("SELECT renown, city_id FROM npcs WHERE id = ?", (i,)).fetchone()
@@ -255,7 +261,37 @@ def take_up_adventuring(conn, world_id):
                 room -= 1
                 conn.execute("UPDATE npcs SET profession = 'Adventurer', workplace_id = NULL WHERE id = ?", (npc_id,))
                 taken += 1
+        if room > 0:
+            taken += jobless_choose(conn, town["id"], room)
     conn.commit()
+    return taken
+
+
+def jobless_choose(conn, town_id, room):
+    """The jobless young of a town (with no class yet) may choose adventuring over day labour -- the bold and the
+    curious more readily -- taking an adventuring class their scores meet (Data.NPCS.abilities). Returns how many."""
+    from Data.History.eras import effect
+    from Data.NPCS import abilities as AB
+    from Data.NPCS.personality import calling, TRAITS
+    from Data.Economy.jobs import _new_class
+    taken = 0
+    for row in conn.execute(
+            """SELECT * FROM npcs WHERE city_id = ? AND alive = 1 AND profession = 'Laborer' AND spouse_id IS NULL
+               AND age BETWEEN ? AND ? AND jailed_until IS NULL AND title IS NULL AND class IN ('None', '')
+               AND strength IS NOT NULL ORDER BY RANDOM()""", (town_id, JOBLESS_FROM, JOBLESS_TO)).fetchall():
+        if taken >= room:
+            break
+        pull = 1 + CHOOSE_PULL * (max(0, row["boldness"] or 0) + max(0, row["curiosity"] or 0)) / 200
+        if random.random() >= JOBLESS_CHOOSE * pull * effect("adventure"):
+            continue
+        npc_class = _new_class(conn, row["id"], row["race"], "Adventurer")
+        if npc_class in (None, "None"):
+            continue                                       # no adventuring class they are fit for: day labour it is
+        conn.execute("UPDATE npcs SET profession = 'Adventurer', class = ?, workplace_id = NULL WHERE id = ?", (npc_class, row["id"]))
+        from Data.NPCS.npc_generator import load_json, CLASS_FILE     # the beginnings of their class's skills
+        for skill in load_json(CLASS_FILE).get(npc_class, {}).get("skills", []):
+            conn.execute("INSERT OR IGNORE INTO npc_skills (npc_id, skill_name, level, xp) VALUES (?, ?, 1, 0)", (row["id"], skill))
+        taken += 1
     return taken
 
 

@@ -634,6 +634,10 @@ class SimulationManager:
         from Data.Research.discoveries import spread_year
         spread_year(self.conn, self.world_id)
 
+        # The young train their trade's ability; the aging feel their years (Data.NPCS.abilities).
+        from Data.NPCS.abilities import abilities_year
+        abilities_year(self.conn, self.world_id)
+
         # The age of the world may turn, and each kingdom's own times begin or end (Data.History.eras).
         from Data.History.eras import eras_year
         eras_year(self.conn, self.world_id)

@@ -200,3 +200,173 @@ def describe(scores):
     strength = f"18/{'00' if pct >= 100 else f'{pct:02d}'}" if s == HIGHEST and pct else str(s)
     return (f"Str {strength} Int {scores['intelligence']} Wis {scores['wisdom']} Dex {scores['dexterity']} "
             f"Con {scores['constitution']} Cha {scores['charisma']}")
+
+
+# ---------------------------------------------------------------- what the scores do (the book's tables)
+
+def _band(value, table):
+    """The entry of a [(highest score, value), ...] table for this score."""
+    for top, v in table:
+        if value <= top:
+            return v
+    return table[-1][1]
+
+
+STRENGTH_TABLE = [(3, (-3, -1)), (5, (-2, -1)), (7, (-1, 0)), (15, (0, 0)), (16, (0, 1)), (17, (1, 1)), (18, (1, 2))]
+EXCEPTIONAL_TABLE = [(50, (1, 3)), (75, (2, 3)), (90, (2, 4)), (99, (2, 5)), (100, (3, 6))]
+DEXTERITY_AC = [(3, 4), (4, 3), (5, 2), (6, 1), (14, 0), (15, -1), (16, -2), (17, -3), (19, -4)]
+CONSTITUTION_HP = [(3, -2), (6, -1), (14, 0), (15, 1), (16, 2), (19, 2)]
+FIGHTER_CONSTITUTION_HP = {17: 3, 18: 4, 19: 5}            # fighters alone gain more at 17 and up
+WISDOM_SAVE = [(3, -3), (4, -2), (7, -1), (14, 0), (15, 1), (16, 2), (17, 3), (19, 4)]
+AGING = [(41, {"strength": -1, "constitution": -1, "intelligence": 1, "wisdom": 1}),               # middle age
+         (61, {"strength": -2, "dexterity": -2, "constitution": -1, "wisdom": 1}),                 # old
+         (91, {"strength": -1, "dexterity": -1, "constitution": -1, "intelligence": 1, "wisdom": 1})]  # venerable
+SICKNESS_PER_POINT = 0.10      # each point of Constitution's hit-point bonus takes this share off a sickness's daily harm
+RESEARCH_PER_POINT = 0.05      # each point of Intelligence above 10 adds this to a scholar's research (below 10, takes it)
+
+
+def strength_bonus(scores):
+    """(to hit, damage) for this Strength (exceptional Strength for those who have it)."""
+    if not scores:
+        return 0, 0
+    if scores["strength"] >= HIGHEST and scores.get("strength_pct"):
+        return _band(scores["strength_pct"], EXCEPTIONAL_TABLE)
+    return _band(scores["strength"], STRENGTH_TABLE)
+
+
+def dexterity_ac(scores):
+    """Armor class adjustment (negative is better)."""
+    return _band(scores["dexterity"], DEXTERITY_AC) if scores else 0
+
+
+def constitution_hp(scores, npc_class=None):
+    """Hit points added (or taken) per level."""
+    if not scores:
+        return 0
+    con = scores["constitution"]
+    if npc_class in table()["exceptional"] and con in FIGHTER_CONSTITUTION_HP:
+        return FIGHTER_CONSTITUTION_HP[con]
+    return _band(con, CONSTITUTION_HP)
+
+
+def wisdom_save(scores):
+    """Saving throw adjustment against charm, fear and other attacks on the mind."""
+    return _band(scores["wisdom"], WISDOM_SAVE) if scores else 0
+
+
+def sickness_factor(scores):
+    """How much of a sickness's daily harm this Constitution takes (Con 16: 0.8, Con 3: 1.2)."""
+    return 1.0 - SICKNESS_PER_POINT * constitution_hp(scores) if scores else 1.0
+
+
+def research_factor(scores):
+    """A scholar's research by Intelligence (Int 18: 1.4, Int 10: 1.0, Int 6: 0.8)."""
+    return max(0.5, 1.0 + RESEARCH_PER_POINT * (scores["intelligence"] - 10)) if scores else 1.0
+
+
+def bonus_spells(scores, npc_class):
+    """A cleric's or druid's extra first- and second-level spells a day for high Wisdom (the book: 13 and 14 give
+    first-level spells, 15 and 16 second-level). Returns [extra first, extra second]."""
+    if not scores or npc_class not in ("Cleric", "Druid"):
+        return [0, 0]
+    wis = scores["wisdom"]
+    return [(wis >= 13) + (wis >= 14), (wis >= 15) + (wis >= 16)]
+
+
+# ---------------------------------------------------------------- scores that change: training, deeds, hardship, age
+
+TRAIN_UNTIL = 25               # the young train: life stage 16 to this
+TRAIN_FROM = 16
+TRAIN_CHANCE = 0.12            # a year, for someone of middling diligence (doubled for the most diligent, none for the idlest;
+                               # half again for the boldest)
+TRAIN_CAP = 2                  # training raises any one score at most this much in a lifetime
+DEED_CHANCE = 0.03             # surviving a fight: this often +1 Strength or Constitution...
+HARDSHIP_CHANCE = 0.05         # ...pulling through a sickness: this often +1 Constitution
+DEED_CAP = 1                   # deeds and hardship raise any one score at most this much in a lifetime
+TRADE_SCORE = {                # the score a trade trains
+    "Soldier": "strength", "Guard": "strength", "Captain": "strength", "Knight": "strength", "Blacksmith": "strength",
+    "Armorer": "strength", "Miner": "strength", "Quarrier": "strength", "Smelter": "strength", "Farmer": "strength",
+    "Carpenter": "strength", "Baker": "constitution", "Miller": "constitution",
+    "Thief": "dexterity", "Smuggler": "dexterity", "Hunter": "dexterity", "Fisherman": "dexterity", "Tailor": "dexterity",
+    "Scholar": "intelligence", "Mage": "intelligence", "Alchemist": "intelligence",
+    "Priest": "wisdom", "Healer": "wisdom",
+    "Merchant": "charisma", "innkeeper": "charisma", "Bandit": "strength",
+}
+
+
+def _gains(row):
+    try:
+        return json.loads(row["ability_gains"] or "{}")
+    except (KeyError, IndexError, TypeError, ValueError):
+        return {}
+
+
+def grow(conn, npc_id, ability, how="train"):
+    """+1 to a score -- by training (how 'train', at most TRAIN_CAP a lifetime) or by deeds and hardship ('deed',
+    at most DEED_CAP) -- never past their people's maximum. Returns True if it rose."""
+    row = conn.execute(f"SELECT race, {ability}, ability_gains FROM npcs WHERE id = ?", (npc_id,)).fetchone()
+    if not row or row[ability] is None:
+        return False
+    gains = _gains(row)
+    key = f"{how}:{ability}"
+    if gains.get(key, 0) >= (TRAIN_CAP if how == "train" else DEED_CAP) or row[ability] >= limits(row["race"], ability)[1]:
+        return False
+    gains[key] = gains.get(key, 0) + 1
+    conn.execute(f"UPDATE npcs SET {ability} = {ability} + 1, ability_gains = ? WHERE id = ?", (json.dumps(gains), npc_id))
+    return True
+
+
+def deeds(conn, fighters):
+    """After a fight: each named survivor may come out of it stronger or hardier."""
+    for f in fighters:
+        if f.ref is None or not getattr(f, "race", "") or f.hp <= 0:
+            continue
+        if random.random() < DEED_CHANCE:
+            grow(conn, f.ref, random.choice(("strength", "constitution")), "deed")
+
+
+def hardship(conn, npc_id):
+    if random.random() < HARDSHIP_CHANCE:
+        grow(conn, npc_id, "constitution", "deed")
+
+
+def trains(row):
+    """The score this person's trade (or, for an adventurer, their class's first prime requisite) trains."""
+    if row["profession"] == "Adventurer":
+        prime = (table()["classes"].get(row["class"]) or {}).get("prime") or ["strength"]
+        return prime[0]
+    return TRADE_SCORE.get(row["profession"])
+
+
+def age_shift(conn, row):
+    """The book's aging: on reaching middle age, old age and venerable age, scores shift (within their people's
+    limits). Returns how many stages were applied."""
+    reached = sum(1 for at, _ in AGING if row["age"] >= at)
+    done = row["ability_age"] or 0
+    if reached <= done or row["strength"] is None:
+        return 0
+    scores = {a: row[a] for a in ABILITIES}
+    for _, shift in AGING[done:reached]:
+        for a, d in shift.items():
+            scores[a] += d
+    scores = fit(row["race"], scores)
+    pct = row["strength_pct"] if scores["strength"] >= HIGHEST else 0
+    conn.execute(f"UPDATE npcs SET {', '.join(a + ' = ?' for a in ABILITIES)}, strength_pct = ?, ability_age = ? WHERE id = ?",
+                 (*[scores[a] for a in ABILITIES], pct, reached, row["id"]))
+    return reached - done
+
+
+def abilities_year(conn, world_id):
+    """Yearly: the young train (by diligence); the aging feel their years. Returns {"trained", "aged"}."""
+    trained = aged = 0
+    for row in conn.execute(
+            """SELECT n.* FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND n.alive = 1 AND n.strength IS NOT NULL""", (world_id,)).fetchall():
+        aged += age_shift(conn, row) > 0
+        if TRAIN_FROM <= row["age"] <= TRAIN_UNTIL and row["jailed_until"] is None:
+            ability = trains(row)
+            drive = (1 + (row["diligence"] or 0) / 100) * (1 + max(0, row["boldness"] or 0) / 200)   # the diligent and bold train harder
+            if ability and random.random() < TRAIN_CHANCE * drive and grow(conn, row["id"], ability):
+                trained += 1
+    conn.commit()
+    return {"trained": trained, "aged": aged}

@@ -106,6 +106,8 @@ class Fighter:
     cause: str = ""                # how it died, when a special attack killed it
     fx: dict = field(default_factory=dict)         # what specials have left on it: drained levels, grips, sickness...
     max_engaged: int = 0           # at most this many foes can strike it in a round (a dragon on the wing); 0: no limit
+    damage_bonus: int = 0          # Strength's damage bonus (Data.NPCS.abilities), on every blow
+    wis_save: int = 0              # Wisdom's saving throw bonus against fear, charm and the like
 
     def __post_init__(self):
         self.max_hp = self.max_hp or self.hp
@@ -157,8 +159,18 @@ def person_fighter(npc, side="people", armored=False, skills=None):
     from Data.Magic.magic import casting_level, arm_caster       # casters fight with their spells
     casting = casting_level(npc.get("class"), npc.get("profession"), skills, race)
     if casting:
-        arm_caster(fighter, npc.get("class"), casting, npc.get("id"))
+        arm_caster(fighter, npc.get("class"), casting, npc.get("id"), npc.get("wisdom"))
     fighter.spells = fighter.spells + races.racial_powers(race)    # a dragonborn's breath, a tiefling's rebuke
+    from Data.NPCS import abilities                                 # the book's Strength, Dexterity, Constitution, Wisdom
+    scores = abilities.of(npc)
+    if scores:
+        hit, damage = abilities.strength_bonus(scores)
+        fighter.to_hit += hit
+        fighter.damage_bonus = damage
+        fighter.ac += abilities.dexterity_ac(scores)
+        per_level = abilities.constitution_hp(scores, npc.get("class"))
+        fighter.hp = fighter.max_hp = max(1.0, fighter.hp + per_level * max(1, level, fighter.caster_level))
+        fighter.wis_save = abilities.wisdom_save(scores)
     return fighter
 
 
@@ -176,7 +188,7 @@ def attack_all(attacker, target, rnd=0):
     for i, (lo, hi) in enumerate(attacker.attacks):
         die = random.randint(1, 20)
         if target.held or die == 20 or (die != 1 and die + attacker.to_hit + edge >= attacker.thac0 - target.ac):
-            blow = roll(lo, hi) * attacker.damage_scale
+            blow = max(1, roll(lo, hi) + attacker.damage_bonus) * attacker.damage_scale
             done += blow
             hits.append(i)
             if attacker.specials:

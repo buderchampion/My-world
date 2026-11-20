@@ -154,11 +154,14 @@ def scholars_research(conn, kingdom_id):
     from Data.Economy.prosperity import grand_towns
     great = set(grand_towns(conn, "Great Library"))
     total = 0.0
-    for npc_id, city_id in conn.execute(
-            """SELECT n.id, n.city_id FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1
+    from Data.NPCS.abilities import research_factor
+    for npc_id, city_id, intelligence in conn.execute(
+            """SELECT n.id, n.city_id, n.intelligence FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1
                AND n.profession = 'Scholar' AND n.workplace_id IS NOT NULL AND n.jailed_until IS NULL""", (kingdom_id,)).fetchall():
         best = conn.execute("SELECT COALESCE(MAX(level), 1) FROM npc_skills WHERE npc_id = ?", (npc_id,)).fetchone()[0]
         points = RESEARCH_PER_SCHOLAR * (1 + best / SKILL_STEP)
+        if intelligence is not None:                           # a sharp mind works faster (Data.NPCS.abilities)
+            points *= research_factor({"intelligence": intelligence})
         total += points * (GREAT_LIBRARY if city_id in great else 1.0)
     from Data.History.eras import effect                         # an Age of Wonders
     return total * (1 + bonus(kingdom_id, "research")) * effect("research")

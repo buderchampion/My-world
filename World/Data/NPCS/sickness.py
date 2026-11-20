@@ -77,7 +77,7 @@ def _people(conn, world_id):
     """Every living person: {id: row} with what sickness needs to know."""
     return {r["id"]: r for r in conn.execute(
         """SELECT n.id, n.city_id, n.home_id, n.workplace_id, n.age, n.fed, n.health, n.disease, n.disease_days,
-                  n.disease_severity, n.profession, c.kingdom_id, c.type city_type,
+                  n.disease_severity, n.profession, n.constitution, c.kingdom_id, c.type city_type,
                   (b.type = 'Slums') in_slums
            FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
            LEFT JOIN buildings b ON b.id = n.home_id
@@ -225,7 +225,7 @@ def cure(conn, world_id, people, away):
     for c in casters(conn, world_id, ("Cleric", "Druid", "Bard"), city_ids=set(sick_by_city)):
         if c["id"] in away or c["profession"] not in MAGIC_TRADES:
             continue                       # Cure Disease is a learned rite: hedge casters do not have it
-        spells = [s for s in prepare(c["class"], c["level"], c["id"], wanted={"cure_disease"}) if s[2]["effect"] == "cure_disease"]
+        spells = [s for s in prepare(c["class"], c["level"], c["id"], wanted={"cure_disease"}, wisdom=c.get("wisdom")) if s[2]["effect"] == "cure_disease"]
         patients = sorted((p for p in sick_by_city[c["city_id"]] if p["disease"] and p["id"] not in fresh), key=lambda p: p["health"])
         for _ in spells:
             if not patients:
@@ -265,6 +265,9 @@ def run_course(conn, world_id, people, day, away):
         if not d:
             continue
         harm = d["harm"] * (p["disease_severity"] or 1.0) * _frailty(p)
+        if p["constitution"] is not None:                    # a hardy constitution suffers less (Data.NPCS.abilities)
+            from Data.NPCS.abilities import sickness_factor
+            harm *= sickness_factor({"constitution": p["constitution"]})
         from Data.Research.discoveries import city_bonus             # herbal lore and physicians' learning
         harm *= max(0.1, 1 + city_bonus(p["city_id"], "sickness"))
         if (p["fed"] if p["fed"] is not None else 1.0) < HUNGRY_FED:
@@ -284,6 +287,8 @@ def run_course(conn, world_id, people, day, away):
             until = None if d["immune_days"] is None else day + d["immune_days"]
             conn.execute("INSERT INTO npc_immunities (npc_id, disease, until_day) VALUES (?, ?, ?)", (p["id"], p["disease"], until))
             well.append(p["id"])
+            from Data.NPCS.abilities import hardship              # what does not kill them may harden them
+            hardship(conn, p["id"])
         else:
             conn.execute("UPDATE npcs SET health = ?, disease_days = ? WHERE id = ?", (round(health, 2), days, p["id"]))
     return dead, well

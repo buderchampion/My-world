@@ -96,8 +96,9 @@ def casting_level(npc_class, profession, skills, race=None):
     return min(MAX_CASTING_LEVEL, level)
 
 
-def per_day(npc_class, level):
-    """Spells a day of each spell level: [first, second, ...]."""
+def per_day(npc_class, level, wisdom=None):
+    """Spells a day of each spell level: [first, second, ...] -- with a cleric's or druid's bonus spells for high
+    Wisdom (Data.NPCS.abilities)."""
     if level <= 0 or npc_class not in CASTERS:
         return []
     table = spells()["Spells per day"]["Bard" if npc_class == "Bard" else
@@ -106,6 +107,11 @@ def per_day(npc_class, level):
     slots = list(table[str(min(level, MAX_CASTING_LEVEL))])
     if npc_class == "Sorcerer":
         slots = [n + 1 for n in slots]
+    if wisdom is not None:
+        from Data.NPCS.abilities import bonus_spells
+        for i, extra in enumerate(bonus_spells({"wisdom": wisdom}, npc_class)):
+            if i < len(slots):                                 # bonus spells only of levels they can already cast
+                slots[i] += extra
     return slots
 
 
@@ -118,10 +124,10 @@ def known(npc_class, ident=None):
     return {lvl: rng.sample(sorted(v), min(SORCERER_KINDS, len(v))) for lvl, v in book.items()}
 
 
-def prepare(npc_class, level, ident=None, wanted=None):
+def prepare(npc_class, level, ident=None, wanted=None, wisdom=None):
     """The day's spells: [(spell level, name, spell)]. `wanted` (a set of effects) prefers those kinds:
     a caster heading into a fight prepares harm and healing, not plant growth."""
-    slots = per_day(npc_class, level)
+    slots = per_day(npc_class, level, wisdom)
     if not slots:
         return []
     book = spell_list(CASTERS[npc_class][0])
@@ -330,12 +336,12 @@ def inspiration(npc_class, level):
 BATTLE_SPELLS = set(OFFENSIVE) | {"heal", "bless", "shield", "weapon"}
 
 
-def arm_caster(fighter, npc_class, level, ident=None):
+def arm_caster(fighter, npc_class, level, ident=None, wisdom=None):
     """Gives a fighter their casting: the day's battle spells, a caster's hit points, a bard's song."""
     fighter.caster_level = level
     if level <= 0:
         return fighter
-    fighter.spells = prepare(npc_class, level, ident, wanted=BATTLE_SPELLS)
+    fighter.spells = prepare(npc_class, level, ident, wanted=BATTLE_SPELLS, wisdom=wisdom)
     fighter.inspires = inspiration(npc_class, level)
     hp = HIT_DIE.get(CASTERS[npc_class][0], 2.5) * level
     if hp > fighter.hp:
@@ -351,7 +357,7 @@ def casters(conn, world_id, classes=None, city_ids=None):
     classes = list(classes or CASTERS)
     marks = ",".join("?" * len(classes))
     rows = conn.execute(
-        f"""SELECT n.id, n.name, n.class, n.profession, n.city_id, n.health, n.race, s.skill_name, s.level
+        f"""SELECT n.id, n.name, n.class, n.profession, n.city_id, n.health, n.race, n.wisdom, s.skill_name, s.level
             FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
             JOIN npc_skills s ON s.npc_id = n.id
             WHERE k.world_id = ? AND n.alive = 1 AND n.age >= 16 AND n.class IN ({marks})""",
@@ -363,14 +369,14 @@ def casters(conn, world_id, classes=None, city_ids=None):
         level = casting_level(r["class"], r["profession"], {r["skill_name"]: r["level"]}, r["race"])
         if level > 0 and (city_ids is None or r["city_id"] in city_ids):
             found[r["id"]] = {"id": r["id"], "name": r["name"], "class": r["class"], "profession": r["profession"],
-                              "city_id": r["city_id"], "health": r["health"], "level": level}
+                              "city_id": r["city_id"], "health": r["health"], "level": level, "wisdom": r["wisdom"]}
     return list(found.values())
 
 
-def healing_spells(npc_class, level, ident=None):
+def healing_spells(npc_class, level, ident=None, wisdom=None):
     """The cure spells a caster has today, as (low, high, bonus)."""
     return [(sp["dice"][0], sp["dice"][1], sp.get("bonus", 0))
-            for _, _, sp in prepare(npc_class, level, ident, wanted={"heal"}) if sp["effect"] == "heal"]
+            for _, _, sp in prepare(npc_class, level, ident, wanted={"heal"}, wisdom=wisdom) if sp["effect"] == "heal"]
 
 
 def heal(conn, healers, wounded_ids):
@@ -382,7 +388,7 @@ def heal(conn, healers, wounded_ids):
         f"SELECT id, health FROM npcs WHERE alive = 1 AND health < 100 AND disease IS NULL AND id IN ({marks})", list(wounded_ids))}
     restored = 0
     for h in healers:
-        for lo, hi, bonus in healing_spells(h["class"], h["level"], h["id"]):
+        for lo, hi, bonus in healing_spells(h["class"], h["level"], h["id"], h.get("wisdom")):
             if not hurt:
                 break
             worst = min(hurt, key=hurt.get)

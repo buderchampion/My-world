@@ -114,11 +114,12 @@ def _ability(f, key, default=0):
     return abilities(race).get(key, default)
 
 
-def save(f, kind, mod=0):
-    """Does `f` make its saving throw of this kind? kind None: there is no save."""
+def save(f, kind, mod=0, mental=False):
+    """Does `f` make its saving throw of this kind? kind None: there is no save. `mental`: an attack on the mind
+    (fear, charm, a mind blast), against which Wisdom helps (Data.NPCS.abilities)."""
     if kind is None:
         return False
-    bonus = mod
+    bonus = mod + (getattr(f, "wis_save", 0) if mental else 0)
     if kind in ("spell", "wand"):
         bonus += _ability(f, "save_vs_magic")
     if kind == "poison":
@@ -207,7 +208,7 @@ def opening(side_a, side_b):
                     for foe in _alive(theirs):
                         if spec.get("max_level") is not None and (foe.hit_dice or 0) > spec["max_level"]:
                             continue                                # dragon awe: only the untrained break at the sight
-                        if not foe.mindless and not save(foe, spec.get("save", "spell")):
+                        if not foe.mindless and not save(foe, spec.get("save", "spell"), mental=True):
                             afflict(foe, "fear", f)
                             if spec.get("age"):
                                 foe.fx["aged"] = foe.fx.get("aged", 0) + roll(spec["age"])
@@ -255,7 +256,7 @@ def _gaze(f, spec, foes):
     targets = [x for x in _alive(foes) if not x.held]
     random.shuffle(targets)
     for foe in targets[:spec.get("targets", 1)]:
-        if not save(foe, spec.get("save", "spell"), spec.get("save_mod", 0)):
+        if not save(foe, spec.get("save", "spell"), spec.get("save_mod", 0), mental=spec["effect"] in ("charm", "fear", "confuse")):
             afflict(foe, spec["effect"], f, spec.get("word", "gaze"), spec.get("rounds"))
 
 
@@ -323,7 +324,7 @@ def act(f, allies, foes, rnd):
             targets = _alive(foes)
             random.shuffle(targets)
             for foe in targets[:spec.get("targets", 4)]:
-                if not foe.mindless and not save(foe, spec.get("save", "spell")):
+                if not foe.mindless and not save(foe, spec.get("save", "spell"), mental=True):
                     foe.stunned = max(foe.stunned, roll(spec.get("rounds", (3, 12))))
             return True
     return False
@@ -534,4 +535,6 @@ def aftermath(conn, fighters):
             from Data.NPCS.sickness import catch
             catch(conn, f.ref, f.fx["illness"])
             out["sick"] += 1
+    from Data.NPCS.abilities import deeds                      # and what they came through may have made them stronger
+    deeds(conn, fighters)
     return out

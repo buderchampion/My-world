@@ -74,6 +74,9 @@ def apply_workday(npc, tax_rate: float = 0.0) -> float:
 
     npc["gold"] = round(npc.get("gold", 0) + take_home, 2)
 
+    from Data.NPCS.abilities import prime_bonus, of     # a prime requisite of 16 or more: +10% (the book)
+    xp_multiplier *= 1 + prime_bonus(npc.get("class"), of(npc))
+
     for skill in npc.get("skills", {}).values():
         add_skill_xp(skill, round(SKILL_XP_PER_DAY * xp_multiplier))
 

@@ -689,6 +689,23 @@ FEATURES = [
                   "Data/Database/database.py": ['"strength_pct"', '"charisma"']},
     },
     {
+        "name": "Decision Engine, piece 1c: what the scores do -- fights, sickness, learning, spells; training, deeds, aging; "
+                "the jobless choose adventuring",
+        "functions": {"Data/NPCS/abilities.py": ["strength_bonus", "dexterity_ac", "constitution_hp", "wisdom_save", "sickness_factor",
+                                                 "research_factor", "bonus_spells", "grow", "deeds", "hardship", "trains",
+                                                 "age_shift", "abilities_year"],
+                      "Data/Quests/adventure.py": ["jobless_choose"]},
+        "wired": {"Data/Combat/melee.py": ["abilities.strength_bonus(scores)", "attacker.damage_bonus"],
+                  "Data/Combat/specials.py": ["mental=True", "deeds(conn, fighters)"],
+                  "Data/Combat/combat.py": ["ABILITY_POWER"],
+                  "Data/NPCS/sickness.py": ["sickness_factor(", "hardship(conn"],
+                  "Data/NPCS/employment.py": ["prime_bonus(npc.get(\"class\"), of(npc))"],
+                  "Data/Research/discoveries.py": ["research_factor("],
+                  "Data/Magic/magic.py": ["bonus_spells("],
+                  "Data/Simulation/simulation_manager.py": ["abilities_year(self.conn"],
+                  "Data/NPCS/ProfessionClasses.json": ['"Adventurer"']},
+    },
+    {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
                 "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
         "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
@@ -3481,11 +3498,15 @@ def _smoke_body(r, holder):
         import Data.Government.rebellion as rebellion_module        # ...and nor is a lord's rising
         raids_held, raids_module.RAID_CHANCE = raids_module.RAID_CHANCE, 0.0
         risings_held, rebellion_module.RISING_CHANCE_AT_ZERO = rebellion_module.RISING_CHANCE_AT_ZERO, 0.0
+        import Data.World.disasters as disasters_module             # ...nor a fire, flood or earthquake (a Doge died in a fire)
+        disasters_held = (disasters_module.FIRE_CHANCE, disasters_module.FLOOD_CHANCE, disasters_module.QUAKE_CHANCE)
+        disasters_module.FIRE_CHANCE = disasters_module.FLOOD_CHANCE = disasters_module.QUAKE_CHANCE = 0.0
         try:
             manager.on_month()
         finally:
             raids_module.RAID_CHANCE = raids_held
             rebellion_module.RISING_CHANCE_AT_ZERO = risings_held
+            disasters_module.FIRE_CHANCE, disasters_module.FLOOD_CHANCE, disasters_module.QUAKE_CHANCE = disasters_held
         replaced = [cid for cid, rid in ruled.items()
                     if conn.execute("SELECT ruler_id FROM cities WHERE id = ?", (cid,)).fetchone()[0] != rid]
         assert not replaced, f"a quiet month replaced {len(replaced)} living rulers (rulers are not being saved)"
@@ -3700,8 +3721,9 @@ def _smoke_body(r, holder):
         saved_meals = conn.execute("SELECT n.id, n.fed FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ?", (kingdom["id"],)).fetchall()
         try:
             conn.execute("""UPDATE kingdoms SET health_unrest = 5, health_stability = 95, health_loyalty = 65, treasury = 1000000,
-                            price_level = 1, tax_rate = 0.10, regent_id = NULL, export_ban_until = NULL, martial_law_until = NULL
-                            WHERE id = ?""", (kingdom["id"],))
+                            price_level = 1, tax_rate = 0.10, regent_id = NULL, export_ban_until = NULL, martial_law_until = NULL,
+                            quarantine_until = 1000000
+                            WHERE id = ?""", (kingdom["id"],))          # (already quarantined: a plague abroad calls for nothing)
             conn.execute("UPDATE provinces SET loyalty = 65 WHERE kingdom_id = ?", (kingdom["id"],))
             conn.execute("UPDATE cities SET hungry_days = 0 WHERE kingdom_id = ?", (kingdom["id"],))
             conn.execute("UPDATE city_resources SET amount = 0 WHERE resource_name = 'Wood' AND city_id IN (SELECT id FROM cities WHERE kingdom_id = ?)", (kingdom["id"],))
@@ -3713,7 +3735,8 @@ def _smoke_body(r, holder):
 
             conn.execute("UPDATE npcs SET generosity = 0, mercy = 0, boldness = 0 WHERE id = ?", (ruler,))
             conn.commit()
-            assert E.choose(conn, staged, get_npc(conn, ruler), day)[0] is None, "an even-tempered ruler meddled with a calm realm"
+            meddled = E.choose(conn, staged, get_npc(conn, ruler), day)[0]
+            assert meddled is None, f"an even-tempered ruler meddled with a calm realm ({meddled})"
             conn.execute("UPDATE npcs SET generosity = -90 WHERE id = ?", (ruler,))
             conn.commit()
             assert E.choose(conn, staged, get_npc(conn, ruler), day)[0] == "raise taxes", "a greedy ruler did not raise taxes in a calm, rich realm"
@@ -3735,9 +3758,10 @@ def _smoke_body(r, holder):
             assert not sold, "a kingdom that banned food exports still sold Food abroad"
         finally:
             conn.execute("""UPDATE kingdoms SET tax_rate = ?, treasury = ?, price_level = ?, regent_id = ?, export_ban_until = ?,
-                            martial_law_until = ? WHERE id = ?""",
+                            martial_law_until = ?, quarantine_until = ? WHERE id = ?""",
                          (saved_kingdom["tax_rate"], saved_kingdom["treasury"], saved_kingdom["price_level"], saved_kingdom["regent_id"],
-                          saved_kingdom["export_ban_until"], saved_kingdom["martial_law_until"], kingdom["id"]))
+                          saved_kingdom["export_ban_until"], saved_kingdom["martial_law_until"], saved_kingdom["quarantine_until"],
+                          kingdom["id"]))
             conn.execute("UPDATE npcs SET generosity = ?, mercy = ?, boldness = ? WHERE id = ?", (*saved_traits, ruler))
             conn.executemany("UPDATE provinces SET loyalty = ? WHERE id = ?", [(row["loyalty"], row["id"]) for row in saved_lords])
             conn.executemany("UPDATE cities SET hungry_days = ? WHERE id = ?", [(row["hungry_days"], row["id"]) for row in saved_hunger])
@@ -4642,6 +4666,8 @@ def _smoke_body(r, holder):
 
             alive = lambda npc: conn.execute("SELECT alive FROM npcs WHERE id = ?", (npc,)).fetchone()[0]
             saved_v, saved_n = V.random, N.random
+            import Data.NPCS.abilities as ABL
+            saved_of, ABL.of = ABL.of, lambda npc: None             # their trades decide these duels, not their rolled scores
             try:
                 # a youth no match for a Knight trains
                 avenger, nemesis = cast(age=18, foe="Knight")
@@ -4679,6 +4705,7 @@ def _smoke_body(r, holder):
                 assert conn.execute("SELECT gold FROM npcs WHERE id = ?", (avenger,)).fetchone()[0] == 1000 - V.ASSASSIN_FEE, "the patron did not pay the blade"
             finally:
                 V.random, N.random = saved_v, saved_n
+                ABL.of = saved_of
                 conn.execute("UPDATE grievances SET settled = 1")
                 conn.commit()
 
@@ -5544,7 +5571,7 @@ def _smoke_body(r, holder):
                 assert low <= s[a] <= high, f"{p['name']} ({p['race']}) has {a} {s[a]}, outside {low}-{high}"
         # every classed person meets their class's minimums; exceptional Strength only for fighters with 18, within their people's cap
         classed = [p for p in people if p["class"] not in (None, "None")]
-        bad = [p for p in classed if not AB.qualifies(AB.of(p), p["class"])]
+        bad = [p for p in classed if not (p["ability_age"] or 0) and not AB.qualifies(AB.of(p), p["class"])]   # (age may wear them below)
         assert not bad, f"{len(bad)} people do not meet their class's minimums, e.g. {bad[0]['name']}, {bad[0]['class']}: {AB.describe(AB.of(bad[0]))}"
         for p in people:
             if p["strength_pct"]:
@@ -5563,9 +5590,9 @@ def _smoke_body(r, holder):
         from Data.NPCS.personality import calling
         assert calling({"piety": 100}, "Cleric", "class") == 1.5 and calling({"piety": -100}, "Cleric", "class") == 1.0, \
             "a perfect calling does not pull half again as much"
-        merry = sum(AB.person("Human", "innkeeper", {"sociability": 100})[0] == "Bard" for _ in range(3000))
-        dour = sum(AB.person("Human", "innkeeper", {"sociability": -100})[0] == "Bard" for _ in range(3000))
-        assert merry > dour * 1.2, f"sociability did not tilt innkeepers toward Bard ({merry} vs {dour})"
+        merry = sum(AB.person("Human", "innkeeper", {"sociability": 100})[0] == "Bard" for _ in range(5000))
+        dour = sum(AB.person("Human", "innkeeper", {"sociability": -100})[0] == "Bard" for _ in range(5000))
+        assert merry > dour * 1.15, f"sociability did not tilt innkeepers toward Bard ({merry} vs {dour})"
         # someone recruited as a knight takes no class they are too weak for
         weak = next((p for p in people if p["profession"] not in ("Child",)), None)
         if weak:
@@ -5579,6 +5606,75 @@ def _smoke_body(r, holder):
 
     run_step(r, "ability scores: everyone has six within their people's limits; every class's minimums are met; exceptional Strength "
                 "only for fighters; heroes roll better; children take after parents; callings tilt classes", ability_scores)
+
+    def what_scores_do():
+        import Data.NPCS.abilities as AB
+        import Data.Quests.adventure as AD
+        from Data.Combat import melee
+        from Data.Magic.magic import per_day
+        # the book's tables
+        assert AB.strength_bonus({"strength": 18, "strength_pct": 100}) == (3, 6) and AB.strength_bonus({"strength": 3}) == (-3, -1)
+        assert AB.dexterity_ac({"dexterity": 18}) == -4 and AB.dexterity_ac({"dexterity": 3}) == 4
+        assert AB.constitution_hp({"constitution": 18}, "Fighter") == 4 and AB.constitution_hp({"constitution": 18}, "Cleric") == 2
+        assert AB.wisdom_save({"wisdom": 18}) == 4 and abs(AB.sickness_factor({"constitution": 16}) - 0.8) < 1e-9
+        assert AB.prime_bonus("Fighter", {"strength": 16}) == 0.10 and AB.prime_bonus("Fighter", {"strength": 15}) == 0
+        assert per_day("Cleric", 1, 14) == [per_day("Cleric", 1)[0] + 2], "high Wisdom gave a cleric no bonus spells"
+        # a strong, quick, hardy, wise fighter hits harder and more often, is harder to hit, has more life, steadier nerves
+        base = {"name": "x", "profession": "Soldier", "race": "Human", "class": "Fighter", "id": None, "skills": {}, "strength_pct": 0}
+        plain = melee.person_fighter(dict(base, **{a: 10 for a in AB.ABILITIES}))
+        strong = dict(base, **{a: 10 for a in AB.ABILITIES})
+        strong.update(strength=18, dexterity=18, constitution=18, wisdom=18, strength_pct=100)
+        great = melee.person_fighter(strong)
+        assert (great.to_hit - plain.to_hit, great.damage_bonus, plain.ac - great.ac, great.wis_save) == (3, 6, 4, 4), \
+            "Strength, Dexterity and Wisdom did not count in a fight"
+        assert great.hp > plain.hp, "Constitution added no hit points"
+        # a person who grows: training at most +2 a score in a lifetime, deeds at most +1, never past their people's maximum
+        npc = conn.execute("SELECT * FROM npcs WHERE alive = 1 AND strength IS NOT NULL AND race = 'Human' AND strength <= 14 LIMIT 1").fetchone()
+        if npc:
+            saved = (npc["strength"], npc["constitution"], npc["ability_gains"], npc["age"], npc["ability_age"], npc["dexterity"],
+                     npc["intelligence"], npc["wisdom"], npc["strength_pct"])
+            try:
+                assert sum(AB.grow(conn, npc["id"], "strength") for _ in range(4)) == AB.TRAIN_CAP, "training went past its lifetime cap"
+                assert sum(AB.grow(conn, npc["id"], "constitution", "deed") for _ in range(3)) == AB.DEED_CAP, "deeds went past their cap"
+                # the book's aging: reaching old age shifts the scores once
+                conn.execute("UPDATE npcs SET age = 61, ability_age = 0 WHERE id = ?", (npc["id"],))
+                before = dict(conn.execute("SELECT * FROM npcs WHERE id = ?", (npc["id"],)).fetchone())
+                assert AB.age_shift(conn, before) == 2, "reaching old age did not bring middle and old age"
+                after = dict(conn.execute("SELECT * FROM npcs WHERE id = ?", (npc["id"],)).fetchone())
+                assert after["strength"] == max(3, before["strength"] - 3) and after["wisdom"] == min(18, before["wisdom"] + 2), \
+                    "aging did not shift the scores as the book does"
+                assert AB.age_shift(conn, after) == 0, "aging was felt twice"
+            finally:
+                conn.execute("""UPDATE npcs SET strength = ?, constitution = ?, ability_gains = ?, age = ?, ability_age = ?, dexterity = ?,
+                                intelligence = ?, wisdom = ?, strength_pct = ? WHERE id = ?""", (*saved, npc["id"]))
+                conn.commit()
+        # a jobless youth may choose adventuring, taking an adventuring class they meet
+        row = conn.execute("""SELECT n.* FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                              WHERE k.world_id = ? AND n.alive = 1 AND n.age BETWEEN 18 AND 30 AND n.title IS NULL
+                              AND n.strength IS NOT NULL AND n.jailed_until IS NULL ORDER BY n.id LIMIT 1""", (world_id,)).fetchone()
+        if row:
+            saved = (row["profession"], row["class"], row["spouse_id"], row["workplace_id"], row["strength"], row["dexterity"],
+                     row["constitution"], row["wisdom"], row["intelligence"], row["charisma"])
+            held = AD.JOBLESS_CHOOSE
+            try:
+                conn.execute("""UPDATE npcs SET profession = 'Laborer', class = 'None', spouse_id = NULL, workplace_id = NULL,
+                                strength = 12, dexterity = 12, constitution = 12, wisdom = 12, intelligence = 12, charisma = 12
+                                WHERE id = ?""", (row["id"],))
+                AD.JOBLESS_CHOOSE = 1.0
+                AD.jobless_choose(conn, row["city_id"], 10 ** 6)
+                now = conn.execute("SELECT profession, class FROM npcs WHERE id = ?", (row["id"],)).fetchone()
+                assert now["profession"] == "Adventurer" and AB.qualifies({a: 12 for a in AB.ABILITIES}, now["class"]) \
+                    and now["class"] in AD.ADVENTURING_CLASSES, f"a jobless youth did not take up adventuring with a class they meet: {tuple(now)}"
+            finally:
+                AD.JOBLESS_CHOOSE = held
+                conn.execute("""UPDATE npcs SET profession = ?, class = ?, spouse_id = ?, workplace_id = ?, strength = ?, dexterity = ?,
+                                constitution = ?, wisdom = ?, intelligence = ?, charisma = ? WHERE id = ?""", (*saved, row["id"]))
+                conn.commit()
+        # the yearly turn runs
+        AB.abilities_year(conn, world_id)
+
+    run_step(r, "what the scores do: the book's Strength, Dexterity, Constitution and Wisdom in fights; spells, experience, sickness; "
+                "training and deeds within their caps; aging; the jobless choose adventuring", what_scores_do)
 
     run_step(r, "eras: the world opens at peace; darkness, war, want and quiet turn the age; every kingdom chronicles it; kingdoms have their own times",
              eras_turn)

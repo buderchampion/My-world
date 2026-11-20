@@ -226,6 +226,23 @@
         "classes": [
             "None"
         ]
+    },
+
+    "Adventurer": {
+        "classes": [
+            "Fighter",
+            "Rogue",
+            "Cleric",
+            "Wizard",
+            "Ranger",
+            "Paladin",
+            "Barbarian",
+            "Bard",
+            "Druid",
+            "Monk",
+            "Sorcerer",
+            "Warlock"
+        ]
     }
 
 }

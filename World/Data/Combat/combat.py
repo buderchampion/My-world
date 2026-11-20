@@ -84,11 +84,16 @@ def get_combat_power(npc):
 
     skills = {name: (s["level"] if isinstance(s, dict) else s) for name, s in (npc.get("skills") or {}).items()}
 
-    return base + 2 * fighting_bonus(skills) + CASTING_POWER * casting_level(npc.get("class"), npc.get("profession"), skills,
-                                                                           npc.get("race"))
+    from Data.NPCS import abilities                # Strength and Constitution count, more gently than in a fight by the book
+    scores = abilities.of(npc)
+    hit, damage = abilities.strength_bonus(scores)
+    body = ABILITY_POWER * (hit + damage + abilities.constitution_hp(scores, npc.get("class")))
+    return max(0.5, base + 2 * fighting_bonus(skills) + body + CASTING_POWER * casting_level(npc.get("class"), npc.get("profession"),
+                                                                                          skills, npc.get("race")))
 
 
 CASTING_POWER = 2          # a caster's strength in the older battles, for each casting level
+ABILITY_POWER = 0.5        # ...and for each point of Strength's to-hit and damage and Constitution's hit-point bonus
 INSPIRE_POWER = 0.1        # a side with a bard singing fights this much harder
 
 
