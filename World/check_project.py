@@ -677,6 +677,18 @@ FEATURES = [
                   "run_world.py": ["has_engine(connection"]},
     },
     {
+        "name": "Decision Engine, piece 1b: ability scores by the AD&D 1st edition book; classes within their minimums; callings",
+        "functions": {"Data/NPCS/abilities.py": ["roll", "new_scores", "inherited_scores", "qualifies", "prime_bonus", "exceptional",
+                                                 "class_options", "choose_class", "person", "of", "describe"],
+                      "Data/NPCS/personality.py": ["calling"]},
+        "wired": {"Data/Database/repository.py": ["AB.person(race, profession, traits, preferred=npc_class)"],
+                  "Data/NPCS/npc_generator.py": ["person(race, profession, traits)", "calling(traits, p)"],
+                  "Data/World/villagers.py": ["person(race, profession, traits)"],
+                  "Data/NPCS/family.py": ["inherited_scores(parent_a, parent_b, race)"],
+                  "Data/Economy/jobs.py": ["_new_class(conn, npc_id, race, trade)"],
+                  "Data/Database/database.py": ['"strength_pct"', '"charisma"']},
+    },
+    {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
                 "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
         "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
@@ -5515,6 +5527,58 @@ def _smoke_body(r, holder):
 
     run_step(r, "twelve traits: a new world's people all have them, each people leans as its table says, children take after "
                 "their parents, older worlds run the old way, and character is never shown in words", twelve_traits)
+
+    def ability_scores():
+        import statistics
+        import Data.NPCS.abilities as AB
+        from Data.Economy.jobs import _new_class
+        people = [dict(r) for r in conn.execute(
+            """SELECT n.* FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+               WHERE k.world_id = ? AND n.alive = 1""", (world_id,))]
+        # everyone has six scores within their people's limits
+        for p in people:
+            s = AB.of(p)
+            assert s, f"{p['name']} has no ability scores"
+            for a in AB.ABILITIES:
+                low, high = AB.limits(p["race"], a)
+                assert low <= s[a] <= high, f"{p['name']} ({p['race']}) has {a} {s[a]}, outside {low}-{high}"
+        # every classed person meets their class's minimums; exceptional Strength only for fighters with 18, within their people's cap
+        classed = [p for p in people if p["class"] not in (None, "None")]
+        bad = [p for p in classed if not AB.qualifies(AB.of(p), p["class"])]
+        assert not bad, f"{len(bad)} people do not meet their class's minimums, e.g. {bad[0]['name']}, {bad[0]['class']}: {AB.describe(AB.of(bad[0]))}"
+        for p in people:
+            if p["strength_pct"]:
+                assert p["class"] in AB.table()["exceptional"] and p["strength"] == 18 and \
+                    p["strength_pct"] <= AB.people(p["race"])["strength_pct"], f"{p['name']} has exceptional Strength they cannot have"
+        # heroes roll better than ordinary folk
+        plain = [p for p in people if p["class"] in (None, "None") and p["profession"] != "Child"]
+        if len(classed) > 50 and len(plain) > 50:
+            total = lambda group: statistics.mean(sum(p[a] for a in AB.ABILITIES) for p in group)
+            assert total(classed) > total(plain) + 3, "people with a class did not roll as heroes"
+        # children take after their parents
+        bright = {a: 18 for a in AB.ABILITIES}
+        kids = [AB.inherited_scores(bright, bright, "Human") for _ in range(400)]
+        assert statistics.mean(k["intelligence"] for k in kids) > 13.5, "children of brilliant parents are not bright"
+        # callings: a perfect fit is half again as likely; the sociable innkeeper turns Bard more often
+        from Data.NPCS.personality import calling
+        assert calling({"piety": 100}, "Cleric", "class") == 1.5 and calling({"piety": -100}, "Cleric", "class") == 1.0, \
+            "a perfect calling does not pull half again as much"
+        merry = sum(AB.person("Human", "innkeeper", {"sociability": 100})[0] == "Bard" for _ in range(3000))
+        dour = sum(AB.person("Human", "innkeeper", {"sociability": -100})[0] == "Bard" for _ in range(3000))
+        assert merry > dour * 1.2, f"sociability did not tilt innkeepers toward Bard ({merry} vs {dour})"
+        # someone recruited as a knight takes no class they are too weak for
+        weak = next((p for p in people if p["profession"] not in ("Child",)), None)
+        if weak:
+            saved = {a: weak[a] for a in AB.ABILITIES}
+            conn.execute(f"UPDATE npcs SET {', '.join(a + ' = 3' for a in AB.ABILITIES)} WHERE id = ?", (weak["id"],))
+            try:
+                assert _new_class(conn, weak["id"], weak["race"], "Knight") == "None", "a person of 3s in everything was given a knight's class"
+            finally:
+                conn.execute(f"UPDATE npcs SET {', '.join(a + ' = ?' for a in AB.ABILITIES)} WHERE id = ?", (*saved.values(), weak["id"]))
+                conn.commit()
+
+    run_step(r, "ability scores: everyone has six within their people's limits; every class's minimums are met; exceptional Strength "
+                "only for fighters; heroes roll better; children take after parents; callings tilt classes", ability_scores)
 
     run_step(r, "eras: the world opens at peace; darkness, war, want and quiet turn the age; every kingdom chronicles it; kingdoms have their own times",
              eras_turn)

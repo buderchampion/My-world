@@ -143,6 +143,14 @@ def init_database():
         "honour": "INTEGER",
         "piety": "INTEGER",
         "loyalty": "INTEGER",
+        # ability scores, after the AD&D 1st edition Player's Handbook (Data.NPCS.abilities; new worlds only)
+        "strength": "INTEGER",
+        "intelligence": "INTEGER",
+        "wisdom": "INTEGER",
+        "dexterity": "INTEGER",
+        "constitution": "INTEGER",
+        "charisma": "INTEGER",
+        "strength_pct": "INTEGER NOT NULL DEFAULT 0",          # exceptional Strength: 18/01 .. 18/00 (100)
     })
 
     _add_missing_columns(connection, "kingdoms", {

@@ -42,7 +42,7 @@ def make_individual(conn, village_id, city_id=None, profession="Farmer", age=Non
 
     from Data.Database.repository import create_npc, save_npc, find_open_building
     from Data.NPCS.npc_generator import (
-        load_json, generate_class, get_building_type, MALE_NAMES, FEMALE_NAMES, CLASS_FILE, SKILL_FILE, PROFESSION_BUILDINGS,
+        load_json, get_building_type, MALE_NAMES, FEMALE_NAMES, CLASS_FILE, SKILL_FILE, PROFESSION_BUILDINGS,
     )
     from Data.DailyLife.daily_life import build_schedule
 
@@ -51,11 +51,14 @@ def make_individual(conn, village_id, city_id=None, profession="Farmer", age=Non
     age = age if age is not None else random.randint(18, 50)
     name = random.choice(load_json(MALE_NAMES if gender == "Male" else FEMALE_NAMES))
 
-    npc_class = "None" if profession == "Child" else generate_class(profession)
     if race is None:                           # a villager is of their village's peoples (Data.NPCS.races)
         from Data.NPCS.races import choose_person_race, city_race
         race = choose_person_race(city_race(conn, village_id))
-    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession, race=race)
+    from Data.NPCS.personality import random_traits
+    from Data.NPCS.abilities import person, new_scores
+    traits = random_traits(race)               # who they are, then their scores and class (Data.NPCS.abilities)
+    npc_class, scores = ("None", new_scores(race)) if profession == "Child" else person(race, profession, traits)
+    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=traits, race=race, abilities=scores)
 
     building_type = get_building_type(profession, load_json(PROFESSION_BUILDINGS))
     if building_type:

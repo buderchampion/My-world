@@ -41,10 +41,25 @@ def trade_for_building():
     return by_building
 
 
-def _new_class(race, profession):
-    from Data.NPCS.npc_generator import generate_class
-    from Data.NPCS.races import suited_class
-    return suited_class(race, generate_class(profession), profession)
+def _new_class(conn, npc_id, race, profession):
+    """The class someone takes with a new trade: one the trade allows that their scores meet, their personality
+    tilting it (Data.NPCS.abilities) -- with exceptional Strength rolled if they become a fighter with 18. Someone
+    without scores (an older world) takes one the old way."""
+    from Data.NPCS import abilities as AB
+    from Data.NPCS.personality import TRAITS
+    row = conn.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone()
+    scores = AB.of(row) if row else None
+    if scores is None:
+        from Data.NPCS.npc_generator import generate_class
+        from Data.NPCS.races import suited_class
+        return suited_class(race, generate_class(profession), profession)
+    traits = {t: row[t] for t in TRAITS}
+    npc_class = AB.choose_class(race, profession, traits, scores)
+    # exceptional Strength is a fighter's: rolled on becoming one with 18, gone on becoming anything else
+    pct = AB.exceptional(scores, npc_class, race)["strength_pct"] if npc_class in AB.table()["exceptional"] else 0
+    if pct != scores["strength_pct"]:
+        conn.execute("UPDATE npcs SET strength_pct = ? WHERE id = ?", (pct, npc_id))
+    return npc_class
 
 
 def come_of_age(conn, world_id):
@@ -53,7 +68,7 @@ def come_of_age(conn, world_id):
         """SELECT n.id, n.race FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
            WHERE k.world_id = ? AND n.alive = 1 AND n.profession = 'Child' AND n.age >= ?""", (world_id, WORKING_AGE)).fetchall()
     conn.executemany("UPDATE npcs SET profession = 'Laborer', class = ? WHERE id = ?",
-                     [(_new_class(race, "Laborer"), npc_id) for npc_id, race in grown])
+                     [(_new_class(conn, npc_id, race, "Laborer"), npc_id) for npc_id, race in grown])
     conn.commit()
     return len(grown)
 
@@ -93,7 +108,7 @@ def recruit(conn, world_id, only=None):
                        AND age BETWEEN ? AND ? AND jailed_until IS NULL ORDER BY age, id LIMIT ?""",
                     (post["city_id"], WORKING_AGE, RECRUIT_MAX_AGE, room)).fetchall():
                 conn.execute("UPDATE npcs SET profession = ?, class = ?, workplace_id = ? WHERE id = ?",
-                             (trade, _new_class(race, trade), post["id"], npc_id))
+                             (trade, _new_class(conn, npc_id, race, trade), post["id"], npc_id))
                 taken += 1
                 afford -= 1
             if afford <= 0:

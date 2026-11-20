@@ -33,7 +33,7 @@ import random
 TRAITS = ("generosity", "mercy", "boldness", "ambition", "diligence", "curiosity",
           "vengefulness", "sociability", "affection", "honour", "piety", "loyalty")
 FIRST_TRAITS = TRAITS[:3]
-PEOPLE_VERSION = 1        # 1: the twelve traits
+PEOPLE_VERSION = 2        # 1: the twelve traits; 2: and ability scores (Data.NPCS.abilities)
 
 SPREAD = 40               # how far people usually stray from their people's middle
 CHILD_VARIATION = 25      # how far a child strays from their parents' average
@@ -53,6 +53,36 @@ WORDS = {
     "piety": ("pious", "doubting"),
     "loyalty": ("loyal", "fickle"),
 }
+
+
+# Callings: a person's traits make a fitting trade or class a little likelier at generation (and when they
+# come of age or are recruited) -- at most CALLING_PULL more for a perfect fit (+100 in every trait listed;
+# -1 means the low end: the deceitful to thieving). Everyone else is as likely as before.
+CALLING_PULL = 0.5
+TRADE_TILT = {
+    "Priest": {"piety": 1}, "Healer": {"mercy": 1},
+    "Scholar": {"curiosity": 1}, "Mage": {"curiosity": 1}, "Alchemist": {"curiosity": 1},
+    "Soldier": {"boldness": 1}, "Captain": {"boldness": 1}, "Knight": {"boldness": 1, "loyalty": 1}, "Guard": {"loyalty": 1},
+    "Thief": {"honour": -1}, "Smuggler": {"honour": -1}, "Bandit": {"honour": -1},
+    "Merchant": {"ambition": 1, "sociability": 1}, "innkeeper": {"sociability": 1},
+    "Hunter": {"sociability": -1}, "Fisherman": {"sociability": -1},
+    "Blacksmith": {"diligence": 1}, "Armorer": {"diligence": 1}, "Miner": {"diligence": 1}, "Farmer": {"diligence": 1},
+}
+CLASS_TILT = {
+    "Cleric": {"piety": 1}, "Paladin": {"piety": 1, "honour": 1}, "Druid": {"piety": 1},
+    "Wizard": {"curiosity": 1}, "Barbarian": {"boldness": 1}, "Rogue": {"honour": -1},
+    "Warlock": {"ambition": 1}, "Bard": {"sociability": 1}, "Ranger": {"sociability": -1}, "Monk": {"diligence": 1},
+}
+
+
+def calling(traits, name, kind="trade"):
+    """How much likelier this person is to take up this trade (kind 'trade') or class ('class'): 1.0 (no pull)
+    to 1 + CALLING_PULL, by how well their traits fit it. 1.0 for anyone without traits."""
+    tilt = (TRADE_TILT if kind == "trade" else CLASS_TILT).get(name)
+    if not tilt or not traits:
+        return 1.0
+    fit = sum(max(0, sign * (traits.get(t) or 0)) for t, sign in tilt.items()) / (100 * len(tilt))
+    return 1.0 + CALLING_PULL * fit
 
 
 def _clamp(value):

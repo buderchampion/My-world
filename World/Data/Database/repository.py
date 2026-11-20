@@ -5,27 +5,38 @@ from Data.Database.database import get_connection
 # NPCs
 # ---------------------------------------------------------------------------
 
-def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=None, race=None):
+def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=None, race=None, abilities=None):
     """Creates an NPC. Everyone gets a personality (Data.NPCS.personality):
     `traits` if given -- a child's, inherited -- otherwise their own. And a people
     (Data.NPCS.races): `race` if given -- a child's, from their parents -- otherwise one
-    of their kingdom's, most likely its own; anyone not human is named in their people's tongue."""
+    of their kingdom's, most likely its own; anyone not human is named in their people's tongue.
+    And ability scores (Data.NPCS.abilities): `abilities` if given, otherwise rolled -- as a hero's
+    if they have a class, which they keep only if they meet its minimums (else another their
+    trade allows, or none)."""
 
     from Data.NPCS.personality import random_traits, TRAITS
     from Data.NPCS import races
     race = race or races.choose_person_race(races.city_race(conn, city_id))
     traits = traits or random_traits(race)                          # around their people's middle
     npc_class = races.suited_class(race, npc_class, profession)      # a dwarf is never a monk (the Player's Handbook)
+    from Data.NPCS import abilities as AB
+    if abilities is None:
+        if npc_class in (None, "None") or profession == "Child":
+            abilities = AB.new_scores(race)
+        else:                                                         # a hero's rolls; if they miss the class's minimums,
+            npc_class, abilities = AB.person(race, profession, traits, preferred=npc_class)   # another they meet, or none
     if race != races.HUMAN:
         name = races.given_name(race, gender)
 
     cursor = conn.execute(
         f"""
-        INSERT INTO npcs (city_id, name, gender, age, class, profession, {", ".join(TRAITS)}, race, years)
-        VALUES (?, ?, ?, ?, ?, ?, {", ".join("?" * len(TRAITS))}, ?, ?)
+        INSERT INTO npcs (city_id, name, gender, age, class, profession, {", ".join(TRAITS)}, race, years,
+                          {", ".join(AB.ABILITIES)}, strength_pct)
+        VALUES (?, ?, ?, ?, ?, ?, {", ".join("?" * len(TRAITS))}, ?, ?, {", ".join("?" * len(AB.ABILITIES))}, ?)
         """,
         (city_id, name, gender, age, npc_class, profession,
-         *[traits.get(t) for t in TRAITS], race, races.years_for(race, age))
+         *[traits.get(t) for t in TRAITS], race, races.years_for(race, age),
+         *[abilities[a] for a in AB.ABILITIES], abilities.get("strength_pct") or 0)
     )
 
     return get_npc(conn, cursor.lastrowid)

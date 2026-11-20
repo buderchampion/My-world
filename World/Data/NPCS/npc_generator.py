@@ -48,7 +48,11 @@ def is_profession_available(conn, city_id, profession, profession_buildings):
     return find_open_building(conn, city_id, building_type, "workplace_id") is not None
 
 
-def generate_profession(conn, city_id, city_type=None):
+def generate_profession(conn, city_id, city_type=None, traits=None):
+    """A trade with a free place in the town, by the town's mix -- a person's traits tilting it a little
+    (Data.NPCS.personality.calling: the pious toward the temple)."""
+
+    from Data.NPCS.personality import calling
 
     professions = load_json(PROFESSIONS)
     profession_buildings = load_json(PROFESSION_BUILDINGS)
@@ -70,11 +74,9 @@ def generate_profession(conn, city_id, city_type=None):
 
     while remaining_categories:
 
-        if weights:
-            category_weights = [weights.get(c, 1) for c in remaining_categories]
-            category = random.choices(remaining_categories, weights=category_weights, k=1)[0]
-        else:
-            category = random.choice(remaining_categories)
+        pull = [max(calling(traits, p) for p in professions[c]) for c in remaining_categories]
+        category_weights = [(weights.get(c, 1) if weights else 1) * k for c, k in zip(remaining_categories, pull)]
+        category = random.choices(remaining_categories, weights=category_weights, k=1)[0]
 
         available = [
             p for p in professions[category]
@@ -82,7 +84,7 @@ def generate_profession(conn, city_id, city_type=None):
         ]
 
         if available:
-            return random.choice(available)
+            return random.choices(available, weights=[calling(traits, p) for p in available], k=1)[0]
 
         remaining_categories.remove(category)
 
@@ -120,14 +122,21 @@ def generate_npc(conn, city_id, city_type=None):
 
     age = random.randint(18, 70)
 
-    profession = generate_profession(conn, city_id, city_type)
+    # who they are first -- their people and traits -- then their scores, trade and class (Data.NPCS.abilities)
+    from Data.NPCS import races
+    from Data.NPCS.personality import random_traits
+    from Data.NPCS.abilities import person
+    race = races.choose_person_race(races.city_race(conn, city_id))
+    traits = random_traits(race)
+
+    profession = generate_profession(conn, city_id, city_type, traits)
 
     if profession is None:
         profession = "Laborer"
 
-    npc_class = generate_class(profession)
+    npc_class, scores = person(race, profession, traits)
 
-    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession)
+    npc = create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=traits, race=race, abilities=scores)
 
     building_type = get_building_type(profession, profession_buildings)
 
