@@ -70,6 +70,9 @@ def get_or_create_world():
         given = ensure_personalities(connection, world["id"])
         if given:
             print(f"  (gave {given} people a personality -- this world predates them)")
+        from Data.NPCS.personality import has_engine
+        if not has_engine(connection, world["id"]):
+            print("  (this world predates the Decision Engine: it runs the old way. Start a new world to get it.)")
 
         from Data.Monsters.lairs import ensure_lairs
         lairs = ensure_lairs(connection, world["id"])

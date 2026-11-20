@@ -264,7 +264,6 @@ def review(conn, world_id, kingdom_ids=None, crisis=False):
     """
 
     from Data.Database.repository import get_npc, create_event
-    from Data.NPCS.personality import describe
     from Data.History.chronicle import write_entry, current_date
 
     day = today(conn, world_id)
@@ -286,14 +285,12 @@ def review(conn, world_id, kingdom_ids=None, crisis=False):
         what = apply_edict(conn, kingdom, edict, day)
         conn.execute("INSERT INTO kingdom_edicts (kingdom_id, edict, day, ruler_id) VALUES (?, ?, ?, ?)",
                      (kingdom["id"], edict, day, decider["id"]))
-        nature = describe(decider)
-        title = decider["title"] or ("Regent" if kingdom["regent_id"] else "ruler")
-        create_event(conn, "Edict", f"{title} {decider['name']} ({nature}) of {kingdom['name']} decreed: {edict} ({what}).",
+        title = decider["title"] or ("Regent" if kingdom["regent_id"] else "ruler")       # (character stays hidden: no words for it)
+        create_event(conn, "Edict", f"{title} {decider['name']} of {kingdom['name']} decreed: {edict} ({what}).",
                      kingdom_id=kingdom["id"])
         if edict in CHRONICLED:
             write_entry(conn, kingdom["id"], "Edict", CHRONICLED[edict], year, season,
-                        {"kingdom": kingdom["name"], "ruler": decider["name"], "title": title,
-                         "nature": nature if nature != "even-tempered" else "steady"}, seed_parts=(kingdom["id"], day))
+                        {"kingdom": kingdom["name"], "ruler": decider["name"], "title": title}, seed_parts=(kingdom["id"], day))
         issued.append((kingdom["name"], edict, what))
 
     conn.commit()

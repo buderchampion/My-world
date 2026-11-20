@@ -404,8 +404,8 @@ FEATURES = [
             "Data/Government/health.py": ["kingdom_health", "update_health"],
         },
         "wired": {
-            "Data/Database/repository.py": ["random_traits()"],
-            "Data/NPCS/family.py": ["inherited_traits(parent_a, parent_b)"],
+            "Data/Database/repository.py": ["random_traits(race)"],
+            "Data/NPCS/family.py": ["inherited_traits(parent_a, parent_b, race)"],
             "Data/Simulation/simulation_manager.py": ["update_health(self.conn"],
             "run_world.py": ["ensure_personalities("],
             "Data/Database/database.py": ['"generosity"', '"health_stability"'],
@@ -667,6 +667,14 @@ FEATURES = [
                   "Data/Government/feudal.py": ["added(\"loyalty\", kingdom[\"id\"])"],
                   "Data/History/chronicle.py": ["era_name_of_kingdom(conn, kingdom_id)"]},
         "tables": ["world_eras", "kingdom_periods"],
+    },
+    {
+        "name": "Decision Engine, piece 1a: twelve hidden traits for everyone in a new world, leaning by people, inherited",
+        "functions": {"Data/NPCS/personality.py": ["leanings", "random_traits", "inherited_traits", "people_version", "has_engine"]},
+        "wired": {"Data/Database/repository.py": ["random_traits(race)", "people_version) VALUES (?, ?)"],
+                  "Data/Database/database.py": ['"ambition"', '"loyalty"', '"people_version"'],
+                  "Data/NPCS/Races.json": ['"leanings"'],
+                  "run_world.py": ["has_engine(connection"]},
     },
     {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
@@ -3006,6 +3014,7 @@ def _smoke_body(r, holder):
             conn.execute("DELETE FROM kingdom_favor")
             conn.execute("DELETE FROM kingdom_relations")
             conn.execute("DELETE FROM events WHERE type = 'Alliance'")
+            conn.execute("DELETE FROM event_participants WHERE event_id NOT IN (SELECT id FROM events)")   # ids are reused
             conn.commit()
 
         clear()
@@ -3070,6 +3079,7 @@ def _smoke_body(r, holder):
             conn.execute("DELETE FROM kingdom_favor")
             conn.execute("DELETE FROM kingdom_relations")
             conn.execute("DELETE FROM events WHERE type = 'Alliance Ended'")
+            conn.execute("DELETE FROM event_participants WHERE event_id NOT IN (SELECT id FROM events)")   # ids are reused
             conn.commit()
 
         clear()
@@ -3104,6 +3114,7 @@ def _smoke_body(r, holder):
             conn.execute("DELETE FROM kingdom_relations")
             conn.execute("DELETE FROM chronicle_entries")
             conn.execute("DELETE FROM events WHERE type IN ('Alliance', 'Alliance Ended')")
+            conn.execute("DELETE FROM event_participants WHERE event_id NOT IN (SELECT id FROM events)")   # ids are reused
             conn.commit()
 
         clear()
@@ -3352,6 +3363,7 @@ def _smoke_body(r, holder):
         capital = get_city(conn, rep["capital_city_id"]); capital["resources"]["Food"] = 0.0; save_city(conn, capital)
         seat = get_city(conn, seller["capital_city_id"]); seat["resources"]["Food"] = 10.0 ** 6; save_city(conn, seat)
         conn.execute("DELETE FROM events WHERE type = 'Grain Office'")
+        conn.execute("DELETE FROM event_participants WHERE event_id NOT IN (SELECT id FROM events)")   # ids are reused
         conn.commit()
 
     run_step(r, "(setup) a republic's grain reserve empty just before the month tick", prepare_grain_office)
@@ -5463,6 +5475,46 @@ def _smoke_body(r, holder):
             conn.execute("UPDATE kingdoms SET price_level = ? WHERE id = ?", (k["price_level"], k["id"]))
             EA.ensure_era(conn, world_id)
             conn.commit()
+
+
+    def twelve_traits():
+        import statistics
+        import Data.NPCS.personality as P
+        # a new world: its people are of this generation, and every living person has all twelve traits
+        assert P.people_version(conn, world_id) == P.PEOPLE_VERSION and P.has_engine(conn, world_id), \
+            "a new world was not marked as having the Decision Engine's people"
+        missing = conn.execute(f"""SELECT COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                   WHERE k.world_id = ? AND n.alive = 1 AND ({" OR ".join(f"n.{t} IS NULL" for t in P.TRAITS)})""",
+                               (world_id,)).fetchone()[0]
+        assert missing == 0, f"{missing} living people lack some of the twelve traits"
+        # each people's average sits where its leanings say (sampled), and the spread stays wide
+        for race in ("Human", "Dwarf", "Elf", "Halfling", "Orc"):
+            sample = [P.random_traits(race) for _ in range(3000)]
+            for t in P.TRAITS:
+                mean = statistics.mean(x[t] for x in sample)
+                assert abs(mean - P.leanings(race).get(t, 0)) < 4, f"{race} {t} averages {mean:.1f}, not {P.leanings(race).get(t, 0)}"
+            assert 30 < statistics.pstdev(x["curiosity"] for x in sample) < 45, f"{race} curiosity does not vary widely"
+        # children take after their parents
+        bold = {t: 80 for t in P.TRAITS}
+        kids = [P.inherited_traits(bold, bold, "Human") for _ in range(500)]
+        assert statistics.mean(k["ambition"] for k in kids) > 60, "children of very ambitious parents are not ambitious"
+        # a trait no parent has (an older parent) comes from the child's people
+        kids = [P.inherited_traits({"generosity": 0}, None, "Gnome") for _ in range(2000)]
+        assert abs(statistics.mean(k["curiosity"] for k in kids) - 20) < 4, "a missing trait did not come from the child's people"
+        # an older world (made before the twelve) is told it runs the old way
+        conn.execute("UPDATE worlds SET people_version = 0 WHERE id = ?", (world_id,))
+        try:
+            assert not P.has_engine(conn, world_id), "an older world was taken for one with the Decision Engine"
+        finally:
+            conn.execute("UPDATE worlds SET people_version = ? WHERE id = ?", (P.PEOPLE_VERSION, world_id))
+            conn.commit()
+        # character is never shown in words: not in edicts, not in their chronicle entries
+        assert "describe(" not in (ROOT / "Data/Government/edicts.py").read_text(encoding="utf-8"), "edicts still describe the ruler's character"
+        templates = (ROOT / "Data/History/ChronicleTemplates.json").read_text(encoding="utf-8")
+        assert "{nature}" not in templates, "a chronicle template still names a ruler's character"
+
+    run_step(r, "twelve traits: a new world's people all have them, each people leans as its table says, children take after "
+                "their parents, older worlds run the old way, and character is never shown in words", twelve_traits)
 
     run_step(r, "eras: the world opens at peace; darkness, war, want and quiet turn the age; every kingdom chronicles it; kingdoms have their own times",
              eras_turn)

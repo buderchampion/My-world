@@ -93,7 +93,7 @@ def create_child(conn, parent_a, parent_b, city_type):
     from Data.NPCS.races import child_race
     race = child_race(parent_a.get("race"), parent_b.get("race"))      # an elf and a human have a half-elf
     child = create_npc(conn, parent_a["city_id"], name, gender, 0, "None", "Child",
-                       traits=inherited_traits(parent_a, parent_b), race=race)      # takes after both parents
+                       traits=inherited_traits(parent_a, parent_b, race), race=race)      # takes after both parents
 
     set_npc_parents(conn, child["id"], parent_a["id"], parent_b["id"])
 

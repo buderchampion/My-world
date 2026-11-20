@@ -1,5 +1,5 @@
 {
-    "_about": "The peoples of the world. kingdom_weight: how likely a kingdom is to be of this people (humans half of all). age_rate: real years per year of life stage (an elf of 120 is in the prime of youth, like a human of 16). homelands: the land its kingdoms settle by choice. minority_share and minorities: who else lives in its kingdoms. Names are built from syllables, so they never run out; family names and place names too. classes: the classes its people can follow and the highest level each can reach (null: no limit), after the Player's Handbook; abilities: what the book gives them in a fight; attitudes: how they feel about other peoples (their own: SAME_PEOPLE), coloring kingdoms' favor and friendships.",
+    "_about": "The peoples of the world. kingdom_weight: how likely a kingdom is to be of this people (humans half of all). age_rate: real years per year of life stage (an elf of 120 is in the prime of youth, like a human of 16). homelands: the land its kingdoms settle by choice. minority_share and minorities: who else lives in its kingdoms. Names are built from syllables, so they never run out; family names and place names too. classes: the classes its people can follow and the highest level each can reach (null: no limit), after the Player's Handbook; abilities: what the book gives them in a fight; attitudes: how they feel about other peoples (their own: SAME_PEOPLE), coloring kingdoms' favor and friendships. leanings: how far this people's average moves on each personality trait (Data.NPCS.personality); every individual still varies widely.",
     "Human": {
         "kingdom_weight": 7,
         "age_rate": 1.0,
@@ -34,7 +34,8 @@
             "Half-Orc": -5,
             "Tiefling": -10,
             "Orc": -15
-        }
+        },
+        "leanings": {}
     },
     "Elf": {
         "kingdom_weight": 1,
@@ -168,6 +169,11 @@
             "Half-Orc": -15,
             "Orc": -35,
             "Tiefling": -10
+        },
+        "leanings": {
+            "curiosity": 15,
+            "mercy": 10,
+            "diligence": -5
         }
     },
     "Half-Elf": {
@@ -209,6 +215,11 @@
             "Elf": 10,
             "Half-Orc": -15,
             "Orc": -20
+        },
+        "leanings": {
+            "curiosity": 5,
+            "sociability": 5,
+            "loyalty": -5
         }
     },
     "Dwarf": {
@@ -355,6 +366,13 @@
             "Half-Orc": -35,
             "Orc": -35,
             "Tiefling": -10
+        },
+        "leanings": {
+            "loyalty": 15,
+            "vengefulness": 15,
+            "diligence": 15,
+            "generosity": -10,
+            "curiosity": -10
         }
     },
     "Halfling": {
@@ -487,6 +505,13 @@
             "Elf": 10,
             "Orc": -20,
             "Tiefling": -10
+        },
+        "leanings": {
+            "sociability": 15,
+            "affection": 10,
+            "generosity": 10,
+            "boldness": -10,
+            "ambition": -10
         }
     },
     "Gnome": {
@@ -632,6 +657,10 @@
             "Half-Orc": -35,
             "Orc": -35,
             "Tiefling": -10
+        },
+        "leanings": {
+            "curiosity": 20,
+            "sociability": 10
         }
     },
     "Half-Orc": {
@@ -664,6 +693,11 @@
             "Half-Elf": -15,
             "Halfling": -15,
             "Orc": 10
+        },
+        "leanings": {
+            "boldness": 10,
+            "vengefulness": 10,
+            "mercy": -5
         }
     },
     "Dragonborn": {
@@ -808,6 +842,11 @@
         },
         "attitudes": {
             "Orc": -10
+        },
+        "leanings": {
+            "honour": 15,
+            "loyalty": 10,
+            "ambition": 10
         }
     },
     "Tiefling": {
@@ -922,6 +961,12 @@
         },
         "attitudes": {
             "Orc": -10
+        },
+        "leanings": {
+            "ambition": 10,
+            "curiosity": 5,
+            "piety": -15,
+            "sociability": -5
         }
     },
     "Orc": {
@@ -1055,6 +1100,13 @@
             "Human": -15,
             "Half-Orc": 10,
             "Dragonborn": -10
+        },
+        "leanings": {
+            "boldness": 15,
+            "vengefulness": 15,
+            "ambition": 10,
+            "mercy": -15,
+            "honour": -5
         }
     },
     "Children": {

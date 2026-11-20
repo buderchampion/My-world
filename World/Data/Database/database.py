@@ -75,6 +75,8 @@ def init_database():
 
     # the seed a world was generated from (Data.Infrastructure.seeds)
     _add_missing_columns(connection, "worlds", {"seed": "INTEGER", "map_width": "INTEGER", "map_height": "INTEGER"})
+    # which generation of people a world has (Data.NPCS.personality.PEOPLE_VERSION): an older world stays 0
+    _add_missing_columns(connection, "worlds", {"people_version": "INTEGER NOT NULL DEFAULT 0"})
 
     # kills, renown and epithets (Data.Combat.nemesis)
     _add_missing_columns(connection, "npcs", {
@@ -131,6 +133,16 @@ def init_database():
         "generosity": "INTEGER",
         "mercy": "INTEGER",
         "boldness": "INTEGER",
+        # the other nine, for the Decision Engine (new worlds only: Data.NPCS.personality.PEOPLE_VERSION)
+        "ambition": "INTEGER",
+        "diligence": "INTEGER",
+        "curiosity": "INTEGER",
+        "vengefulness": "INTEGER",
+        "sociability": "INTEGER",
+        "affection": "INTEGER",
+        "honour": "INTEGER",
+        "piety": "INTEGER",
+        "loyalty": "INTEGER",
     })
 
     _add_missing_columns(connection, "kingdoms", {

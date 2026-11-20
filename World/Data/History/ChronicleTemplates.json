@@ -125,24 +125,24 @@
         "{When}, {kingdom} was founded in rebellion, when {ruler} of the {county} defeated the armies of {other} and claimed a crown."
     ],
     "Edict (lower taxes)": [
-        "{When}, the {nature} {title} {ruler} of {kingdom} lightened the people's taxes, and there was gladness in the markets.",
-        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, lowered the taxes of the realm.",
-        "{When}, {kingdom}'s {nature} {title}, {ruler}, eased the burden of taxes upon the people."
+        "{When}, the {title} {ruler} of {kingdom} lightened the people's taxes, and there was gladness in the markets.",
+        "{When}, {ruler}, {title} of {kingdom}, lowered the taxes of the realm.",
+        "{When}, {kingdom}'s {title}, {ruler}, eased the burden of taxes upon the people."
     ],
     "Edict (raise taxes)": [
-        "{When}, the {nature} {title} {ruler} of {kingdom} laid heavier taxes upon the realm, and the people murmured.",
-        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, raised the taxes of the realm.",
-        "{When}, {kingdom}'s {nature} {title}, {ruler}, demanded more of every purse in the land."
+        "{When}, the {title} {ruler} of {kingdom} laid heavier taxes upon the realm, and the people murmured.",
+        "{When}, {ruler}, {title} of {kingdom}, raised the taxes of the realm.",
+        "{When}, {kingdom}'s {title}, {ruler}, demanded more of every purse in the land."
     ],
     "Edict (open the granary)": [
-        "{When}, with hunger in the land, the {nature} {title} {ruler} of {kingdom} threw open the royal granaries to feed the starving.",
-        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, sent the crown's grain to the hungry villages.",
-        "{When}, {kingdom}'s {nature} {title}, {ruler}, opened the granaries of the crown against the famine."
+        "{When}, with hunger in the land, the {title} {ruler} of {kingdom} threw open the royal granaries to feed the starving.",
+        "{When}, {ruler}, {title} of {kingdom}, sent the crown's grain to the hungry villages.",
+        "{When}, {kingdom}'s {title}, {ruler}, opened the granaries of the crown against the famine."
     ],
     "Edict (martial law)": [
-        "{When}, the {nature} {title} {ruler} of {kingdom} put the realm under martial law, and soldiers kept every street.",
-        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, proclaimed martial law to hold the restless realm.",
-        "{When}, {kingdom}'s {nature} {title}, {ruler}, set soldiers over the towns and ruled by the sword for a season."
+        "{When}, the {title} {ruler} of {kingdom} put the realm under martial law, and soldiers kept every street.",
+        "{When}, {ruler}, {title} of {kingdom}, proclaimed martial law to hold the restless realm.",
+        "{When}, {kingdom}'s {title}, {ruler}, set soldiers over the towns and ruled by the sword for a season."
     ],
     "Election (founding)": [
         "{When}, the Great Council of {kingdom} gathered for the first time and elected {ruler} as Doge, to rule the republic for life.",
@@ -195,9 +195,9 @@
         "{When}, {kingdom} was born on the frontier: settlers from {other} founded {city}, and owed no crown but their own."
     ],
     "Edict (public works)": [
-        "{When}, the {nature} {title} {ruler} of {kingdom} decreed great works: workshops were enlarged, and the idle of the towns set to labor.",
-        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, set the masons and carpenters to work, and the towns grew.",
-        "{When}, {kingdom}'s {nature} {title}, {ruler}, ordered the towns to build, that their idle hands might find work."
+        "{When}, the {title} {ruler} of {kingdom} decreed great works: workshops were enlarged, and the idle of the towns set to labor.",
+        "{When}, {ruler}, {title} of {kingdom}, set the masons and carpenters to work, and the towns grew.",
+        "{When}, {kingdom}'s {title}, {ruler}, ordered the towns to build, that their idle hands might find work."
     ],
     "Vengeance (battle)": [
         "{When}, at {city}, {avenger} of {kingdom} came face to face with {nemesis}, who {reason} -- and cut them down.",
@@ -228,9 +228,9 @@
         "{When}, the {disease} passed from {kingdom}; {dead} had perished of it."
     ],
     "Edict (quarantine)": [
-        "{When}, the {nature} {title} {ruler} of {kingdom} shut the plague towns and set watchmen upon the roads.",
-        "{When}, {ruler}, {title} of {kingdom}, a {nature} ruler, decreed a quarantine against the sickness.",
-        "{When}, by command of {kingdom}'s {nature} {title}, {ruler}, none might pass in or out of the stricken towns."
+        "{When}, the {title} {ruler} of {kingdom} shut the plague towns and set watchmen upon the roads.",
+        "{When}, {ruler}, {title} of {kingdom}, decreed a quarantine against the sickness.",
+        "{When}, by command of {kingdom}'s {title}, {ruler}, none might pass in or out of the stricken towns."
     ],
     "Ruler Died (sickness)": [
         "{When}, sickness carried off {ruler}, {title} of {kingdom}.",

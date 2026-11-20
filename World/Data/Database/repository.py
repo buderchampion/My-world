@@ -11,21 +11,21 @@ def create_npc(conn, city_id, name, gender, age, npc_class, profession, traits=N
     (Data.NPCS.races): `race` if given -- a child's, from their parents -- otherwise one
     of their kingdom's, most likely its own; anyone not human is named in their people's tongue."""
 
-    from Data.NPCS.personality import random_traits
+    from Data.NPCS.personality import random_traits, TRAITS
     from Data.NPCS import races
-    traits = traits or random_traits()
     race = race or races.choose_person_race(races.city_race(conn, city_id))
+    traits = traits or random_traits(race)                          # around their people's middle
     npc_class = races.suited_class(race, npc_class, profession)      # a dwarf is never a monk (the Player's Handbook)
     if race != races.HUMAN:
         name = races.given_name(race, gender)
 
     cursor = conn.execute(
-        """
-        INSERT INTO npcs (city_id, name, gender, age, class, profession, generosity, mercy, boldness, race, years)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        f"""
+        INSERT INTO npcs (city_id, name, gender, age, class, profession, {", ".join(TRAITS)}, race, years)
+        VALUES (?, ?, ?, ?, ?, ?, {", ".join("?" * len(TRAITS))}, ?, ?)
         """,
         (city_id, name, gender, age, npc_class, profession,
-         traits["generosity"], traits["mercy"], traits["boldness"], race, races.years_for(race, age))
+         *[traits.get(t) for t in TRAITS], race, races.years_for(race, age))
     )
 
     return get_npc(conn, cursor.lastrowid)
@@ -620,8 +620,10 @@ def set_last_civil_war_year(conn, kingdom_id, year):
     conn.execute("UPDATE kingdoms SET last_civil_war_year = ? WHERE id = ?", (year, kingdom_id))
 
 def create_world(conn, name):
+    """A new world: its people are of the current generation (Data.NPCS.personality.PEOPLE_VERSION)."""
 
-    cursor = conn.execute("INSERT INTO worlds (name) VALUES (?)", (name,))
+    from Data.NPCS.personality import PEOPLE_VERSION
+    cursor = conn.execute("INSERT INTO worlds (name, people_version) VALUES (?, ?)", (name, PEOPLE_VERSION))
 
     return {"id": cursor.lastrowid, "name": name}
 
