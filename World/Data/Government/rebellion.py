@@ -112,6 +112,9 @@ def rise(conn, leader, allies=()):
     kingdom = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (leader["kingdom_id"],)).fetchone())
     from Data.NPCS.personality import nudge          # the crown is betrayed by its own lords (Data.NPCS.personality)
     nudge(conn, [kingdom["ruler_id"]], "betrayed")
+    from Data.NPCS.regard import betrayed                # and the crown's trust in the rebel lords and their houses breaks
+    from Data.Government.edicts import today
+    betrayed(conn, kingdom["ruler_id"], [lord["id"] for lord in lords if lord], today(conn, kingdom["world_id"]))
 
     rebels, crown, _, mercenaries = sides(conn, coalition)
 

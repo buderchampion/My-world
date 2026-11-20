@@ -103,9 +103,11 @@ def grant_epithet(conn, npc_id, epithet):
     return True
 
 
-def hold_grievances(conn, victim_id, killer_id, day, deed="slew"):
+def hold_grievances(conn, victim_id, killer_id, day, deed="slew", context=None):
     """The victim's kin and close friends take up a grievance against the killer (or, with another `deed`,
-    against whoever is to blame: "paid for the murder of"). Returns how many did."""
+    against whoever is to blame: "paid for the murder of"). A notable's grievance also spreads to the killer's
+    house and, in a war or raid, the killer's kingdom (Data.NPCS.regard). Returns how many did."""
+    from Data.NPCS.regard import widen
     from Data.Government.succession import children_of, parents_of, siblings_of, spouse_of
 
     holders = {}
@@ -134,6 +136,8 @@ def hold_grievances(conn, victim_id, killer_id, day, deed="slew"):
             """INSERT INTO grievances (holder_id, target_id, amount, reason, since_day, settled) VALUES (?, ?, ?, ?, ?, 0)
                ON CONFLICT(holder_id, target_id) DO UPDATE SET amount = MIN(?, grievances.amount + excluded.amount), settled = 0""",
             (holder, killer_id, amount, f"{deed} their {'friend' if kind == 'friend' else kind_of_victim(kind)}, {victim_name}", day, MAX_GRIEVANCE))
+        widen(conn, holder, killer_id, amount, f"{deed} their {'friend' if kind == 'friend' else kind_of_victim(kind)}, {victim_name}",
+              day, context)
         count += 1
     return count
 
@@ -168,7 +172,7 @@ def _credit(conn, dead, foes, city_id, context, day, kingdom_id):
             gain += RANK_RENOWN[rank]
             conn.execute("INSERT INTO killings (killer_id, victim_id, day, city_id, context, victim_rank) VALUES (?, ?, ?, ?, ?, ?)",
                          (killer["id"], victim["id"], day, city_id, context, rank))
-            hold_grievances(conn, victim["id"], killer["id"], day)
+            hold_grievances(conn, victim["id"], killer["id"], day, context=context)
             title = victim.get("title") or victim.get("profession")
             where = f" at {place['name']}" if place else ""
             create_event(conn, "Slaying", f"{display_name(conn, killer['id'])} slew {title} {victim['name']}{where}.",
@@ -235,7 +239,7 @@ def slay(conn, killer, victim, city_id, context, day, cause):
     conn.execute("INSERT INTO killings (killer_id, victim_id, day, city_id, context, victim_rank) VALUES (?, ?, ?, ?, ?, ?)",
                  (killer["id"], victim["id"], day, city_id, context, rank or "none"))
     conn.execute("UPDATE npcs SET kills = kills + 1, renown = renown + ? WHERE id = ?", (gain, killer["id"]))
-    hold_grievances(conn, victim["id"], killer["id"], day)
+    hold_grievances(conn, victim["id"], killer["id"], day, context=context)
     if rank == "monarch":
         grant_epithet(conn, killer["id"], f"the {victim.get('title')}slayer")
     elif rank == "lord":

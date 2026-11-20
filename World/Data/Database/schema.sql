@@ -304,6 +304,20 @@ CREATE TABLE IF NOT EXISTS grievances (
     PRIMARY KEY (holder_id, target_id)
 );
 
+-- Regard (Decision Engine piece 2a, Data.NPCS.regard): grievance toward a house or kingdom, held by
+-- notables, and earned trust toward a person, house or kingdom. Trust from ties (kin, friends) is worked
+-- out live and never stored; grievance toward a person stays in grievances above.
+CREATE TABLE IF NOT EXISTS regard (
+    holder_id    INTEGER NOT NULL REFERENCES npcs(id),
+    target_kind  TEXT NOT NULL,                -- 'npc', 'house' (a family id) or 'kingdom'
+    target_id    INTEGER NOT NULL,
+    grievance    REAL NOT NULL DEFAULT 0,      -- 0 to 200, like a grievance toward a person
+    trust        REAL NOT NULL DEFAULT 0,      -- earned trust, -100 to +100
+    reason       TEXT,
+    since_day    INTEGER NOT NULL,
+    PRIMARY KEY (holder_id, target_kind, target_id)
+);
+
 -- Occupations: a conquered town held by a garrison for a year (Data.Government.occupation).
 CREATE TABLE IF NOT EXISTS occupations (
     id                   INTEGER PRIMARY KEY,

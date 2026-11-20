@@ -179,7 +179,26 @@ def year_events(conn, world_id, first_day, last_day, before_max_id):
     except Exception:
         e["quests"], e["adventurers"], e["captives"], e["era"] = [], (0, 0), [], None
     e["nudges"] = nudge_summary(conn, world_id)
+    e["grudges"] = grudge_summary(conn, world_id)
     return e
+
+
+def grudge_summary(conn, world_id):
+    """Grievance and trust (Data.NPCS.regard): open grievances against people, notables' feuds with houses and
+    grudges against kingdoms, and how many lords their ruler distrusts."""
+    try:
+        people = conn.execute("""SELECT COUNT(*), COALESCE(AVG(g.amount), 0) FROM grievances g JOIN npcs h ON h.id = g.holder_id
+                                 JOIN cities c ON c.id = h.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                 WHERE k.world_id = ? AND g.settled = 0 AND h.alive = 1""", (world_id,)).fetchone()
+        wider = dict(conn.execute("""SELECT r.target_kind, COUNT(*) FROM regard r JOIN npcs h ON h.id = r.holder_id
+                                     JOIN cities c ON c.id = h.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                     WHERE k.world_id = ? AND r.grievance > 0 AND h.alive = 1 GROUP BY 1""", (world_id,)).fetchall())
+        distrust = conn.execute("""SELECT COUNT(*) FROM regard r JOIN kingdoms k ON k.ruler_id = r.holder_id
+                                   WHERE k.world_id = ? AND r.target_kind = 'npc' AND r.trust < 0""", (world_id,)).fetchone()[0]
+    except Exception:
+        return None
+    return (f"{people[0]} against people (average {people[1]:.0f}), {wider.get('house', 0)} house feuds, "
+            f"{wider.get('kingdom', 0)} grudges against kingdoms; rulers distrust {distrust} lords")
 
 
 def nudge_summary(conn, world_id):
@@ -265,6 +284,8 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
         lines.append(f"Era      {e['era'][0]}")
     if e.get("nudges"):
         lines.append(f"Nudges   {e['nudges']}")
+    if e.get("grudges"):
+        lines.append(f"Grudges  {e['grudges']}")
     lines.append("Kingdoms")
     for k in s["kingdoms"]:
         if k["status"] == "Fallen":

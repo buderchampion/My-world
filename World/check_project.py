@@ -724,6 +724,16 @@ FEATURES = [
                   "Data/Database/database.py": ['"trait_drift"']},
     },
     {
+        "name": "Decision Engine, piece 2a: grievance and trust -- notables hold blood feuds against houses and grudges against "
+                "kingdoms; grievances fade by temper; trust from ties, betrayal and faithful service",
+        "functions": {"Data/NPCS/regard.py": ["hold", "earn_trust", "tie", "trust", "grievance", "widen", "betrayed", "regard_year"],
+                      "Data/NPCS/notables.py": ["notable_ids", "is_notable", "house_of", "house_name"]},
+        "wired": {"Data/Combat/nemesis.py": ["widen(conn, holder", "context=context"],
+                  "Data/Government/rebellion.py": ["betrayed(conn, kingdom"],
+                  "Data/Simulation/simulation_manager.py": ["regard_year(self.conn"]},
+        "tables": ["regard"],
+    },
+    {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
                 "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
         "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
@@ -5773,6 +5783,64 @@ def _smoke_body(r, holder):
                 conn.execute("UPDATE npcs SET vengefulness = ?, mercy = ?, trait_drift = ? WHERE id = ?", (*held, spouse["id"]))
                 conn.commit()
         P.masters_year(conn, world_id)
+
+    def grievance_and_trust():
+        import Data.NPCS.regard as R
+        import Data.NPCS.notables as N
+        from Data.Combat.nemesis import hold_grievances
+        notables = set(N.notable_ids(conn, world_id))
+        assert notables, "a world with no notables"
+        # a lord of a noble house slays a notable's kin in a raid from another kingdom: the notable holds the
+        # killer, the killer's house (half) and the killer's kingdom (half) to account
+        lords = conn.execute(f"""SELECT n.id, c.kingdom_id FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                 WHERE k.world_id = ? AND n.alive = 1 AND n.title IN ({','.join('?' * len(N.NOBLE_TITLES))})""",
+                             (world_id, *N.NOBLE_TITLES)).fetchall()
+        assert lords, "no rulers or lords to test with"
+        killer = lords[0]
+        house = N.house_of(conn, killer["id"])
+        assert house is not None, "a ruler's or lord's family is not a noble house"
+        holder = conn.execute(
+            f"""SELECT n.id, n.spouse_id FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                WHERE k.world_id = ? AND n.alive = 1 AND n.profession IN ('Knight', 'Captain') AND c.kingdom_id != ?
+                AND n.spouse_id IS NOT NULL AND (SELECT alive FROM npcs s WHERE s.id = n.spouse_id) = 1
+                AND (n.family_id IS NULL OR n.family_id != ?) LIMIT 1""", (world_id, killer["kingdom_id"], house)).fetchone()
+        if holder is None:
+            return
+        victim = holder["spouse_id"]
+        saved = (conn.execute("SELECT * FROM grievances").fetchall(), conn.execute("SELECT * FROM regard").fetchall())
+        temper_was = conn.execute("SELECT vengefulness FROM npcs WHERE id = ?", (holder["id"],)).fetchone()[0]
+        try:
+            hold_grievances(conn, victim, killer["id"], 100, context="raid")
+            assert R.grievance(conn, holder["id"], "npc", killer["id"]) == 100, "a widow holds no grievance for her slain spouse"
+            assert R.grievance(conn, holder["id"], "house", house) == 50, "no blood feud against the killer's house"
+            assert R.grievance(conn, holder["id"], "kingdom", killer["kingdom_id"]) == 50, "no grudge against the raiding kingdom"
+            assert R.trust(conn, holder["id"], "npc", victim) >= R.TIE_TRUST["spouse"] - 0.01, "no trust between spouses"
+            # betrayal breaks the crown's trust; years of faithful service mend it a little
+            ruler = conn.execute("SELECT ruler_id FROM kingdoms WHERE id = ?", (killer["kingdom_id"],)).fetchone()[0]
+            if ruler and ruler != killer["id"]:
+                R.betrayed(conn, ruler, [killer["id"]], 100)
+                assert R.trust(conn, ruler, "npc", killer["id"]) <= R.BETRAYED + R.TIE_TRUST["sibling"], "betrayal did not cost trust"
+            # grievances fade by temper: the forgiving faster than the even-tempered; the vengeful never forget
+            for temper, kept in ((-100, 80), (0, 90), (100, 100)):
+                conn.execute("UPDATE npcs SET vengefulness = ? WHERE id = ?", (temper, holder["id"]))
+                conn.execute("UPDATE grievances SET amount = 100, settled = 0 WHERE holder_id = ? AND target_id = ?", (holder["id"], killer["id"]))
+                conn.execute("UPDATE regard SET grievance = 100 WHERE holder_id = ?", (holder["id"],))
+                R.regard_year(conn, world_id)
+                left = R.grievance(conn, holder["id"], "npc", killer["id"])
+                assert abs(left - kept) < 0.01, f"a grievance of temper {temper} kept {left:.1f} of 100, not {kept}"
+                assert abs(R.grievance(conn, holder["id"], "house", house) - kept) < 0.01, "a blood feud did not fade by temper"
+        finally:
+            conn.execute("DELETE FROM grievances")
+            conn.execute("DELETE FROM regard")
+            for row in saved[0]:
+                conn.execute(f"INSERT INTO grievances VALUES ({','.join('?' * len(row))})", tuple(row))
+            for row in saved[1]:
+                conn.execute(f"INSERT INTO regard VALUES ({','.join('?' * len(row))})", tuple(row))
+            conn.execute("UPDATE npcs SET vengefulness = ? WHERE id = ?", (temper_was, holder["id"]))
+            conn.commit()
+
+    run_step(r, "grievance and trust: a lord's raid gives a notable a blood feud with his house and a grudge with his kingdom; "
+                "grievances fade by temper; betrayal costs the crown's trust", grievance_and_trust)
 
     run_step(r, "life nudges: battle hardens once a year; kin slain always counts; childhood doubles; grief deepens faith or doubt; "
                 "mastery once in a life; no trait past 30 from birth", life_nudges)
