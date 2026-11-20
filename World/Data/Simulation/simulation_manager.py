@@ -637,6 +637,8 @@ class SimulationManager:
         # The young train their trade's ability; the aging feel their years (Data.NPCS.abilities).
         from Data.NPCS.abilities import abilities_year
         abilities_year(self.conn, self.world_id)
+        from Data.NPCS.personality import masters_year          # a trade mastered moves them (once in a life)
+        masters_year(self.conn, self.world_id)
 
         # The age of the world may turn, and each kingdom's own times begin or end (Data.History.eras).
         from Data.History.eras import eras_year

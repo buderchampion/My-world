@@ -77,6 +77,8 @@ def fall_of_capital(conn, city, attacker, defender):
                 if lord and lord["title"] in ("Count", "Countess"):
                     lord["title"] = None
                     save_npc(conn, lord)
+                    from Data.NPCS.personality import nudge
+                    nudge(conn, [lord["id"]], "loss")
             conn.execute("UPDATE cities SET province_id = NULL WHERE province_id = ?", (seat["id"],))
             conn.execute("DELETE FROM provinces WHERE id = ?", (seat["id"],))
         conn.execute("UPDATE cities SET type = 'Capital', ruler_id = NULL WHERE id = ?", (new_capital["id"],))
@@ -98,6 +100,8 @@ def fall_of_capital(conn, city, attacker, defender):
         else:
             ruler["title"] = None
             save_npc(conn, ruler)
+            from Data.NPCS.personality import nudge
+            nudge(conn, [ruler["id"]], "loss")
             attacker_capital = attacker.get("capital") or attacker.get("capital_city_id")
             if attacker_capital:
                 relocate_npc(conn, ruler["id"], attacker_capital)

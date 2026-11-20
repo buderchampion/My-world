@@ -267,6 +267,9 @@ def tournament(conn, world_id, kingdom_id):
             save_npc(conn, npc)
             death_event(conn, npc, "the lists", city_id=capital["id"])
             apply_grief(conn, npc)
+    from Data.NPCS.personality import nudge          # glory for the champion; the unhorsed are humbled
+    nudge(conn, [champion], "glory")
+    nudge(conn, [r for r in riders if r != champion and r not in fallen], "beaten")
     spend_treasury(conn, kingdom_id, TOURNEY_PRIZE)
     conn.execute("UPDATE npcs SET gold = gold + ?, renown = renown + ? WHERE id = ?", (TOURNEY_PRIZE, CHAMPION_RENOWN, champion))
     conn.execute("UPDATE npcs SET needs_happiness = MIN(100, needs_happiness + ?) WHERE city_id = ? AND alive = 1",

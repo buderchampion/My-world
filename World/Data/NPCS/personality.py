@@ -89,6 +89,144 @@ def _clamp(value):
     return max(-100, min(100, int(round(value))))
 
 
+# Life nudges. What happens to a person moves their traits a little (step 1d). Each kind of event nudges a
+# person at most once a year (a hard year of war hardens a soldier a little; years of war make a veteran),
+# except kin slain, which always counts; becoming a master counts once in a life. Childhood shapes people
+# most: under CHILDHOOD every nudge counts CHILD_NUDGE times. No trait ever drifts more than DRIFT_CAP from
+# where it was at birth. Each person's record (npcs.trait_drift) keeps how far each trait has moved and the
+# year each kind last nudged them. Nudges are silent: the tools that explain a person's choices show them.
+DRIFT_CAP = 30
+CHILDHOOD = 16
+CHILD_NUDGE = 2
+NUDGES = {
+    "battle":    {"mercy": -2, "boldness": 2},              # fought in a battle
+    "glory":     {"ambition": 3, "boldness": 3},            # won a duel, a tournament, a great quest
+    "beaten":    {"boldness": -3, "ambition": -2},          # beaten, captured or humiliated
+    "kin_slain": {"vengefulness": 10, "mercy": -5},         # spouse, parent, child or sibling slain
+    "grief":     {"piety": "faith", "sociability": -3},     # spouse or child lost to sickness, age or mishap
+    "hardship":  None,                                      # survived plague or famine (see _shifts)
+    "helped":    {"generosity": 3, "sociability": 2},       # freed, found, cured
+    "betrayed":  {"loyalty": -5, "sociability": -3},
+    "master":    {"diligence": 2, "ambition": 2},           # a trade mastered (skill level MASTER_LEVEL)
+    "loss":      {"ambition": -3},                          # lost a title, a home or a fortune
+}
+EVERY_TIME = {"kin_slain"}
+ONCE_A_LIFE = {"master"}
+FAITH = 5                  # grief: the pious grow more pious, doubters more doubtful
+PIOUS_HARDSHIP = 5         # hardship: the pious (piety STRONG or more) turn to the gods...
+HARD_HEARTED = -3          # ...everyone else holds tighter to what they have (generosity)
+
+
+def _shifts(event, row):
+    """{trait: change} this event makes in this person."""
+    if event == "hardship":
+        return {"piety": PIOUS_HARDSHIP} if (row["piety"] or 0) >= STRONG else {"generosity": HARD_HEARTED}
+    shifts = {}
+    for trait, d in NUDGES[event].items():
+        if d == "faith":
+            piety = row["piety"] or 0
+            d = FAITH if piety > 0 else -FAITH if piety < 0 else 0
+        if d:
+            shifts[trait] = d
+    return shifts
+
+
+def drift_of(row):
+    """A person's nudge record: {"traits": {trait: how far it has moved}, "seen": {event: year last nudged}}."""
+    import json
+    try:
+        record = json.loads(row["trait_drift"] or "{}")
+    except (KeyError, IndexError, TypeError, ValueError):
+        record = {}
+    record.setdefault("traits", {})
+    record.setdefault("seen", {})
+    return record
+
+
+def nudge(conn, npc_ids, event):
+    """Life nudges `event` (NUDGES) the traits of these people -- the living with the twelve traits (older
+    worlds: no one). Returns how many were nudged."""
+    import json
+    from Data.Government.edicts import today
+    ids = list(dict.fromkeys(i for i in npc_ids if i and i > 0))
+    nudged, year = 0, None
+    for start in range(0, len(ids), 500):
+        part = ids[start:start + 500]
+        rows = conn.execute(
+            f"""SELECT n.id, n.age, n.trait_drift, {', '.join('n.' + t for t in TRAITS)}, k.world_id
+                FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                WHERE n.id IN ({','.join('?' * len(part))}) AND n.alive = 1 AND n.loyalty IS NOT NULL""", part).fetchall()
+        for row in rows:
+            if year is None:
+                year = today(conn, row["world_id"]) // 360
+            record = drift_of(row)
+            seen = record["seen"]
+            if event in ONCE_A_LIFE and event in seen:
+                continue
+            if event not in EVERY_TIME and seen.get(event) == year:
+                continue
+            seen[event] = year
+            scale = CHILD_NUDGE if (row["age"] or 0) < CHILDHOOD else 1
+            sets = {}
+            for trait, d in _shifts(event, row).items():
+                moved = record["traits"].get(trait, 0)
+                wanted = max(-DRIFT_CAP, min(DRIFT_CAP, moved + d * scale))       # never past DRIFT_CAP from birth
+                value = _clamp(row[trait] + wanted - moved)
+                if value != row[trait]:
+                    record["traits"][trait] = moved + value - row[trait]
+                    sets[trait] = value
+            columns = "".join(f"{t} = ?, " for t in sets)
+            conn.execute(f"UPDATE npcs SET {columns}trait_drift = ? WHERE id = ?", (*sets.values(), json.dumps(record), row["id"]))
+            nudged += 1
+    return nudged
+
+
+def kin_of(conn, npc_id, close=False):
+    """Living kin of a person: spouse, parents, children and (unless `close`) brothers and sisters.
+    `close`: only those for whom this is the loss of a spouse or a child (their spouse and their parents)."""
+    row = conn.execute("SELECT spouse_id, parent_a_id, parent_b_id FROM npcs WHERE id = ?", (npc_id,)).fetchone()
+    if not row:
+        return []
+    kin = {row["spouse_id"], row["parent_a_id"], row["parent_b_id"]}
+    kin |= {r[0] for r in conn.execute("SELECT id FROM npcs WHERE spouse_id = ? AND alive = 1", (npc_id,))}
+    if not close:
+        kin |= {r[0] for r in conn.execute("SELECT id FROM npcs WHERE (parent_a_id = ? OR parent_b_id = ?) AND alive = 1",
+                                           (npc_id, npc_id))}
+        parents = [p for p in (row["parent_a_id"], row["parent_b_id"]) if p]
+        if parents:
+            marks = ",".join("?" * len(parents))
+            kin |= {r[0] for r in conn.execute(
+                f"SELECT id FROM npcs WHERE (parent_a_id IN ({marks}) OR parent_b_id IN ({marks})) AND alive = 1 AND id != ?",
+                (*parents, *parents, npc_id))}
+    kin.discard(None)
+    kin.discard(npc_id)
+    return list(kin)
+
+
+GRIEF_CAUSES = {"old age", "sickness", "starvation", "fire", "flood", "earthquake", "lost in the wilds"}
+
+
+def mourn(conn, npc_id, cause):
+    """A death moves the kin: a violent one breeds vengeance in spouse, parents, children, brothers and sisters;
+    a death by sickness, age or mishap grieves a spouse or parent."""
+    if cause in GRIEF_CAUSES:
+        return nudge(conn, kin_of(conn, npc_id, close=True), "grief")
+    return nudge(conn, kin_of(conn, npc_id), "kin_slain")
+
+
+MASTER_LEVEL = 7           # a skill at this level is mastered (a master bard's song is twice as strong: Data.Magic.magic)
+
+
+def masters_year(conn, world_id):
+    """Yearly: those who have mastered a skill feel it (once in a life). Returns how many."""
+    ids = [r[0] for r in conn.execute(
+        """SELECT DISTINCT s.npc_id FROM npc_skills s JOIN npcs n ON n.id = s.npc_id JOIN cities c ON c.id = n.city_id
+           JOIN kingdoms k ON k.id = c.kingdom_id
+           WHERE k.world_id = ? AND n.alive = 1 AND n.loyalty IS NOT NULL AND s.level >= ?
+           AND (n.trait_drift IS NULL OR n.trait_drift NOT LIKE '%"master"%')""", (world_id, MASTER_LEVEL))]
+    return nudge(conn, ids, "master")
+
+
 def leanings(race):
     """How far a people's average moves on each trait (Races.json)."""
     from Data.NPCS.races import race_of

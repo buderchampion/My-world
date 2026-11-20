@@ -125,6 +125,8 @@ def crown(conn, kingdom, claimant, deposed):
     from Data.Events.events import coronation_event
     capital = kingdom["capital_city_id"]
     conn.execute("UPDATE npcs SET title = NULL WHERE id = ?", (deposed["id"],))
+    from Data.NPCS.personality import nudge
+    nudge(conn, [deposed["id"]], "loss")
     vacate_seats(conn, claimant, capital)
     conn.execute("UPDATE provinces SET lord_id = NULL, regent_id = NULL WHERE lord_id = ?", (claimant["id"],))
     if claimant["city_id"] != capital:
@@ -152,6 +154,8 @@ def exile(conn, kingdom, npc):
         (kingdom["world_id"], kingdom["id"], seat[0], seat[0], seat[1], seat[1])).fetchone()
     province = conn.execute("SELECT * FROM provinces WHERE lord_id = ?", (npc["id"],)).fetchone()
     conn.execute("UPDATE npcs SET title = NULL WHERE id = ?", (npc["id"],))
+    from Data.NPCS.personality import nudge
+    nudge(conn, [npc["id"]], "loss")
     if province:
         conn.execute("UPDATE provinces SET lord_id = NULL, regent_id = NULL WHERE id = ?", (province["id"],))
         conn.execute("UPDATE cities SET ruler_id = NULL WHERE id = ?", (province["seat_city_id"],))

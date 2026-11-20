@@ -537,4 +537,6 @@ def aftermath(conn, fighters):
             out["sick"] += 1
     from Data.NPCS.abilities import deeds                      # and what they came through may have made them stronger
     deeds(conn, fighters)
+    from Data.NPCS.personality import nudge                    # ...and harder (Data.NPCS.personality)
+    nudge(conn, [f.ref for f in fighters if f.ref is not None and getattr(f, "race", "") and f.hp > 0], "battle")
     return out

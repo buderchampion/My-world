@@ -323,6 +323,11 @@ def kingdom_periods(conn, world_id, day):
             conn.execute("UPDATE kingdom_periods SET ended_day = ? WHERE id = ?", (day, now["id"]))
             _chronicle(conn, world_id, k["id"], "Period Ended", {"era": now["name"]}, (now["id"],))
             changes.append((k["id"], now["kind"], "ended"))
+            if now["kind"] == "hungry":                  # those who lived through the Hungry Years (Data.NPCS.personality)
+                from Data.NPCS.personality import nudge
+                nudge(conn, [r[0] for r in conn.execute(
+                    "SELECT n.id FROM npcs n JOIN cities c ON c.id = n.city_id WHERE c.kingdom_id = ? AND n.alive = 1",
+                    (k["id"],))], "hardship")
         if kind:
             ruler = conn.execute("SELECT name, title FROM npcs WHERE id = ?", (k["ruler_id"],)).fetchone() if k["ruler_id"] else None
             who = f"{ruler['title'] or ''} {ruler['name']}".strip() if ruler else "the crown"

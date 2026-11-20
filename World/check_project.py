@@ -706,6 +706,24 @@ FEATURES = [
                   "Data/NPCS/ProfessionClasses.json": ['"Adventurer"']},
     },
     {
+        "name": "Decision Engine, piece 1d: life nudges traits -- battle, glory, defeat, kin slain, grief, hardship, help, "
+                "betrayal, mastery, loss -- once a year per kind, double in childhood, never more than 30 from birth",
+        "functions": {"Data/NPCS/personality.py": ["nudge", "drift_of", "kin_of", "mourn", "masters_year"]},
+        "wired": {"Data/Events/events.py": ["mourn(conn"],
+                  "Data/Combat/nemesis.py": ['"battle")', '"glory")'],
+                  "Data/Combat/specials.py": ['"battle")'],
+                  "Data/Events/festivals.py": ['"glory")', '"beaten")'],
+                  "Data/Quests/adventure.py": ['"glory" if won else "beaten"', '"helped")', '"beaten")'],
+                  "Data/NPCS/sickness.py": ['"helped")', '"hardship")'],
+                  "Data/History/eras.py": ['"hardship")'],
+                  "Data/Government/rebellion.py": ['"betrayed")'],
+                  "Data/Government/conquest.py": ['"loss")'],
+                  "Data/World/disasters.py": ['"loss")'],
+                  "Data/Government/crime.py": ['"loss")'],
+                  "Data/Simulation/simulation_manager.py": ["masters_year(self.conn"],
+                  "Data/Database/database.py": ['"trait_drift"']},
+    },
+    {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
                 "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
         "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
@@ -5675,6 +5693,89 @@ def _smoke_body(r, holder):
 
     run_step(r, "what the scores do: the book's Strength, Dexterity, Constitution and Wisdom in fights; spells, experience, sickness; "
                 "training and deeds within their caps; aging; the jobless choose adventuring", what_scores_do)
+
+    def life_nudges():
+        import json
+        import Data.NPCS.personality as P
+        from Data.Events.events import death_event
+        rows = conn.execute(f"""SELECT n.* FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                WHERE k.world_id = ? AND n.alive = 1 AND n.loyalty IS NOT NULL AND n.age >= 20
+                                AND n.mercy BETWEEN -40 AND 40 AND n.boldness BETWEEN -40 AND 40 ORDER BY n.id LIMIT 1""",
+                            (world_id,)).fetchall()
+        if not rows:
+            return
+        npc = rows[0]
+        saved = {t: npc[t] for t in P.TRAITS} | {"trait_drift": npc["trait_drift"], "age": npc["age"]}
+
+        def now():
+            return conn.execute("SELECT * FROM npcs WHERE id = ?", (npc["id"],)).fetchone()
+
+        def restore():
+            conn.execute(f"UPDATE npcs SET {', '.join(k + ' = ?' for k in saved)} WHERE id = ?", (*saved.values(), npc["id"]))
+            conn.commit()
+        try:
+            restore()
+            conn.execute("UPDATE npcs SET trait_drift = NULL WHERE id = ?", (npc["id"],))
+            # a battle hardens: mercy -2, boldness +2 -- once a year, however many battles
+            assert P.nudge(conn, [npc["id"]], "battle") == 1
+            assert P.nudge(conn, [npc["id"]], "battle") == 0, "the same kind of event nudged twice in a year"
+            after = now()
+            assert (after["mercy"] - npc["mercy"], after["boldness"] - npc["boldness"]) == (-2, 2), "a battle did not harden them"
+            # kin slain always counts -- but no trait ever drifts more than DRIFT_CAP from birth
+            for _ in range(10):
+                P.nudge(conn, [npc["id"]], "kin_slain")
+            after = now()
+            assert after["vengefulness"] - npc["vengefulness"] == min(P.DRIFT_CAP, 100 - npc["vengefulness"]), \
+                "kin slain did not count every time, or went past the drift cap"
+            assert after["mercy"] - npc["mercy"] == -P.DRIFT_CAP, "mercy drifted past the cap"
+            assert all(abs(v) <= P.DRIFT_CAP for v in P.drift_of(after)["traits"].values()), "a trait drifted past the cap"
+            # childhood shapes them twice as much
+            restore()
+            conn.execute("UPDATE npcs SET trait_drift = NULL, age = 10 WHERE id = ?", (npc["id"],))
+            P.nudge(conn, [npc["id"]], "glory")
+            after = now()
+            assert after["ambition"] - npc["ambition"] == min(2 * 3, 100 - npc["ambition"]), "a child's nudge did not count double"
+            # grief: the pious grow more pious, doubters more doubtful
+            restore()
+            for piety, sign in ((50, 1), (-50, -1)):
+                conn.execute("UPDATE npcs SET trait_drift = NULL, piety = ? WHERE id = ?", (piety, npc["id"]))
+                P.nudge(conn, [npc["id"]], "grief")
+                assert now()["piety"] == piety + sign * P.FAITH, "grief did not deepen faith or doubt"
+            # hardship: the pious turn to the gods, the rest hold tighter to what they have
+            conn.execute("UPDATE npcs SET trait_drift = NULL, piety = 60 WHERE id = ?", (npc["id"],))
+            P.nudge(conn, [npc["id"]], "hardship")
+            assert now()["piety"] == 65
+            conn.execute("UPDATE npcs SET trait_drift = NULL, piety = 0 WHERE id = ?", (npc["id"],))
+            P.nudge(conn, [npc["id"]], "hardship")
+            assert now()["generosity"] == npc["generosity"] - 3 or npc["generosity"] <= -98
+            # mastery counts once in a life
+            conn.execute("UPDATE npcs SET trait_drift = NULL WHERE id = ?", (npc["id"],))
+            assert P.nudge(conn, [npc["id"]], "master") == 1
+            conn.execute("UPDATE npcs SET trait_drift = ? WHERE id = ?",
+                         (json.dumps({"traits": {}, "seen": {"master": -5}}), npc["id"]))
+            assert P.nudge(conn, [npc["id"]], "master") == 0, "mastery moved someone twice"
+        finally:
+            restore()
+        # a violent death moves the dead one's kin to vengeance; a death by sickness grieves a spouse or parent
+        kin_row = conn.execute("""SELECT n.* FROM npcs n JOIN cities c ON c.id = n.city_id JOIN kingdoms k ON k.id = c.kingdom_id
+                                  WHERE k.world_id = ? AND n.alive = 1 AND n.spouse_id IS NOT NULL AND n.loyalty IS NOT NULL
+                                  AND (SELECT alive FROM npcs s WHERE s.id = n.spouse_id) = 1 ORDER BY n.id LIMIT 1""",
+                               (world_id,)).fetchone()
+        if kin_row:
+            spouse = conn.execute("SELECT * FROM npcs WHERE id = ?", (kin_row["spouse_id"],)).fetchone()
+            assert kin_row["spouse_id"] in P.kin_of(conn, kin_row["id"], close=True)
+            held = (spouse["vengefulness"], spouse["mercy"], spouse["trait_drift"])
+            try:
+                P.mourn(conn, kin_row["id"], "War")
+                moved = conn.execute("SELECT vengefulness FROM npcs WHERE id = ?", (spouse["id"],)).fetchone()[0]
+                assert moved == min(100, held[0] + 10), "a spouse slain did not breed vengeance"
+            finally:
+                conn.execute("UPDATE npcs SET vengefulness = ?, mercy = ?, trait_drift = ? WHERE id = ?", (*held, spouse["id"]))
+                conn.commit()
+        P.masters_year(conn, world_id)
+
+    run_step(r, "life nudges: battle hardens once a year; kin slain always counts; childhood doubles; grief deepens faith or doubt; "
+                "mastery once in a life; no trait past 30 from birth", life_nudges)
 
     run_step(r, "eras: the world opens at peace; darkness, war, want and quiet turn the age; every kingdom chronicles it; kingdoms have their own times",
              eras_turn)

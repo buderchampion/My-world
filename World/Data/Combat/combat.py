@@ -322,6 +322,8 @@ def transfer_conquest(conn, city, attacker_kingdom, defender_kingdom):
                 lord = get_npc(conn, province["lord_id"])
                 lord["title"] = None
                 save_npc(conn, lord)
+                from Data.NPCS.personality import nudge
+                nudge(conn, [lord["id"]], "loss")
             conn.execute("UPDATE cities SET kingdom_id = ?, province_id = NULL WHERE province_id = ?",
                          (attacker_kingdom["id"], province["id"]))
             conn.execute("DELETE FROM provinces WHERE id = ?", (province["id"],))

@@ -221,7 +221,7 @@ def cure(conn, world_id, people, away):
             sick_by_city.setdefault(p["city_id"], []).append(p)
     if not sick_by_city:
         return 0
-    cured = 0
+    cured, healed = 0, []
     for c in casters(conn, world_id, ("Cleric", "Druid", "Bard"), city_ids=set(sick_by_city)):
         if c["id"] in away or c["profession"] not in MAGIC_TRADES:
             continue                       # Cure Disease is a learned rite: hedge casters do not have it
@@ -237,6 +237,9 @@ def cure(conn, world_id, people, away):
             people[p["id"]] = row
             sick_by_city[c["city_id"]] = [x for x in sick_by_city[c["city_id"]] if x["id"] != p["id"]]
             cured += 1
+            healed.append(p["id"])
+    from Data.NPCS.personality import nudge                # the cured were helped (Data.NPCS.personality)
+    nudge(conn, healed, "helped")
     return cured
 
 
@@ -289,6 +292,9 @@ def run_course(conn, world_id, people, day, away):
             well.append(p["id"])
             from Data.NPCS.abilities import hardship              # what does not kill them may harden them
             hardship(conn, p["id"])
+            if d.get("kind") == "plague":                          # and a plague survived changes them (Data.NPCS.personality)
+                from Data.NPCS.personality import nudge
+                nudge(conn, [p["id"]], "hardship")
         else:
             conn.execute("UPDATE npcs SET health = ?, disease_days = ? WHERE id = ?", (round(health, 2), days, p["id"]))
     return dead, well

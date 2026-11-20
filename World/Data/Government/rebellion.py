@@ -110,6 +110,8 @@ def rise(conn, leader, allies=()):
     coalition = [leader] + list(allies)
     lords = [get_npc(conn, p["lord_id"]) for p in coalition]
     kingdom = dict(conn.execute("SELECT * FROM kingdoms WHERE id = ?", (leader["kingdom_id"],)).fetchone())
+    from Data.NPCS.personality import nudge          # the crown is betrayed by its own lords (Data.NPCS.personality)
+    nudge(conn, [kingdom["ruler_id"]], "betrayed")
 
     rebels, crown, _, mercenaries = sides(conn, coalition)
 

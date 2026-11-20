@@ -613,7 +613,16 @@ def do_monsters(conn, world_id, quest, party, foes, day):
 
 
 def free_captives(conn, lair_id, how):
-    n = conn.execute("UPDATE captives SET status = 'Freed' WHERE lair_id = ? AND status = 'Held'", (lair_id,)).rowcount
+    return freed(conn, "lair_id = ?", (lair_id,))
+
+
+def freed(conn, where, params):
+    """Captives or the lost (those matching `where`, still held) go free -- and are moved by it: they were
+    helped (Data.NPCS.personality). Returns how many."""
+    from Data.NPCS.personality import nudge
+    ids = [r[0] for r in conn.execute(f"SELECT npc_id FROM captives WHERE status = 'Held' AND {where}", params)]
+    n = conn.execute(f"UPDATE captives SET status = 'Freed' WHERE status = 'Held' AND {where}", params).rowcount
+    nudge(conn, ids, "helped")
     return n
 
 
@@ -691,7 +700,7 @@ def do_errand(conn, world_id, quest, one, day):
         punishment = sentence(conn, dict(thief), _mercy(conn, kingdom), day)
         conn.execute("UPDATE crimes SET punishment = ? WHERE id = ?", (punishment, crime["id"]))
     elif kind == "Search":
-        conn.execute("UPDATE captives SET status = 'Freed' WHERE npc_id = ? AND status = 'Held'", (quest["target_npc_a_id"],))
+        freed(conn, "npc_id = ?", (quest["target_npc_a_id"],))
     return True, True
 
 
@@ -767,6 +776,8 @@ def undertake(conn, world_id, quest, day, taken, adventurers=None):
     else:
         reward(conn, living, 0, 0, QUEST_XP // 2)
         close(conn, quest, "Failed", day, f"{who} were beaten; {dead} fell")
+    from Data.NPCS.personality import nudge                 # glory for the victors; the beaten come home humbled
+    nudge(conn, living, "glory" if won else "beaten")
     text = (f"{who} took up the quest to {quest['title'][0].lower() + quest['title'][1:]}"
             + (f" and won through, slaying {slain}" if won else f", and were beaten") + (f"; {dead} of them fell." if dead else "."))
     if kind == "Dragon" and won:
@@ -799,6 +810,8 @@ def take_captives(conn, world_id, lair, village_id, living_ids, n):
         conn.execute("""INSERT INTO captives (world_id, npc_id, lair_id, home_city_id, kind, map_x, map_y, taken_day, status)
                         VALUES (?, ?, ?, ?, 'captive', ?, ?, ?, 'Held')""",
                      (world_id, i, lair["id"], village_id, lair["map_x"], lair["map_y"], day))
+    from Data.NPCS.personality import nudge
+    nudge(conn, taken, "beaten")
     return taken
 
 
@@ -806,6 +819,8 @@ def lose_traveller(conn, world_id, npc_id, home_city_id, x, y):
     """A traveller beaten by beasts on the road, but not slain: lost and hurt in the wilds."""
     conn.execute("""INSERT INTO captives (world_id, npc_id, lair_id, home_city_id, kind, map_x, map_y, taken_day, status)
                     VALUES (?, ?, NULL, ?, 'lost', ?, ?, ?, 'Held')""", (world_id, npc_id, home_city_id, x, y, _today(conn, world_id)))
+    from Data.NPCS.personality import nudge
+    nudge(conn, [npc_id], "beaten")
 
 
 def captives_month(conn, world_id, day):
@@ -814,8 +829,8 @@ def captives_month(conn, world_id, day):
     from Data.Database.repository import get_npc
     from Data.Events.events import death_event
     from Data.Relationships.relationships import apply_grief
-    freed = conn.execute("""UPDATE captives SET status = 'Freed' WHERE world_id = ? AND status = 'Held' AND kind = 'captive'
-                            AND lair_id IN (SELECT id FROM monster_lairs WHERE status != 'Active' OR count <= 0)""", (world_id,)).rowcount
+    let_go = freed(conn, """world_id = ? AND kind = 'captive'
+                            AND lair_id IN (SELECT id FROM monster_lairs WHERE status != 'Active' OR count <= 0)""", (world_id,))
     dead = 0
     for c in conn.execute("""SELECT c.*, l.monster FROM captives c LEFT JOIN monster_lairs l ON l.id = c.lair_id
                              WHERE c.world_id = ? AND c.status = 'Held'""", (world_id,)).fetchall():
@@ -833,7 +848,7 @@ def captives_month(conn, world_id, day):
             apply_grief(conn, npc)
             dead += 1
     conn.commit()
-    return {"dead": dead, "freed": freed}
+    return {"dead": dead, "freed": let_go}
 
 
 # ---------------------------------------------------------------- the month

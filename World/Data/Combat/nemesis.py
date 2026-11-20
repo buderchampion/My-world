@@ -208,6 +208,9 @@ def record_battle(conn, side_a, dead_a, side_b, dead_b, city_id=None, context="b
     if world is None:
         return []
     day = today(conn, world["world_id"])
+    fallen = {d.get("id") for d in list(dead_a) + list(dead_b)}           # the living come home harder (Data.NPCS.personality)
+    from Data.NPCS.personality import nudge
+    nudge(conn, [n.get("id") for n in list(side_a) + list(side_b) if n.get("id") not in fallen], "battle")
     return (_credit(conn, dead_a, side_b, city_id, context, day, kingdom_id)
             + _credit(conn, dead_b, side_a, city_id, context, day, kingdom_id))
 
@@ -319,8 +322,12 @@ def duel(conn, feud, avenger, nemesis, city_id, context, template):
             write_entry(conn, kingdom_id, "Vengeance", template, year, season,
                         {"kingdom": kingdom, "avenger": avenger_name, "nemesis": nemesis_name, "reason": feud["reason"], "city": where},
                         seed_parts=(holder, target))
+        from Data.NPCS.personality import nudge
+        nudge(conn, [holder], "glory")
     else:
         slay(conn, nemesis, avenger, city_id, context, day, f"slain seeking vengeance on {nemesis_name}")
         create_event(conn, "Vengeance", f"{avenger_name} sought out {nemesis_name}, who {feud['reason']}, at {where} -- and fell to them.",
                      participants=[holder, target], city_id=city_id, kingdom_id=_kingdom_of(conn, target))
+        from Data.NPCS.personality import nudge
+        nudge(conn, [target], "glory")                         # they stood against their avenger and lived
     return avenger_won

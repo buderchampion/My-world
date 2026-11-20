@@ -178,7 +178,38 @@ def year_events(conn, world_id, first_day, last_day, before_max_id):
         e["era"] = conn.execute("SELECT name FROM world_eras WHERE world_id = ? AND ended_day IS NULL", (world_id,)).fetchone()
     except Exception:
         e["quests"], e["adventurers"], e["captives"], e["era"] = [], (0, 0), [], None
+    e["nudges"] = nudge_summary(conn, world_id)
     return e
+
+
+def nudge_summary(conn, world_id):
+    """Life nudges (Data.NPCS.personality): how many of the living have been moved, how far on average, how many
+    reached the 30-point limit on some trait; soldiers' mercy and boldness drift against everyone else's."""
+    import json
+    try:
+        rows = conn.execute("""SELECT n.profession, n.trait_drift FROM npcs n JOIN cities c ON c.id = n.city_id
+                               JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND n.alive = 1
+                               AND n.loyalty IS NOT NULL""", (world_id,)).fetchall()
+    except Exception:
+        return None
+    moved = capped = 0
+    total = 0.0
+    sums = {"Soldier": [0, 0, 0], "other": [0, 0, 0]}
+    for r in rows:
+        drift = (json.loads(r["trait_drift"]) if r["trait_drift"] else {}).get("traits", {})
+        group = sums["Soldier" if r["profession"] in ("Soldier", "Captain", "Knight") else "other"]
+        group[0] += 1
+        group[1] += drift.get("mercy", 0)
+        group[2] += drift.get("boldness", 0)
+        if drift:
+            moved += 1
+            total += sum(abs(v) for v in drift.values())
+            capped += any(abs(v) >= 30 for v in drift.values())
+    def avg(g, i):
+        return g[i] / g[0] if g[0] else 0
+    return (f"{moved:,} of {len(rows):,} moved, {total / moved if moved else 0:.1f} points each, {capped} at the limit; "
+            f"soldiers mercy {avg(sums['Soldier'], 1):+.1f} boldness {avg(sums['Soldier'], 2):+.1f}, "
+            f"others mercy {avg(sums['other'], 1):+.1f} boldness {avg(sums['other'], 2):+.1f}")
 
 
 def write(lines, fh):
@@ -232,6 +263,8 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
             lines.append("Captives " + ", ".join(f"{k} {st.lower()} {n}" for k, st, n in e["captives"]))
     if e.get("era"):
         lines.append(f"Era      {e['era'][0]}")
+    if e.get("nudges"):
+        lines.append(f"Nudges   {e['nudges']}")
     lines.append("Kingdoms")
     for k in s["kingdoms"]:
         if k["status"] == "Fallen":

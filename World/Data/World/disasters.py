@@ -30,6 +30,7 @@ FIRE_CHANCE = 0.004            # a month, for a town of FIRE_TOWN_SIZE named peo
 FIRE_TOWN_SIZE = 300
 FIRE_SUMMER = 2.0              # ...twice as likely in summer
 FIRE_BURNS = (0.05, 0.30)      # the share of buildings a fire takes
+HOME_LOST = 50                 # damage this heavy (a fire's) leaves a house's people without their home
 FIRE_STORES = (0.05, 0.25)     # the share of each store it takes
 FIRE_DEATHS = (0.0, 0.02)      # the share of townsfolk it kills
 GREAT_FIRE = 0.22              # a fire that takes this share of a town (or GREAT_FIRE_DEAD lives) is a Great Fire: chronicled
@@ -104,6 +105,12 @@ def _damage(conn, city_id, share, lost):
     hit = random.sample(ids, min(len(ids), max(1 if ids and share > 0 else 0, int(round(len(ids) * share)))))
     for b in hit:
         conn.execute("UPDATE buildings SET condition = MAX(0, condition - ?) WHERE id = ?", (random.uniform(*lost), b))
+    if hit and lost[0] >= HOME_LOST:                    # a home burned down: those who lived there lost it (Data.NPCS.personality)
+        from Data.NPCS.personality import nudge
+        marks = ",".join("?" * len(hit))
+        nudge(conn, [r[0] for r in conn.execute(
+            f"""SELECT n.id FROM npcs n JOIN buildings b ON b.id = n.home_id
+                WHERE b.id IN ({marks}) AND b.type = 'House' AND n.alive = 1""", hit)], "loss")
     return len(hit)
 
 

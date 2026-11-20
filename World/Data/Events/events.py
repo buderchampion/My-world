@@ -37,6 +37,10 @@ def death_event(conn, npc, cause, city_id=None, kingdom_id=None, foe_kingdom=Non
     # foe_kingdom (given for war deaths) lets the chronicle name the enemy.
     record_ruler_death(conn, npc, cause, event["id"], foe_kingdom=foe_kingdom)
 
+    # and their kin are moved by it: vengeance for the slain, grief for the rest (Data.NPCS.personality)
+    from Data.NPCS.personality import mourn
+    mourn(conn, npc["id"], cause)
+
     return event
 
 

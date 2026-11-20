@@ -153,6 +153,7 @@ def init_database():
         "strength_pct": "INTEGER NOT NULL DEFAULT 0",          # exceptional Strength: 18/01 .. 18/00 (100)
         "ability_gains": "TEXT",                               # what training and deeds have added: {"train:strength": 1}
         "ability_age": "INTEGER NOT NULL DEFAULT 0",           # the aging stages already felt (1 middle, 2 old, 3 venerable)
+        "trait_drift": "TEXT",                                 # life nudges: {"traits": {"mercy": -4}, "seen": {"battle": 3}}
     })
 
     _add_missing_columns(connection, "kingdoms", {

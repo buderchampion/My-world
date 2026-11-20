@@ -49,6 +49,7 @@ POOR, HUNGRY, SLUMS, ROGUE, THIEF_AGAIN = 3.0, 3.0, 2.0, 3.0, 2.0   # how much l
 HARD_HEART = 1.5                 # at mercy -100 (scaled: none at 0 or above)
 TAKE = (0.1, 0.3)                # the share of the victim's gold taken
 MIN_TAKE = 2
+FORTUNE_LOST = 100              # a theft this large is the loss of a fortune
 MARKS = 5                        # a thief sizes up this many townsfolk and robs the best-off
 WATCH = ("Guard", "Soldier")
 WATCH_REACH = 0.5                # the watch's catch: 1 - e^(-REACH x watchmen per 100 people)...
@@ -216,6 +217,9 @@ def thefts_month(conn, world_id):
                 conn.execute("UPDATE npcs SET gold = gold + ? WHERE id = ?", (take - cut, thief["id"]))
                 if cut:
                     conn.execute("UPDATE thieves_guilds SET chest = chest + ? WHERE id = ?", (cut, thief["guild_id"]))
+                if take >= FORTUNE_LOST:                    # robbed of a fortune (Data.NPCS.personality)
+                    from Data.NPCS.personality import nudge
+                    nudge(conn, [victim["id"]], "loss")
                 victim["gold"] -= take
                 thief["gold"] = (thief["gold"] or 0) + take - cut
             conn.execute("""INSERT INTO crimes (world_id, city_id, thief_id, victim_id, kind, amount, day, caught, punishment)
