@@ -25,6 +25,8 @@ REQUIRED_TEMPLATE_KEYS = (
     "Discovery Made", "Discovery Learned (trade)", "Discovery Learned (fair)", "Discovery Learned (conquest)",
     "Era Began", "Period Began (golden)", "Period Began (troubles)", "Period Began (hungry)", "Period Began (mourning)",
     "Period Began (wars)", "Period Ended",
+    "Quest Done (lair)", "Quest Failed (lair)", "Quest Done (rescue)", "Quest Failed (rescue)", "Quest Done (bounty)",
+    "Quest Failed (bounty)", "Quest Done (dragon)", "Quest Failed (dragon)", "Quest Done (herbs)",
     "Vengeance (battle)",
     "Edict (public works)",
     "Realm Founded (settlers)",

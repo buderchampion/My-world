@@ -115,6 +115,11 @@ def init_database():
     _add_missing_columns(connection, "npcs", {"convictions": "INTEGER NOT NULL DEFAULT 0", "guild_id": "INTEGER",
                                               "jailed_until": "INTEGER"})        # shaken by a disaster (Data.World.disasters)
     _add_missing_columns(connection, "outbreaks", {"chronicled": "INTEGER NOT NULL DEFAULT 0"})
+    # adventurers and their quests (Data.Quests.adventure)
+    _add_missing_columns(connection, "quests", {"posted_day": "INTEGER", "taken_day": "INTEGER", "done_day": "INTEGER",
+                                                "outcome": "TEXT", "target_lair_id": "INTEGER", "target_dragon_id": "INTEGER",
+                                                "caravan_id": "INTEGER", "crime_id": "INTEGER"})
+    _add_missing_columns(connection, "caravans", {"escort_quest_id": "INTEGER", "escort_checked": "INTEGER NOT NULL DEFAULT 0"})
     connection.execute("CREATE INDEX IF NOT EXISTS idx_npcs_disease ON npcs(disease)")
 
     # How well each NPC ate today, 0-1 (Data.Economy.food_market): meals restore

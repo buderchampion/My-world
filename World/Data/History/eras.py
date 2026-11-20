@@ -11,6 +11,8 @@ World eras  the world is always in one era. A new world opens in the Age of
               War       campaigns begun (WAR_PER_REALM)
               Dragons   dragon attacks (DRAGON_DEEDS)
               Wonders   discoveries made (WONDERS_RATE)
+              Heroes    heroes' deeds: lairs, bandits and dragons beaten, captives
+                        rescued, the lost found, herbs fetched (HEROES_RATE)
               Peace     no campaign for PEACE_YEARS
             A new era begins when its signs are strong enough (1.0) and
             stronger than the present era's own; an era whose signs still
@@ -70,10 +72,12 @@ BAD_SHARE = 0.35               # ...or this share of the land has had bad harves
 WAR_PER_REALM = 0.5            # campaigns begun, for every kingdom
 DRAGON_DEEDS = 3               # dragon attacks (and dragons slain)
 WONDERS_RATE = 1.5             # discoveries made by research, a year for every kingdom
+HEROES_RATE = 10               # heroes' deeds -- quests won against monsters and bandits, captives rescued, the lost found,
+                               # herbs brought to the sick; a dragon slain counts ten -- a year for every kingdom
 PEACE_YEARS = 8                # no campaign for this long
 STAY = 0.6                     # an era whose own signs are this strong holds against weaker ones
 FAITH_AFTER = 0.5              # an age of darkness or want that has faded gives way to Faith this often
-ORDER = ("Darkness", "Want", "War", "Dragons", "Wonders", "Faith", "Peace")
+ORDER = ("Darkness", "Want", "War", "Dragons", "Heroes", "Wonders", "Faith", "Peace")
 ADDITIVE = ("happiness", "loyalty")
 
 HUNGRY_DEAD = 30
@@ -214,6 +218,10 @@ def signs(conn, world_id, day):
                                 WHERE k.world_id = ? AND d.day >= ? AND d.day < ? AND d.how = 'research'""", (world_id, since, day)),
         "bad": sum(r[1] for r in harvests) / len(harvests) if harvests else 0.0,
         "hungry": hungry,
+        "heroic": count("""SELECT SUM(CASE WHEN q.type = 'Dragon' THEN 10 ELSE 1 END) FROM quests q JOIN cities c ON c.id = q.city_id
+                           JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND q.status = 'Done'
+                           AND q.type IN ('Lair', 'Rescue', 'Bounty', 'Dragon', 'Search', 'Herbs')
+                           AND q.done_day >= ? AND q.done_day < ?""", (world_id, since, day)),
     }
 
 
@@ -227,6 +235,7 @@ def strengths(s, day):
         "War": s["campaigns"] / realms / WAR_PER_REALM,
         "Dragons": s["dragon_deeds"] / DRAGON_DEEDS,
         "Wonders": s["discoveries"] / years / realms / WONDERS_RATE,
+        "Heroes": s.get("heroic", 0) / years / realms / HEROES_RATE,
         "Peace": 0.0 if s["campaigns"] else min(quiet / PEACE_YEARS, 1.0),   # peace holds, but gives way to any strong sign
     }
 

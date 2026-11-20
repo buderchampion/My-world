@@ -31,6 +31,8 @@ MAX_MILITIA = 40                 # ...with one man per household, up to this man
 FOOD_TAKEN = 0.25                # of the village's Food, if the raiders win
 FAMILY_SIZE = 5                  # people per household (Data.World.countryside)
 CHRONICLED = 10                  # a raid that kills this many is written into the kingdom's chronicle
+CAPTIVE_CHANCE = 0.5             # raiders who win carry off captives this often (to be rescued: Data.Quests.adventure)...
+CAPTIVES = (1, 3)                # ...this many of the village's living
 
 
 def plural(name, n=2):
@@ -124,6 +126,12 @@ def raid(conn, world_id, lair, village):
     if militia_dead:
         conn.execute("UPDATE cities SET households = MAX(0, households - ?) WHERE id = ?", (militia_dead / FAMILY_SIZE, village["id"]))
     taken = 0.0
+    captives = []
+    if raiders_won and random.random() < CAPTIVE_CHANCE:
+        alive = [f.ref for f in defenders if f.ref is not None and f.ref not in named_dead]
+        random.shuffle(alive)
+        from Data.Quests.adventure import take_captives
+        captives = take_captives(conn, world_id, lair, village["id"], alive, random.randint(*CAPTIVES))
     if raiders_won:
         food = conn.execute("SELECT amount FROM city_resources WHERE city_id = ? AND resource_name = 'Food'", (village["id"],)).fetchone()
         taken = round((food[0] if food else 0) * FOOD_TAKEN, 1)
@@ -134,6 +142,8 @@ def raid(conn, world_id, lair, village):
     if raiders_won:
         text = (f"{band_text} from a lair in the wilds raided {village['name']}: {count_of(dead, 'villager')} killed "
                 f"and {taken:,.0f} Food carried off; {fallen} of the raiders fell.")
+        if captives:
+            text += f" They dragged {count_of(len(captives), 'villager')} back to their lair."
     else:
         text = f"{band_text} raided {village['name']} and were driven off: {fallen} of the raiders fell, and {count_of(dead, 'villager')}."
     if left <= 0:
@@ -150,7 +160,7 @@ def raid(conn, world_id, lair, village):
     conn.commit()
     return {"lair": lair["id"], "monster": monster["name"], "village": village["name"], "band": band, "raiders_won": raiders_won,
             "raiders_fallen": fallen, "named_dead": len(named_dead), "militia_dead": militia_dead, "food_taken": taken,
-            "cleared": left <= 0, "text": text}
+            "cleared": left <= 0, "captives": len(captives), "text": text}
 
 
 def monster_raids(conn, world_id):

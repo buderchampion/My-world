@@ -166,6 +166,18 @@ def year_events(conn, world_id, first_day, last_day, before_max_id):
                                     AND day BETWEEN ? AND ?""", (world_id, first_day, last_day)).fetchone()
     e["plagues"] = conn.execute("""SELECT disease, COUNT(*), COALESCE(SUM(dead), 0) FROM outbreaks WHERE world_id = ?
                                    AND started_day BETWEEN ? AND ? GROUP BY disease""", (world_id, first_day, last_day)).fetchall()
+    try:
+        e["quests"] = conn.execute("""SELECT q.type, q.status, COUNT(*) FROM quests q JOIN cities c ON c.id = q.city_id
+                                      JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND q.done_day BETWEEN ? AND ?
+                                      GROUP BY 1, 2""", (world_id, first_day, last_day)).fetchall()
+        e["adventurers"] = conn.execute("""SELECT COUNT(*), COALESCE(SUM(renown >= 10), 0) FROM npcs n JOIN cities c ON c.id = n.city_id
+                                           JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND n.alive = 1
+                                           AND n.profession = 'Adventurer'""", (world_id,)).fetchone()
+        e["captives"] = conn.execute("""SELECT kind, status, COUNT(*) FROM captives WHERE world_id = ? AND taken_day BETWEEN ? AND ?
+                                        GROUP BY 1, 2""", (world_id, first_day, last_day)).fetchall()
+        e["era"] = conn.execute("SELECT name FROM world_eras WHERE world_id = ? AND ended_day IS NULL", (world_id,)).fetchone()
+    except Exception:
+        e["quests"], e["adventurers"], e["captives"], e["era"] = [], (0, 0), [], None
     return e
 
 
@@ -202,7 +214,7 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
     notable = [(k, ev[k]) for k in ("Fire", "Flood", "Earthquake", "Locusts", "Monster Raid", "Beast Attack", "Raid", "Famine",
                                     "Famine Flight", "Turned Bandit", "Wedding", "Coronation", "Election", "Tournament", "Fair",
                                     "Grand Building", "Ennobled", "Edict", "Assassination", "Dragon Attack", "Dragon Slain",
-                                    "Dragon Hunt", "Succession Crisis", "Discovery") if ev.get(k)]
+                                    "Dragon Hunt", "Succession Crisis", "Discovery", "Quest", "Renown") if ev.get(k)]
     if notable:
         lines.append("Events   " + ", ".join(f"{k} {n}" for k, n in notable))
     new_chronicle = e["chronicle"] - chronicle_before
@@ -210,6 +222,16 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
         lines.append("Chronicle " + ", ".join(f"{k} {n}" for k, n in new_chronicle.most_common()))
     lines.append(f"Monsters {s['lairs'][0]} lairs, {s['lairs'][1]:,} monsters; dragons {s['dragons'][0]} evil, {s['dragons'][1]} good, "
                  f"hoards {s['dragons'][2]:,.0f} gold; {s['discoveries']} discoveries known")
+    if e.get("quests") or e.get("adventurers", (0, 0))[0]:
+        done = {}
+        for kind, status, n in e["quests"]:
+            done.setdefault(kind, {})[status] = n
+        lines.append(f"Quests   {e['adventurers'][0]} adventurers ({e['adventurers'][1]} champions); "
+                     + ", ".join(f"{k} " + "/".join(f"{st.lower()} {n}" for st, n in v.items()) for k, v in sorted(done.items())))
+        if e.get("captives"):
+            lines.append("Captives " + ", ".join(f"{k} {st.lower()} {n}" for k, st, n in e["captives"]))
+    if e.get("era"):
+        lines.append(f"Era      {e['era'][0]}")
     lines.append("Kingdoms")
     for k in s["kingdoms"]:
         if k["status"] == "Fallen":

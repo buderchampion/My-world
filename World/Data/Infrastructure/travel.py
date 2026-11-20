@@ -80,7 +80,10 @@ def get_traveling_npc_ids(conn, world_id):
     # Soldiers marching or encamped with an army are away from home too.
     from Data.Government.armies import get_army_npc_ids
 
-    return {row["npc_id"] for row in rows} | get_army_npc_ids(conn, world_id)
+    # So are adventurers off on a quest, and folk carried off by monsters or lost in the wilds (Data.Quests.adventure).
+    from Data.Quests.adventure import busy_ids, captive_ids
+
+    return {row["npc_id"] for row in rows} | get_army_npc_ids(conn, world_id) | busy_ids(conn, world_id) | captive_ids(conn, world_id)
 
 
 def advance_npc_travels(conn, world_id):

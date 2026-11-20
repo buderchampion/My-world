@@ -669,6 +669,23 @@ FEATURES = [
         "tables": ["world_eras", "kingdom_periods"],
     },
     {
+        "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
+                "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
+        "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
+                                                   "choose_one", "post_quests", "lapse", "foes_for", "undertake", "take_captives",
+                                                   "lose_traveller", "captives_month", "quests_month", "hire_escort", "escort_fighters",
+                                                   "escort_done", "escort_defends", "busy_ids", "captive_ids"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["quests_month(self.conn"],
+                  "Data/Infrastructure/travel.py": ["busy_ids(conn, world_id) | captive_ids(conn, world_id)"],
+                  "Data/Monsters/raids.py": ["take_captives(conn, world_id, lair"],
+                  "Data/Monsters/travelers.py": ["lose_traveller(conn, world_id", "escort_fighters(conn, row)"],
+                  "Data/Infrastructure/caravans.py": ["hire_escort(conn, world_id, caravan)", "escort_defends(conn, world_id, caravan, here)",
+                                                     "escort_done(conn, world_id, caravan, delivered=True)"],
+                  "Data/History/eras.py": ["HEROES_RATE"],
+                  "Data/Combat/melee.py": ['"Adventurer": (2, 6, (1, 8))']},
+        "tables": ["quest_party", "captives"],
+    },
+    {
         "name": "Monster raids: raider lairs strike villages; the fight is by the book; the dead, the food and the lair's losses are kept",
         "functions": {"Data/Monsters/raids.py": ["monster_raids", "raid", "nearest_village", "defenders_of", "plural"]},
         "wired": {"Data/Simulation/simulation_manager.py": ["monster_raids(self.conn"]},
@@ -3435,6 +3452,7 @@ def _smoke_body(r, holder):
         ruled = {row["id"]: row["ruler_id"] for row in conn.execute(
             "SELECT c.id, c.ruler_id FROM cities c JOIN npcs n ON n.id = c.ruler_id WHERE n.alive = 1")}
         entries_before = conn.execute("SELECT COUNT(*) FROM chronicle_entries WHERE event_type IN ('Coronation', 'Election')").fetchone()[0]
+        monarchs_before = [r[0] for r in conn.execute("SELECT ruler_id FROM kingdoms WHERE ruler_id IS NOT NULL")]
         import Data.Monsters.raids as raids_module                  # a raid is no quiet month: none this time...
         import Data.Government.rebellion as rebellion_module        # ...and nor is a lord's rising
         raids_held, raids_module.RAID_CHANCE = raids_module.RAID_CHANCE, 0.0
@@ -3455,7 +3473,10 @@ def _smoke_body(r, holder):
                 (entries_after - entries_before,))]
             dead_monarchs = [k["name"] for k in conn.execute(
                 "SELECT k.name FROM kingdoms k JOIN npcs n ON n.id = k.ruler_id WHERE n.alive = 0")]
-            raise AssertionError(f"a quiet month added chronicle entries: {added}; monarchs dead now: {dead_monarchs}")
+            how = [r[0] for r in conn.execute(
+                f"SELECT description FROM events WHERE type = 'Death' AND description LIKE '%died%' AND ({' OR '.join(['description LIKE ?'] * len(monarchs_before))})",
+                [f"%{conn.execute('SELECT name FROM npcs WHERE id = ?', (m,)).fetchone()[0]}%" for m in monarchs_before])] if monarchs_before else []
+            raise AssertionError(f"a quiet month added chronicle entries: {added}; monarchs dead now: {dead_monarchs}; deaths: {how[:3]}")
 
     run_step(r, "rulers are saved, each realm's founding monarch is chronicled once", rulers_saved)
 
@@ -5445,6 +5466,116 @@ def _smoke_body(r, holder):
 
     run_step(r, "eras: the world opens at peace; darkness, war, want and quiet turn the age; every kingdom chronicles it; kingdoms have their own times",
              eras_turn)
+
+    def adventurers_and_quests():
+        import Data.Quests.adventure as AD
+        from Data.Government.edicts import today
+        from Data.Infrastructure.travel import get_traveling_npc_ids
+        day = today(conn, world_id)
+        marks = {t: conn.execute(f"SELECT COALESCE(MAX(id), 0) FROM {t}").fetchone()[0] for t in ("quests", "monster_lairs", "captives", "events", "caravans")}
+        saved = {k: getattr(AD, k) for k in ("TAKE_UP", "TAKE_UP_WORKER", "ADVENTURERS_PER_TAVERN", "SUCCESS", "HERB_BEASTS", "ESCORT_VALUE")}
+        town = conn.execute("""SELECT c.* FROM cities c JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND k.status != 'Fallen'
+                               AND k.type != 'Horde' AND EXISTS (SELECT 1 FROM buildings b WHERE b.city_id = c.id AND b.type = 'Tavern')
+                               ORDER BY c.id LIMIT 1""", (world_id,)).fetchone()
+        if not town:
+            return
+        town = dict(town)
+        away = set(get_traveling_npc_ids(conn, world_id))
+        folk = [dict(r) for r in conn.execute("""SELECT * FROM npcs WHERE city_id = ? AND alive = 1 AND title IS NULL AND jailed_until IS NULL
+                                                 AND age BETWEEN 20 AND 30 ORDER BY id LIMIT 12""", (town["id"],)) if r["id"] not in away][:6]
+        if len(folk) < 4:
+            return
+        before = {n["id"]: (n["profession"], n["class"], n["spouse_id"], n["workplace_id"], n["gold"], n["renown"]) for n in folk}
+        try:
+            # the idle young of the adventuring classes take up the life where a tavern has room
+            AD.TAKE_UP, AD.TAKE_UP_WORKER, AD.ADVENTURERS_PER_TAVERN = 1.0, 1.0, 10 ** 4
+            for n in folk:
+                conn.execute("UPDATE npcs SET profession = 'Laborer', class = 'Fighter', spouse_id = NULL, workplace_id = NULL, gold = 100 WHERE id = ?",
+                             (n["id"],))
+                conn.execute("DELETE FROM npc_skills WHERE npc_id = ? AND skill_name = 'Swordsmanship'", (n["id"],))
+                conn.execute("INSERT INTO npc_skills (npc_id, skill_name, level, xp) VALUES (?, 'Swordsmanship', 15, 0)", (n["id"],))
+            AD.take_up_adventuring(conn, world_id)
+            took = [n["id"] for n in folk if conn.execute("SELECT profession FROM npcs WHERE id = ?", (n["id"],)).fetchone()[0] == "Adventurer"]
+            assert len(took) >= 4, f"idle young fighters in a town with a tavern did not take up adventuring ({len(took)} did)"
+            conn.execute(f"UPDATE npcs SET profession = 'Laborer' WHERE profession = 'Adventurer' AND id NOT IN ({','.join('?' * len(took))})", took)
+            # a small lair near the town: a quest is posted, a party sized to it takes it and clears it, and is away until home
+            lair = conn.execute("""INSERT INTO monster_lairs (world_id, region_id, monster, kind, map_x, map_y, count, hit_points_each)
+                                   VALUES (?, NULL, 'Badger', 'beast', ?, ?, 2, 2.0)""", (world_id, town["map_x"] + 50, town["map_y"])).lastrowid
+            AD.post_quests(conn, world_id, day)
+            q = conn.execute("SELECT * FROM quests WHERE type = 'Lair' AND target_lair_id = ?", (lair,)).fetchone()
+            assert q and q["status"] == "Available", "no quest was posted for a small lair near a town"
+            rep = AD.undertake(conn, world_id, q, day, set())
+            assert rep and rep["done"], f"a strong party did not clear two badgers: {rep}"
+            assert rep["party"] < AD.MAX_PARTY, "a party for two badgers was not sized to the danger"
+            assert conn.execute("SELECT status FROM monster_lairs WHERE id = ?", (lair,)).fetchone()[0] == "Cleared", "the lair was not cleared"
+            party = [r[0] for r in conn.execute("SELECT npc_id FROM quest_party WHERE quest_id = ?", (q["id"],))]
+            assert party and set(party) <= set(get_traveling_npc_ids(conn, world_id)), "the party is not away on its quest"
+            assert conn.execute("SELECT status FROM quests WHERE id = ?", (q["id"],)).fetchone()[0] == "Done", "the quest was not marked done"
+            assert any(conn.execute("SELECT renown FROM npcs WHERE id = ?", (i,)).fetchone()[0] > (before[i][5] or 0) for i in party), \
+                "the party won no renown"
+            # raiders carry off villagers; a rescue is posted; when the lair falls they go home
+            raiders = conn.execute("""INSERT INTO monster_lairs (world_id, region_id, monster, kind, map_x, map_y, count, hit_points_each)
+                                      VALUES (?, NULL, 'Kobold', 'raider', ?, ?, 30, 2.0)""", (world_id, town["map_x"] - 50, town["map_y"])).lastrowid
+            villager = conn.execute("SELECT id FROM npcs WHERE city_id = ? AND alive = 1 AND id NOT IN (%s) LIMIT 1" % ",".join("?" * len(folk)),
+                                    (town["id"], *[n["id"] for n in folk])).fetchone()[0]
+            lair_row = dict(conn.execute("SELECT * FROM monster_lairs WHERE id = ?", (raiders,)).fetchone())
+            assert AD.take_captives(conn, world_id, lair_row, town["id"], [villager], 1) == [villager], "no captive was taken"
+            assert villager in get_traveling_npc_ids(conn, world_id), "a captive is still counted at home"
+            AD.post_quests(conn, world_id, day)
+            assert conn.execute("SELECT 1 FROM quests WHERE type = 'Rescue' AND target_lair_id = ?", (raiders,)).fetchone(), "no rescue was posted"
+            conn.execute("UPDATE monster_lairs SET status = 'Cleared', count = 0 WHERE id = ?", (raiders,))
+            assert AD.captives_month(conn, world_id, day)["freed"] >= 1, "captives of a fallen lair did not go home"
+            # a traveller lost in the wilds: a search is posted, and a ranger finds them; one never found dies
+            AD.lose_traveller(conn, world_id, villager, town["id"], town["map_x"], town["map_y"])
+            AD.post_quests(conn, world_id, day)
+            search = conn.execute("SELECT * FROM quests WHERE type = 'Search' AND target_npc_a_id = ? AND status = 'Available'", (villager,)).fetchone()
+            assert search, "no search was posted for a lost traveller"
+            AD.SUCCESS, AD.HERB_BEASTS = dict(AD.SUCCESS, Search=1.0), 0.0
+            seeker = conn.execute("SELECT * FROM npcs WHERE id = ?", (took[0],)).fetchone()
+            done, lived = AD.do_errand(conn, world_id, dict(search), (seeker, AD.fighter(conn, seeker), False), day)
+            assert done and lived and not conn.execute("SELECT 1 FROM captives WHERE npc_id = ? AND status = 'Held'", (villager,)).fetchone(), \
+                "the lost traveller was not found"
+            # an escort: a rich caravan hires adventurers of its town, who ride with it, and are paid when it comes in
+            AD.ESCORT_VALUE = 0
+            conn.execute("UPDATE quest_party SET back_day = 0")
+            other = conn.execute("SELECT id FROM cities WHERE id != ? LIMIT 1", (town["id"],)).fetchone()[0]
+            cid = conn.execute("""INSERT INTO caravans (origin_city_id, destination_city_id, resource, amount, buyer_kingdom_id,
+                                  seller_kingdom_id, days_remaining, status) VALUES (?, ?, 'Food', 1000.0, ?, ?, 4, 'Delivered')""",
+                               (town["id"], other, town["kingdom_id"], town["kingdom_id"])).lastrowid
+            caravan = dict(conn.execute("SELECT * FROM caravans WHERE id = ?", (cid,)).fetchone())
+            caravan["escort_quest_id"] = AD.hire_escort(conn, world_id, caravan)
+            assert caravan["escort_quest_id"] and AD.escort_fighters(conn, caravan), "a rich caravan hired no escort"
+            AD.escort_done(conn, world_id, caravan, delivered=True)
+            assert conn.execute("SELECT status FROM quests WHERE id = ?", (caravan["escort_quest_id"],)).fetchone()[0] == "Done", \
+                "the escort was not paid when the caravan came in"
+            # a quest no one took lapses
+            old = conn.execute("INSERT INTO quests (city_id, type, title, reward_gold, posted_day) VALUES (?, 'Herbs', 'old', 1, ?)",
+                               (town["id"], day - AD.QUEST_EXPIRE_DAYS - 1)).lastrowid
+            AD.lapse(conn, world_id, day)
+            assert conn.execute("SELECT status FROM quests WHERE id = ?", (old,)).fetchone()[0] == "Lapsed", "an old untaken quest did not lapse"
+            # many quests won by fighting bring an Age of Heroes
+            import Data.History.eras as EA
+            quiet = {"kingdoms": 4, "households": 4000, "campaigns": 0, "last_campaign": 0, "dark_dead": 0, "dragon_deeds": 0,
+                     "discoveries": 0, "bad": 0.0, "hungry": 0, "heroic": round(EA.HEROES_RATE * EA.LOOK_BACK * 4 * 1.5)}
+            assert EA.choose_era(quiet, "Peace", 10 ** 5) == "Heroes", "heroes' deeds did not bring an Age of Heroes"
+            # the month runs
+            AD.quests_month(conn, world_id)
+        finally:
+            for k, v in saved.items():
+                setattr(AD, k, v)
+            for i, (prof, cls, spouse, work, gold, renown) in before.items():
+                conn.execute("UPDATE npcs SET profession = ?, class = ?, spouse_id = ?, workplace_id = ?, gold = ?, renown = ? WHERE id = ? AND alive = 1",
+                             (prof, cls, spouse, work, gold, renown, i))
+            conn.execute("DELETE FROM quest_party WHERE quest_id > ?", (marks["quests"],))
+            conn.execute("DELETE FROM quests WHERE id > ?", (marks["quests"],))
+            conn.execute("DELETE FROM captives WHERE id > ?", (marks["captives"],))
+            conn.execute("DELETE FROM monster_lairs WHERE id > ?", (marks["monster_lairs"],))
+            conn.execute("DELETE FROM caravans WHERE id > ?", (marks["caravans"],))
+            conn.commit()
+
+    run_step(r, "adventurers and quests: the idle young take up adventuring; a party sized to a lair clears it and is away; raiders' captives "
+                "are rescued; the lost are found; a rich caravan hires an escort; untaken quests lapse; heroes' deeds bring their age",
+             adventurers_and_quests)
 
     def discoveries_spread():
         import Data.Research.discoveries as RS

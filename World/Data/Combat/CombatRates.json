@@ -3,5 +3,6 @@
     "Soldier": 6,
     "Captain": 10,
     "Knight": 15,
-    "Bandit": 4
+    "Bandit": 4,
+    "Adventurer": 8
 }

@@ -98,10 +98,19 @@ def advance_caravans(conn, world_id):
     camps = bandit_camps(conn, world_id)
     towns, road_days = _positions(conn, world_id)
 
+    from Data.Quests.adventure import hire_escort, escort_defends, escort_done
+
     for caravan in get_active_caravans(conn, world_id):
 
+        caravan = dict(caravan)
+        if not caravan.get("escort_checked"):                      # setting out: a rich one hires adventurers to guard it
+            caravan["escort_quest_id"] = hire_escort(conn, world_id, caravan)
+            conn.execute("UPDATE caravans SET escort_checked = 1, escort_quest_id = ? WHERE id = ?",
+                         (caravan["escort_quest_id"], caravan["id"]))
+
         here = _along(towns, road_days, caravan["origin_city_id"], caravan["destination_city_id"], caravan["days_remaining"])
-        if random.random() < bandit_chance(camps, here):
+        if random.random() < bandit_chance(camps, here) and not (caravan.get("escort_quest_id") and escort_defends(conn, world_id, caravan, here)):
+            escort_done(conn, world_id, caravan, delivered=False)
             set_caravan_status(conn, caravan["id"], "Raided")
             origin = get_city(conn, caravan["origin_city_id"])
             destination = get_city(conn, caravan["destination_city_id"])
@@ -112,6 +121,7 @@ def advance_caravans(conn, world_id):
         remaining = caravan["days_remaining"] - 1
 
         if remaining <= 0 and seize_at_siege(conn, caravan):
+            escort_done(conn, world_id, caravan, delivered=False)
             seized.append(caravan)              # arrived at a besieged town: the besiegers took it
             continue
 
@@ -122,6 +132,7 @@ def advance_caravans(conn, world_id):
             )
             save_city(conn, destination)
             set_caravan_status(conn, caravan["id"], "Delivered")
+            escort_done(conn, world_id, caravan, delivered=True)
             delivered.append(caravan)
         else:
             decrement_caravan_days(conn, caravan["id"], remaining)

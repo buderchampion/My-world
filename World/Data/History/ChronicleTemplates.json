@@ -502,5 +502,41 @@
         "{When}, {era} came to an end in {kingdom}.",
         "{When}, {kingdom} saw the passing of {era}.",
         "{When}, {era} was over, and {kingdom} went on."
+    ],
+    "Quest Done (lair)": [
+        "{When}, the adventurers {champion} went out from {city} against the {monsters} of the wilds and broke their lair.",
+        "{When}, {champion} cleared the lair of the {monsters} that troubled {city}, and the roads of {kingdom} were the safer for it."
+    ],
+    "Quest Failed (lair)": [
+        "{When}, {champion} rode out from {city} against the lair of the {monsters}, and were thrown back; {dead} came not home.",
+        "{When}, the {monsters} near {city} beat back the adventurers {champion}, and {dead} of them were slain."
+    ],
+    "Quest Done (rescue)": [
+        "{When}, {champion} stole into the lair of the {monsters} and brought home the folk of {city} who had been carried off.",
+        "{When}, the captives of {city} were won back from the {monsters} by {champion}, to great rejoicing in {kingdom}."
+    ],
+    "Quest Failed (rescue)": [
+        "{When}, {champion} sought to free the captives of {city} from the {monsters}, but were beaten; {dead} fell.",
+        "{When}, a rescue of the folk of {city} failed: the {monsters} slew {dead} of {champion}."
+    ],
+    "Quest Done (bounty)": [
+        "{When}, the bandits who plagued {city} were put to the sword by {champion}, for the bounty of {kingdom}.",
+        "{When}, {champion} broke the bandits' camp near {city}, and the folk of {kingdom} slept the easier."
+    ],
+    "Quest Failed (bounty)": [
+        "{When}, {champion} went against the bandits of {city} and were beaten; {dead} fell.",
+        "{When}, the bandits near {city} slew {dead} of the adventurers who came for the bounty: {champion}."
+    ],
+    "Quest Done (dragon)": [
+        "{When}, {dragon} was slain in its lair by adventurers out of {kingdom}: {slayer} struck the last blow, and {gold} gold was won.",
+        "{When}, {champion} took up the crown's bounty and slew {dragon}; {slayer} is called Dragonslayer ever after."
+    ],
+    "Quest Failed (dragon)": [
+        "{When}, {champion} went out to slay {dragon} for the crown's bounty, and {dead} of them were burned in its lair.",
+        "{When}, {dragon} slew {dead} of the adventurers who came against it: {champion}."
+    ],
+    "Quest Done (herbs)": [
+        "{When}, while sickness lay on {city}, {champion} went into the wilds for healing herbs, and {dead} of the sick were cured.",
+        "{When}, {champion} brought healing herbs out of the wild places to {city}, and {dead} who lay sick rose again."
     ]
 }

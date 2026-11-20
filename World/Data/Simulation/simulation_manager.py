@@ -461,6 +461,11 @@ class SimulationManager:
         from Data.Buildings.upgrades import collect_town_taxes
         collect_town_taxes(self.conn, self.world_id)
 
+        # Adventurers take up quests -- lairs, rescues, dragons, herbs, thefts, bounties, errands (Data.Quests.adventure).
+        # Before the job market, so the place of anyone who leaves a trade to adventure is filled this month.
+        from Data.Quests.adventure import quests_month
+        quests_month(self.conn, self.world_id)
+
         # The job market (Data.Economy.jobs): children grown to working age join the
         # jobless; barracks and guard posts take a few young recruits while the crown
         # can pay them; then the jobless take free places in their town.

@@ -30,6 +30,8 @@ TRAVELER_SHARE = 0.4             # folk on a journey keep to the road in company
 CARAVAN_DRIVERS = 2              # a caravan's commoners...
 CARAVAN_GUARDS = 1               # ...and its hired guard
 DISTANCE_PER_TRAVEL_DAY = 90     # road speed (Data.Infrastructure.roads)
+LOST_CHANCE = 0.35               # a traveller beaten by beasts is left lost and hurt in the wilds, not slain, this often
+                                 # (to be searched for: Data.Quests.adventure)
 
 
 def _positions(conn, world_id):
@@ -84,10 +86,11 @@ def _defenders(conn, kind, row):
     level, ac, weapon = melee.TRADES["Guard"]
     guards = [melee.Fighter("guard", "travelers", melee.HP_PER_LEVEL * level, ac, melee.person_thac0(level), [weapon])
               for _ in range(CARAVAN_GUARDS)]
-    return drivers + guards
+    from Data.Quests.adventure import escort_fighters        # adventurers hired to guard it
+    return drivers + guards + (escort_fighters(conn, row) if kind == "caravan" else [])
 
 
-def ambush(conn, world_id, lair, kind, ident, row):
+def ambush(conn, world_id, lair, kind, ident, row, here_x=None, here_y=None):
     """A pack from `lair` falls on one traveler or caravan. Returns its report."""
     from Data.Database.repository import create_event, get_npc
     monster = by_name(lair["monster"])
@@ -110,7 +113,13 @@ def ambush(conn, world_id, lair, kind, ident, row):
     place = place[0] if place else "the road"
     if kind == "traveler":
         npc = get_npc(conn, row["npc_id"])
-        if beasts_won:
+        if beasts_won and random.random() < LOST_CHANCE:
+            from Data.Quests.adventure import lose_traveller
+            conn.execute("UPDATE npc_travels SET status = 'Completed', days_remaining = 0 WHERE id = ?", (ident,))
+            lose_traveller(conn, world_id, npc["id"], npc["city_id"], here_x if here_x is not None else lair["map_x"],
+                           here_y if here_y is not None else lair["map_y"])
+            text = f"{npc['name']} was beaten by {pack_text} on the road from {place}, and is lost in the wilds."
+        elif beasts_won:
             from Data.Events.events import death_event
             from Data.Relationships.relationships import apply_grief
             conn.execute("UPDATE npcs SET alive = 0 WHERE id = ?", (npc["id"],))
@@ -130,6 +139,11 @@ def ambush(conn, world_id, lair, kind, ident, row):
         table = "caravans" if kind == "caravan" else "supply_caravans"
         if beasts_won:
             conn.execute(f"UPDATE {table} SET status = 'Raided' WHERE id = ?", (ident,))
+        if kind == "caravan":
+            from Data.Quests.adventure import bury, escort_done
+            bury(conn, [f for f in result["dead_b"] if f.ref is not None], origin, f"slain by {plural(monster['name']).lower()} guarding a caravan")
+            if beasts_won:
+                escort_done(conn, world_id, row, delivered=False)
         what = "A caravan" if kind == "caravan" else "A supply caravan"
         text = (f"{what} out of {place} was overrun by {pack_text}; its goods were lost." if beasts_won
                 else f"{what} out of {place} beat off {pack_text}" + (f", slaying {fallen}." if fallen else "."))
@@ -159,7 +173,7 @@ def beasts_on_the_roads(conn, world_id):
                 continue
             if random.random() >= chance[lair["id"]] * (TRAVELER_SHARE if kind == "traveler" else 1) or by_name(lair["monster"]) is None:
                 continue
-            report = ambush(conn, world_id, lair, kind, ident, row)
+            report = ambush(conn, world_id, lair, kind, ident, row, x, y)
             if report:
                 reports.append(report)
                 break                                  # one attack a day is enough for anyone

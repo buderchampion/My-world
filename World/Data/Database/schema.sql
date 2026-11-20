@@ -55,7 +55,9 @@ CREATE TABLE IF NOT EXISTS caravans (
     buyer_kingdom_id    INTEGER NOT NULL REFERENCES kingdoms(id),
     seller_kingdom_id   INTEGER NOT NULL REFERENCES kingdoms(id),
     days_remaining      INTEGER NOT NULL,
-    status              TEXT NOT NULL DEFAULT 'En Route'  -- En Route, Delivered, Raided, Seized (by besiegers)
+    status              TEXT NOT NULL DEFAULT 'En Route',  -- En Route, Delivered, Raided, Seized (by besiegers)
+    escort_quest_id     INTEGER,                            -- its hired guards (Data.Quests.adventure)
+    escort_checked      INTEGER NOT NULL DEFAULT 0
 );
 
 CREATE TABLE IF NOT EXISTS npc_travels (
@@ -186,7 +188,37 @@ CREATE TABLE IF NOT EXISTS quests (
     from_city_id        INTEGER REFERENCES cities(id),       -- Supply Run
     to_city_id          INTEGER REFERENCES cities(id),       -- Supply Run
     resource            TEXT,                                -- Supply Run
-    quantity            INTEGER                              -- Supply Run
+    quantity            INTEGER,                             -- Supply Run
+    -- adventurers (Data.Quests.adventure)
+    posted_day          INTEGER,
+    taken_day           INTEGER,
+    done_day            INTEGER,
+    outcome             TEXT,
+    target_lair_id      INTEGER REFERENCES monster_lairs(id), -- Lair, Rescue
+    target_dragon_id    INTEGER REFERENCES dragons(id),       -- Dragon
+    caravan_id          INTEGER REFERENCES caravans(id),      -- Escort
+    crime_id            INTEGER REFERENCES crimes(id)         -- Recovery
+);
+-- Who went on a quest (Data.Quests.adventure): away until back_day; hired = signed on for the one job.
+CREATE TABLE IF NOT EXISTS quest_party (
+    quest_id  INTEGER NOT NULL REFERENCES quests(id),
+    npc_id    INTEGER NOT NULL REFERENCES npcs(id),
+    hired     INTEGER NOT NULL DEFAULT 0,
+    back_day  INTEGER NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_quest_party_back ON quest_party(back_day);
+-- People carried off by monsters to their lair, or lost in the wilds (Data.Quests.adventure).
+CREATE TABLE IF NOT EXISTS captives (
+    id            INTEGER PRIMARY KEY,
+    world_id      INTEGER NOT NULL REFERENCES worlds(id),
+    npc_id        INTEGER NOT NULL REFERENCES npcs(id),
+    lair_id       INTEGER REFERENCES monster_lairs(id),
+    home_city_id  INTEGER NOT NULL REFERENCES cities(id),
+    kind          TEXT NOT NULL,                 -- captive or lost
+    map_x         REAL,
+    map_y         REAL,
+    taken_day     INTEGER NOT NULL,
+    status        TEXT NOT NULL DEFAULT 'Held'    -- Held, Freed or Dead
 );
 
 CREATE TABLE IF NOT EXISTS events (

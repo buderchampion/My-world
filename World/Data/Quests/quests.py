@@ -28,7 +28,7 @@ def generate_bounty_quest(conn, city, bandit_camp):
         conn,
         city_id=city["id"],
         type="Bounty",
-        title=f"Clear out {bandit_camp['name']}",
+        title=f"Clear out the bandits' camp at {city['name']}",
         giver_id=city.get("ruler"),
         target_building_id=bandit_camp["id"],
         reward_gold=round(power * BOUNTY_GOLD_PER_POWER, 2)

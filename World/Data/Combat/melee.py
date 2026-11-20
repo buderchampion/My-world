@@ -58,6 +58,7 @@ TRADES = {
     "Soldier": (1, 7, (1, 8)),     # leather and shield, a sword
     "Guard":   (1, 7, (1, 6)),     # leather and shield, a spear
     "Bandit":  (1, 8, (1, 6)),     # leather, a short sword
+    "Adventurer": (2, 6, (1, 8)),  # studded leather and shield, a sword (Data.Quests.adventure)
 }
 COMMONER = (0, 10, (1, 4))         # no armor, a club or a dagger
 ARMORED_AC = 4                     # an Armor suit from the stores: chain mail and shield
