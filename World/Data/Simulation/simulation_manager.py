@@ -645,6 +645,8 @@ class SimulationManager:
         masters_year(self.conn, self.world_id)
         from Data.NPCS.regard import regard_year                # grievances fade by temper; faithful lords earn trust
         regard_year(self.conn, self.world_id)
+        from Data.NPCS.decide import prune                      # the decision log keeps ten years
+        prune(self.conn, self.world_id)
 
         # The age of the world may turn, and each kingdom's own times begin or end (Data.History.eras).
         from Data.History.eras import eras_year

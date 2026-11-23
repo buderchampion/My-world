@@ -181,7 +181,26 @@ def year_events(conn, world_id, first_day, last_day, before_max_id):
     e["nudges"] = nudge_summary(conn, world_id)
     e["grudges"] = grudge_summary(conn, world_id)
     e["goals"] = goal_summary(conn, world_id)
+    e["decisions"] = decision_summary(conn, world_id, first_day, last_day)
     return e
+
+
+def decision_summary(conn, world_id, first_day, last_day):
+    """Deciding (Data.NPCS.decide): the notables' logged choices this year by kind, the grudge answers among them,
+    and how many grudges anyone let go."""
+    try:
+        kinds = conn.execute("""SELECT kind, COUNT(*) FROM decisions WHERE world_id = ? AND day BETWEEN ? AND ?
+                                GROUP BY 1 ORDER BY 2 DESC""", (world_id, first_day, last_day)).fetchall()
+        grudges = conn.execute("""SELECT choice, COUNT(*) FROM decisions WHERE world_id = ? AND kind = 'grudge' AND day BETWEEN ? AND ?
+                                  GROUP BY 1 ORDER BY 2 DESC""", (world_id, first_day, last_day)).fetchall()
+        forgave = conn.execute("""SELECT COUNT(*) FROM events WHERE type = 'Vengeance' AND description LIKE '% forgave %'
+                                  AND day BETWEEN ? AND ?""", (first_day, last_day)).fetchone()[0]
+    except Exception:
+        return None
+    text = ", ".join(f"{k} {n}" for k, n in kinds) or "none"
+    if grudges:
+        text += " (grudges: " + ", ".join(f"{c} {n}" for c, n in grudges) + ")"
+    return text + f"; {forgave} grudges let go"
 
 
 def goal_summary(conn, world_id):
@@ -300,6 +319,8 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
         lines.append(f"Grudges  {e['grudges']}")
     if e.get("goals"):
         lines.append(f"Goals    {e['goals']}")
+    if e.get("decisions"):
+        lines.append(f"Decided  {e['decisions']}")
     lines.append("Kingdoms")
     for k in s["kingdoms"]:
         if k["status"] == "Fallen":

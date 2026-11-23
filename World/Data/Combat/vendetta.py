@@ -21,6 +21,12 @@ import random
 #             them (Data.Infrastructure.travel) and fight on arriving; if
 #             the nemesis has gone, they come home;
 #   bide      otherwise -- and children until they are grown.
+#
+# In a world with the Decision Engine (Data.NPCS.decide) the same courses are open by the same rules, but the
+# avenger weighs them in character (GRUDGE_OPTIONS): the honourable seldom hire a blade, the deceitful
+# readily; the bold face their foe sooner; and one more course is open --
+#   forgive   they let the grudge go: the grievance is settled. The merciful and forgiving do it most.
+# The weights are set so that someone of even temper chooses much as the old rule did.
 
 VENDETTA_MIN = 60
 READY = 0.4                    # a chance in single combat at least this good, and they will fight
@@ -37,6 +43,57 @@ ASSASSIN_FLOOR = 0.15
 EXPOSED = 0.3
 FAILED_ATTEMPT_GRIEVANCE = 60
 JOURNEY_STAY_DAYS = 5
+
+# Answering a grudge with the Decision Engine (Data.NPCS.decide): each course's pulls.
+GRUDGE_OPTIONS = {
+    "train":   {"base": 0.6, "traits": {"diligence": 0.2, "vengefulness": 0.2, "boldness": 0.1}},
+    "blade":   {"base": -0.1, "traits": {"honour": -0.6, "boldness": -0.6}, "needs": {"money": -0.5},
+                "goals": {"avenge": 0.1, "justice": -0.3}},
+    "face":    {"base": -0.17, "traits": {"boldness": 0.15, "honour": 0.15, "vengefulness": 0.15}, "grievance": 0.2,
+                "goals": {"avenge": 0.15, "glory": 0.1}},
+    "bide":    {"base": 0.17, "traits": {"mercy": 0.1, "boldness": -0.05, "vengefulness": -0.15}},
+    "forgive": {"base": -0.4, "traits": {"mercy": 0.3, "vengefulness": -0.4, "piety": 0.1}, "grievance": -0.3},
+}
+OUTMATCHED = 0.7           # blade: "no match for them in a fight" when their chance is below READY
+ODDS = 0.5                 # face: each point of chance above READY pulls this much
+GRUDGE_WORDS = {"train": "Trained for the fight", "blade": "Hired a blade", "face": "Went to face them",
+                "bide": "Bided their time", "forgive": "Let it go"}
+
+
+def grudge_options(avenger, chance, can_pay):
+    """The courses open to this avenger ({name: option} for Data.NPCS.decide), by the same rules as before."""
+    options = {"bide": dict(GRUDGE_OPTIONS["bide"]), "forgive": dict(GRUDGE_OPTIONS["forgive"])}
+    if chance < READY and avenger["age"] <= YOUNG:
+        options["train"] = dict(GRUDGE_OPTIONS["train"])
+    if can_pay:
+        options["blade"] = dict(GRUDGE_OPTIONS["blade"])
+        if chance < READY:
+            options["blade"]["extra"] = [("no match for them in a fight", OUTMATCHED)]
+    if chance >= READY:
+        options["face"] = dict(GRUDGE_OPTIONS["face"])
+        options["face"]["extra"] = [(f"a {chance:.0%} chance in a fight", (chance - READY) * ODDS)]
+    return options
+
+
+def choose_course(conn, engine, person, avenger, chance, can_pay, target):
+    """What the avenger does this month: by the Decision Engine where the world has it, else by the old rule."""
+    if engine:
+        from Data.NPCS.decide import decide
+        course, _ = decide(conn, person, "grudge", grudge_options(avenger, chance, can_pay), about=("npc", target),
+                           words=GRUDGE_WORDS)
+        return course
+    return old_course(avenger, chance, can_pay, person["boldness"] or 0)
+
+
+def old_course(avenger, chance, can_pay, boldness):
+    """The course by the old rule (worlds without the Decision Engine)."""
+    if chance < READY and avenger["age"] <= YOUNG:
+        return "train"
+    if can_pay and (chance < READY or boldness <= CAUTIOUS):
+        return "blade"
+    if chance >= READY and random.random() < ACT_CHANCE * (1 + boldness / 200):
+        return "face"
+    return "bide"
 
 
 def _away(conn, world_id):
@@ -102,9 +159,11 @@ def pursue_vendettas(conn, world_id):
     from Data.Government.edicts import today
     from Data.Infrastructure.travel import dispatch_npc_travel
 
+    from Data.NPCS.personality import has_engine
     day = today(conn, world_id)
     away = _away(conn, world_id)
     did, seen = [], set()
+    engine = has_engine(conn, world_id)
 
     for feud in conn.execute(
         """SELECT g.* FROM grievances g
@@ -120,19 +179,25 @@ def pursue_vendettas(conn, world_id):
         if not nemesis["alive"] or not avenger["alive"]:
             continue                                         # slain earlier this very month
         chance = win_chance(conn, feud, avenger, nemesis)
-        boldness = conn.execute("SELECT boldness FROM npcs WHERE id = ?", (holder,)).fetchone()["boldness"] or 0
+        person = conn.execute("SELECT * FROM npcs WHERE id = ?", (holder,)).fetchone()
         can_pay = avenger["gold"] >= ASSASSIN_FEE
+        course = choose_course(conn, engine, person, avenger, chance, can_pay, target)
 
-        if chance < READY and avenger["age"] <= YOUNG:
+        if course == "forgive":
+            conn.execute("UPDATE grievances SET settled = 1 WHERE holder_id = ? AND target_id = ?", (holder, target))
+            create_event(conn, "Vengeance", f"{avenger['name']} forgave {nemesis['name']}, who {feud['reason']}.",
+                         participants=[holder, target], city_id=avenger["city_id"])
+            did.append((holder, "forgive"))
+        elif course == "train":
             level = train(conn, holder)
             if level == 1:
                 create_event(conn, "Vengeance", f"{avenger['name']} took up the sword, swearing vengeance on {nemesis['name']}, who {feud['reason']}.",
                              participants=[holder, target], city_id=avenger["city_id"])
             did.append((holder, "train"))
-        elif can_pay and (chance < READY or boldness <= CAUTIOUS):
+        elif course == "blade":
             outcome = hire_assassin(conn, feud, avenger, nemesis, day)
             did.append((holder, f"assassin: {outcome}" if outcome else "bide"))
-        elif chance >= READY and random.random() < ACT_CHANCE * (1 + boldness / 200):
+        elif course == "face":
             if nemesis["city_id"] == avenger["city_id"] and target not in away:
                 won = duel(conn, feud, avenger, nemesis, avenger["city_id"], context="duel", template="Vengeance (duel)")
                 did.append((holder, "duel: won" if won else "duel: fell"))

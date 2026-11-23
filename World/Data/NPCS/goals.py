@@ -1,6 +1,3 @@
-import math
-import random
-
 # Goals (Decision Engine piece 2b). Every notable (Data.NPCS.notables) holds one main goal at a time:
 #
 #   rise     Rise in rank             the ambitious without a title             achieved: a title
@@ -17,7 +14,7 @@ import random
 #   faith    Serve the gods           the pious                                 lifelong
 #
 # Each goal a person may hold is scored by how well it fits their traits and their situation, and the best
-# fit usually wins, but not always (PICKINESS). Goals are sticky: kept until achieved, made impossible, or a
+# fit usually wins, but not always (Data.NPCS.decide.PICKINESS); each choice is logged with its reasons. Goals are sticky: kept until achieved, made impossible, or a
 # big moment strikes (MOMENTS: kin slain, betrayed, a title or home lost), when the person chooses again.
 # A notable without a goal chooses at the next season's review. When a notable dies, a blood feud (avenge
 # against a house or kingdom) passes to their eldest grown child who is not forgiving, with half the
@@ -41,7 +38,6 @@ GLORY_RENOWN = 30
 RICH_GOLD = 2000
 GROWN = 16
 FLOOR = 0.05             # every goal a person may hold has at least this much pull
-PICKINESS = 0.15         # lower: the best fit wins more surely (a choice weighted by e^(score / PICKINESS))
 SWORDS = ("Knight", "Captain", "Soldier", "Adventurer", "Guard")
 
 
@@ -103,50 +99,70 @@ def _may_claim(conn, npc):
     return monarch is not None and _heir_apparent(conn, monarch) != npc["id"]
 
 
-def options(conn, npc):
-    """{goal: (score, target_kind, target_id)} for every goal this person may hold now."""
+def _trait(npc, trait, low=False, scale=1.0):
+    """(word, pull): how far one trait pulls toward a goal -- its high end, or with low=True its low end."""
+    from Data.NPCS.personality import WORDS
+    value = (_down if low else _up)(npc[trait]) * scale
+    return (WORDS[trait][1 if low else 0], value)
+
+
+def reasons_for(conn, npc):
+    """{goal: ([(reason, pull)], target_kind, target_id)} for every goal this person may hold now."""
     from Data.NPCS.notables import NOBLE_TITLES, MONARCH_TITLES
     from Data.NPCS.personality import MASTER_LEVEL
-    t = npc
     out = {}
     titled = npc["title"] is not None
     sword = npc["profession"] in SWORDS
     if not titled:
-        out["rise"] = (_up(t["ambition"]) + (0.2 if sword or _monarch_parent(conn, npc) else 0), None, None)
-    if (t["ambition"] or 0) >= THRONE_AMBITION and npc["title"] not in MONARCH_TITLES and _may_claim(conn, npc):
-        out["throne"] = (_up(t["ambition"]) + _down(t["honour"]) / 2, None, None)
+        born = _monarch_parent(conn, npc)
+        out["rise"] = ([_trait(npc, "ambition")] + ([("a sword-bearer" if sword else "born to a throne", 0.2)] if sword or born else []),
+                       None, None)
+    if (npc["ambition"] or 0) >= THRONE_AMBITION and npc["title"] not in MONARCH_TITLES and _may_claim(conn, npc):
+        out["throne"] = ([_trait(npc, "ambition"), _trait(npc, "honour", low=True, scale=0.5)], None, None)
     if npc["title"] in NOBLE_TITLES:
-        out["keep"] = (_down(t["ambition"]) + _down(t["boldness"]) / 2 + 0.3, None, None)
+        out["keep"] = ([_trait(npc, "ambition", low=True), _trait(npc, "boldness", low=True, scale=0.5),
+                        (f"holds the title of {npc['title']}", 0.3)], None, None)
     if (npc["renown"] or 0) < GLORY_RENOWN:
-        out["glory"] = ((_up(t["boldness"]) + _up(t["ambition"])) / 2 + (0.2 if sword else 0), None, None)
+        out["glory"] = ([_trait(npc, "boldness", scale=0.5), _trait(npc, "ambition", scale=0.5)]
+                        + ([("a sword-bearer", 0.2)] if sword else []), None, None)
     if (npc["gold"] or 0) < RICH_GOLD:
-        out["rich"] = ((_down(t["generosity"]) + _up(t["ambition"])) / 2, None, None)
+        out["rich"] = ([_trait(npc, "generosity", low=True, scale=0.5), _trait(npc, "ambition", scale=0.5)], None, None)
     if _best_skill(conn, npc["id"]) < MASTER_LEVEL:
-        out["master"] = (_up(t["diligence"]), None, None)
+        out["master"] = ([_trait(npc, "diligence")], None, None)
     kind, target, amount = _worst_grievance(conn, npc["id"])
     if amount >= GRUDGE:
-        out["avenge"] = (_up(t["vengefulness"]) + amount / 200, kind, target)
+        from Data.NPCS.decide import _name_of
+        wrong = (f"grievance {amount:.0f} against {_name_of(conn, (kind, target))}", amount / 200)
+        out["avenge"] = ([_trait(npc, "vengefulness"), wrong], kind, target)
         if kind == "npc":
-            out["justice"] = ((_up(t["honour"]) + _up(t["mercy"])) / 2 + amount / 400, kind, target)
+            out["justice"] = ([_trait(npc, "honour", scale=0.5), _trait(npc, "mercy", scale=0.5), (wrong[0], amount / 400)],
+                              kind, target)
     if npc["spouse_id"] is None and (npc["age"] or 0) >= GROWN:
-        out["spouse"] = ((_up(t["affection"]) + _up(t["sociability"])) / 2 + 0.1, None, None)
+        out["spouse"] = ([_trait(npc, "affection", scale=0.5), _trait(npc, "sociability", scale=0.5), ("unmarried", 0.1)], None, None)
     if npc["spouse_id"] is not None and not _grown_child(conn, npc["id"]):
-        out["house"] = (_up(t["affection"]) + (0.2 if titled else 0), None, None)
-    if (t["piety"] or 0) >= FAITH_PIETY:
-        out["faith"] = (_up(t["piety"]), None, None)
-    return {goal: (score + FLOOR, kind, target) for goal, (score, kind, target) in out.items()}
+        out["house"] = ([_trait(npc, "affection")] + ([("a house to carry on", 0.2)] if titled else []), None, None)
+    if (npc["piety"] or 0) >= FAITH_PIETY:
+        out["faith"] = ([_trait(npc, "piety")], None, None)
+    return {goal: ([p for p in parts if p[1]] + [("", FLOOR)], kind, target) for goal, (parts, kind, target) in out.items()}
 
 
-def choose(conn, npc):
-    """The goal this person picks now: (goal, target_kind, target_id) -- the best fit usually, not always."""
-    choices = options(conn, npc)
+def options(conn, npc):
+    """{goal: (score, target_kind, target_id)} for every goal this person may hold now."""
+    return {goal: (sum(v for _, v in parts), kind, target) for goal, (parts, kind, target) in reasons_for(conn, npc).items()}
+
+
+def choose(conn, npc, log=True):
+    """The goal this person picks now: (goal, target_kind, target_id) -- the best fit usually, not always. The
+    choice is logged with its reasons (Data.NPCS.decide)."""
+    from Data.NPCS.decide import pick, record, top_reasons
+    choices = reasons_for(conn, npc)
     if not choices:
         return ("rich", None, None)
-    goals = list(choices)
-    top = max(choices[g][0] for g in goals)
-    weights = [math.exp((choices[g][0] - top) / PICKINESS) for g in goals]
-    goal = random.choices(goals, weights=weights)[0]
-    return (goal, choices[goal][1], choices[goal][2])
+    goal = pick({g: sum(v for _, v in parts) for g, (parts, _, _) in choices.items()})
+    parts, kind, target = choices[goal]
+    if log:
+        record(conn, npc, "goal", GOALS[goal], top_reasons(parts), (kind, target) if target is not None else None, len(choices))
+    return (goal, kind, target)
 
 
 def _today(conn, npc_id):

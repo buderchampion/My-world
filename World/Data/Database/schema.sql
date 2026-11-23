@@ -318,6 +318,21 @@ CREATE TABLE IF NOT EXISTS regard (
     PRIMARY KEY (holder_id, target_kind, target_id)
 );
 
+-- Decisions (Decision Engine piece 2c, Data.NPCS.decide): what notables chose and the three weightiest
+-- reasons, kept LOG_YEARS. The why tool reads it.
+CREATE TABLE IF NOT EXISTS decisions (
+    id         INTEGER PRIMARY KEY,
+    world_id   INTEGER NOT NULL,
+    npc_id     INTEGER NOT NULL REFERENCES npcs(id),
+    day        INTEGER NOT NULL,
+    kind       TEXT NOT NULL,              -- 'goal', 'grudge'...
+    about      TEXT,                       -- whom or what it concerned
+    choice     TEXT NOT NULL,
+    reasons    TEXT,                       -- JSON [[reason, pull], ...]
+    options    INTEGER NOT NULL DEFAULT 0  -- how many choices there were
+);
+CREATE INDEX IF NOT EXISTS idx_decisions_npc ON decisions(npc_id, day);
+
 -- Occupations: a conquered town held by a garrison for a year (Data.Government.occupation).
 CREATE TABLE IF NOT EXISTS occupations (
     id                   INTEGER PRIMARY KEY,

@@ -744,6 +744,16 @@ FEATURES = [
                   "Data/Database/database.py": ['"goal"', '"goal_kind"', '"goal_target"', '"goal_since"']},
     },
     {
+        "name": "Decision Engine, piece 2c: deciding -- one decide() weighs traits, needs, liking, trust, grievance and goal, "
+                "picks mostly in character, logs a notable's choice with its reasons; grudges are answered by it",
+        "functions": {"Data/NPCS/decide.py": ["needs", "pulls", "regard_of", "pick", "decide", "record", "describe", "prune"],
+                      "Data/Combat/vendetta.py": ["grudge_options", "old_course"]},
+        "wired": {"Data/Combat/vendetta.py": ["decide(conn, person, \"grudge\""],
+                  "Data/NPCS/goals.py": ["record(conn, npc, \"goal\""],
+                  "Data/Simulation/simulation_manager.py": ["prune(self.conn"]},
+        "tables": ["decisions"],
+    },
+    {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
                 "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
         "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
@@ -4706,6 +4716,9 @@ def _smoke_body(r, holder):
             saved_v, saved_n = V.random, N.random
             import Data.NPCS.abilities as ABL
             saved_of, ABL.of = ABL.of, lambda npc: None             # their trades decide these duels, not their rolled scores
+            saved_choose = V.choose_course                           # the old rule picks the course here: this step tests how
+            V.choose_course = (lambda conn_, engine, person, avenger, chance, can_pay, target:   # each course plays out
+                               V.old_course(avenger, chance, can_pay, person["boldness"] or 0))  # (the deciding step tests the choice)
             try:
                 # a youth no match for a Knight trains
                 avenger, nemesis = cast(age=18, foe="Knight")
@@ -4744,6 +4757,7 @@ def _smoke_body(r, holder):
             finally:
                 V.random, N.random = saved_v, saved_n
                 ABL.of = saved_of
+                V.choose_course = saved_choose
                 conn.execute("UPDATE grievances SET settled = 1")
                 conn.commit()
 
@@ -5820,10 +5834,13 @@ def _smoke_body(r, holder):
         saved = (conn.execute("SELECT * FROM grievances").fetchall(), conn.execute("SELECT * FROM regard").fetchall())
         temper_was = conn.execute("SELECT vengefulness FROM npcs WHERE id = ?", (holder["id"],)).fetchone()[0]
         try:
+            conn.execute("DELETE FROM grievances WHERE holder_id = ?", (holder["id"],))     # a clean slate: only this raid counts
+            conn.execute("DELETE FROM regard WHERE holder_id = ?", (holder["id"],))
             hold_grievances(conn, victim, killer["id"], 100, context="raid")
             assert R.grievance(conn, holder["id"], "npc", killer["id"]) == 100, "a widow holds no grievance for her slain spouse"
             assert R.grievance(conn, holder["id"], "house", house) == 50, "no blood feud against the killer's house"
-            assert R.grievance(conn, holder["id"], "kingdom", killer["kingdom_id"]) == 50, "no grudge against the raiding kingdom"
+            assert R.grievance(conn, holder["id"], "kingdom", killer["kingdom_id"]) == 50, \
+                f"no grudge against the raiding kingdom (holder in kingdom {R._kingdom_of(conn, holder['id'])}, killer {killer['kingdom_id']})"
             assert R.trust(conn, holder["id"], "npc", victim) >= R.TIE_TRUST["spouse"] - 0.01, "no trust between spouses"
             # betrayal breaks the crown's trust; years of faithful service mend it a little
             ruler = conn.execute("SELECT ruler_id FROM kingdoms WHERE id = ?", (killer["kingdom_id"],)).fetchone()[0]
@@ -5881,7 +5898,8 @@ def _smoke_body(r, holder):
             conn.execute("""INSERT OR REPLACE INTO grievances (holder_id, target_id, amount, reason, since_day, settled)
                             VALUES (?, ?, 180, 'a test', 0, 0)""", (npc_id, other))
             conn.execute("UPDATE npcs SET vengefulness = 100 WHERE id = ?", (npc_id,))
-            picks = [G.choose(conn, conn.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone()) for _ in range(40)]
+            picks = [G.choose(conn, conn.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone(), log=False)
+                     for _ in range(40)]
             avenges = [p for p in picks if p[0] == "avenge"]
             assert len(avenges) >= 20, f"a vengeful notable with a grievance of 180 chose to avenge only {len(avenges)} of 40 times"
             assert all(p[1:] == ("npc", other) for p in avenges), "Avenge aimed at someone other than the wrongdoer"
@@ -5921,6 +5939,55 @@ def _smoke_body(r, holder):
             for row in saved_regard:
                 conn.execute(f"INSERT INTO regard VALUES ({','.join('?' * len(row))})", tuple(row))
             conn.commit()
+
+    def deciding():
+        import collections
+        import Data.NPCS.decide as D
+        import Data.Combat.vendetta as V
+        from Data.NPCS.notables import notable_ids
+        npc = conn.execute(f"""SELECT * FROM npcs WHERE id = ?""", (notable_ids(conn, world_id)[0],)).fetchone()
+        need = D.needs(conn, npc)
+        assert set(need) == set(D.NEEDS) and all(0 <= v <= 1 for v in need.values()), f"needs out of range: {need}"
+        # traits pull: the bold choose the bold course far more often than the cautious
+        bold, cautious = dict(npc), dict(npc)
+        bold["boldness"], cautious["boldness"] = 100, -100
+        options = {"charge": {"traits": {"boldness": 0.3}}, "hold": {"traits": {"boldness": -0.3}}}
+        for who, want in ((bold, "charge"), (cautious, "hold")):
+            got = collections.Counter(D.pick({k: sum(v for _, v in D.pulls(conn, who, o, need=need)) for k, o in options.items()})
+                                      for _ in range(500))
+            assert got[want] >= 475, f"in character too seldom: {got}"
+        # a notable's decision is logged with its reasons; the log keeps LOG_YEARS
+        before = conn.execute("SELECT COUNT(*) FROM decisions WHERE npc_id = ?", (npc["id"],)).fetchone()[0]
+        choice, reasons = D.decide(conn, npc, "test", {"a": {"base": 1.0, "extra": [("the better road", 0.3)]}, "b": {"base": -1.0}},
+                                   words={"a": "Chose a"})
+        assert choice == "a" and reasons, "decide() did not choose the far better option, or gave no reasons"
+        row = conn.execute("SELECT * FROM decisions WHERE npc_id = ? ORDER BY id DESC LIMIT 1", (npc["id"],)).fetchone()
+        assert row and row["choice"] == "Chose a" and row["kind"] == "test", "a notable's decision was not logged"
+        conn.execute("UPDATE decisions SET day = day - ? WHERE id = ?", ((D.LOG_YEARS + 1) * 360, row["id"]))
+        D.prune(conn, world_id)
+        assert conn.execute("SELECT COUNT(*) FROM decisions WHERE id = ?", (row["id"],)).fetchone()[0] == 0, "an old decision was kept"
+        assert conn.execute("SELECT COUNT(*) FROM decisions WHERE npc_id = ?", (npc["id"],)).fetchone()[0] >= before - 1
+        # grudges: someone of even temper answers much as the old rule did; the deceitful hire blades, the forgiving let go
+        base = {t: 0 for t in ("generosity", "mercy", "boldness", "ambition", "diligence", "curiosity", "vengefulness",
+                               "sociability", "affection", "honour", "piety", "loyalty")}
+        base.update(age=40, gold=50, goal=None)
+
+        def share(person, chance, course, n=4000):
+            opts = V.grudge_options(person, chance, person["gold"] >= V.ASSASSIN_FEE)
+            need_ = {"hunger": 0, "safety": 0, "money": max(0, 1 - person["gold"] / 100), "home": 0, "health": 0}
+            regard = {"liking": 0, "trust": 0, "grievance": 0.5}
+            scored = {k: sum(v for _, v in D.pulls(conn, person, o, ("npc", npc["id"]), need_, regard)) for k, o in opts.items()}
+            return sum(D.pick(scored) == course for _ in range(n)) / n
+        assert 0.18 <= share(base, 0.55, "face") <= 0.32, "an even-tempered avenger faces their foe far more or less than before"
+        assert share(dict(base, age=22), 0.25, "train") >= 0.85, "the young and outmatched do not train"
+        assert share(dict(base, gold=400), 0.25, "blade") >= 0.85, "the outmatched with money do not hire a blade"
+        assert share(dict(base, gold=400, honour=-70), 0.55, "blade") >= 0.5, "the deceitful do not reach for a blade"
+        assert share(dict(base, gold=400, honour=70), 0.55, "blade") <= 0.05, "the honourable hire blades"
+        assert share(dict(base, vengefulness=-70, mercy=60), 0.55, "forgive") >= 0.02, "the forgiving never let a grudge go"
+        assert share(base, 0.55, "forgive") <= 0.02, "the even-tempered forgive too readily"
+
+    run_step(r, "deciding: needs in range; traits pull choices in character; a notable's decision is logged with reasons and "
+                "pruned after ten years; grudges answered as before by the even-tempered, bent by honour and mercy", deciding)
 
     run_step(r, "goals: every notable holds one, sticky until achieved; a vengeful heart aims Avenge at the wrongdoer; "
                 "a blood feud passes to a grown heir with half the grievance", notable_goals)
