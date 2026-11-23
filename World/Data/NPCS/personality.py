@@ -149,7 +149,7 @@ def nudge(conn, npc_ids, event):
     import json
     from Data.Government.edicts import today
     ids = list(dict.fromkeys(i for i in npc_ids if i and i > 0))
-    nudged, year = 0, None
+    nudged, year, touched = 0, None, []
     for start in range(0, len(ids), 500):
         part = ids[start:start + 500]
         rows = conn.execute(
@@ -178,6 +178,9 @@ def nudge(conn, npc_ids, event):
             columns = "".join(f"{t} = ?, " for t in sets)
             conn.execute(f"UPDATE npcs SET {columns}trait_drift = ? WHERE id = ?", (*sets.values(), json.dumps(record), row["id"]))
             nudged += 1
+            touched.append(row["id"])
+    from Data.NPCS.goals import moment                 # a big moment makes a notable weigh their goal again
+    moment(conn, touched, event)
     return nudged
 
 

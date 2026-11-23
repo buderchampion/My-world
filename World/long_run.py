@@ -180,7 +180,19 @@ def year_events(conn, world_id, first_day, last_day, before_max_id):
         e["quests"], e["adventurers"], e["captives"], e["era"] = [], (0, 0), [], None
     e["nudges"] = nudge_summary(conn, world_id)
     e["grudges"] = grudge_summary(conn, world_id)
+    e["goals"] = goal_summary(conn, world_id)
     return e
+
+
+def goal_summary(conn, world_id):
+    """Goals (Data.NPCS.goals): what the notables strive for now, most common first."""
+    try:
+        rows = conn.execute("""SELECT n.goal, COUNT(*) FROM npcs n JOIN cities c ON c.id = n.city_id
+                               JOIN kingdoms k ON k.id = c.kingdom_id WHERE k.world_id = ? AND n.alive = 1
+                               AND n.goal IS NOT NULL GROUP BY 1 ORDER BY 2 DESC""", (world_id,)).fetchall()
+    except Exception:
+        return None
+    return ", ".join(f"{goal} {n}" for goal, n in rows) if rows else None
 
 
 def grudge_summary(conn, world_id):
@@ -286,6 +298,8 @@ def report_year(year, s, prev, e, chronicle_before, seconds, fh):
         lines.append(f"Nudges   {e['nudges']}")
     if e.get("grudges"):
         lines.append(f"Grudges  {e['grudges']}")
+    if e.get("goals"):
+        lines.append(f"Goals    {e['goals']}")
     lines.append("Kingdoms")
     for k in s["kingdoms"]:
         if k["status"] == "Fallen":

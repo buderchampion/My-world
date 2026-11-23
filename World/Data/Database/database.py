@@ -154,6 +154,10 @@ def init_database():
         "ability_gains": "TEXT",                               # what training and deeds have added: {"train:strength": 1}
         "ability_age": "INTEGER NOT NULL DEFAULT 0",           # the aging stages already felt (1 middle, 2 old, 3 venerable)
         "trait_drift": "TEXT",                                 # life nudges: {"traits": {"mercy": -4}, "seen": {"battle": 3}}
+        "goal": "TEXT",                                        # a notable's main goal (Data.NPCS.goals): 'avenge', 'rise'...
+        "goal_kind": "TEXT",                                   # what the goal is aimed at: 'npc', 'house' or 'kingdom'
+        "goal_target": "INTEGER",
+        "goal_since": "INTEGER",                               # the day they took it up
     })
 
     _add_missing_columns(connection, "kingdoms", {

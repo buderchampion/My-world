@@ -549,6 +549,10 @@ class SimulationManager:
         from Data.Government.edicts import review
         review(self.conn, self.world_id)
 
+        # Notables review their goals: those without one choose, the achieved choose anew (Data.NPCS.goals).
+        from Data.NPCS.goals import goals_season
+        goals_season(self.conn, self.world_id)
+
         # The hordes' camps move on across the steppe (Data.Government.horde).
         from Data.Government.horde import move_camps
         move_camps(self.conn, self.world_id)

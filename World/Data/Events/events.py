@@ -40,6 +40,8 @@ def death_event(conn, npc, cause, city_id=None, kingdom_id=None, foe_kingdom=Non
     # and their kin are moved by it: vengeance for the slain, grief for the rest (Data.NPCS.personality)
     from Data.NPCS.personality import mourn
     mourn(conn, npc["id"], cause)
+    from Data.NPCS.goals import inherit                 # a blood feud or a claim to the throne passes to an heir
+    inherit(conn, npc["id"])
 
     return event
 

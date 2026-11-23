@@ -734,6 +734,16 @@ FEATURES = [
         "tables": ["regard"],
     },
     {
+        "name": "Decision Engine, piece 2b: goals -- every notable holds one main goal, sticky until achieved, made impossible "
+                "or a big moment strikes; blood feuds and throne claims pass to heirs",
+        "functions": {"Data/NPCS/goals.py": ["options", "choose", "set_goal", "achieved", "impossible", "goals_season",
+                                             "moment", "inherit", "describe"]},
+        "wired": {"Data/Simulation/simulation_manager.py": ["goals_season(self.conn"],
+                  "Data/Events/events.py": ["inherit(conn"],
+                  "Data/NPCS/personality.py": ["moment(conn"],
+                  "Data/Database/database.py": ['"goal"', '"goal_kind"', '"goal_target"', '"goal_since"']},
+    },
+    {
         "name": "Adventurers and quests: adventurers (and folk who sign on) take quests -- lairs, rescues, searches, dragons, herbs, "
                 "thefts, bounties, escorts, errands -- alone or in parties sized to the danger; the Age of Heroes",
         "functions": {"Data/Quests/adventure.py": ["take_up_adventuring", "settle_down", "roster", "pool", "win_rate", "gather",
@@ -5838,6 +5848,82 @@ def _smoke_body(r, holder):
                 conn.execute(f"INSERT INTO regard VALUES ({','.join('?' * len(row))})", tuple(row))
             conn.execute("UPDATE npcs SET vengefulness = ? WHERE id = ?", (temper_was, holder["id"]))
             conn.commit()
+
+    def notable_goals():
+        import Data.NPCS.goals as G
+        from Data.NPCS.notables import notable_ids
+        from Data.NPCS.regard import grievance
+        G.goals_season(conn, world_id)
+        notables = notable_ids(conn, world_id)
+        rows = {r["id"]: r for r in conn.execute(
+            f"SELECT * FROM npcs WHERE id IN ({','.join('?' * len(notables))})", notables)}
+        assert all(rows[i]["goal"] in G.GOALS for i in notables), "a notable without a goal after the season's review"
+        assert conn.execute(f"""SELECT COUNT(*) FROM npcs WHERE goal IS NOT NULL AND alive = 1
+                                AND id NOT IN ({','.join('?' * len(notables))})""", notables).fetchone()[0] == 0, \
+            "someone who is not a notable holds a goal"
+        again = G.goals_season(conn, world_id)
+        assert again["chosen"] == again["achieved"] + again["abandoned"], "goals are not sticky: a notable chose again for no reason"
+        npc_id = notables[0]
+        held = conn.execute("SELECT gold, goal, goal_kind, goal_target, goal_since, vengefulness FROM npcs WHERE id = ?",
+                            (npc_id,)).fetchone()
+        saved_grievances = conn.execute("SELECT * FROM grievances").fetchall()
+        saved_regard = conn.execute("SELECT * FROM regard").fetchall()
+        try:
+            # a goal achieved gives way to a new one: rich at RICH_GOLD
+            conn.execute("UPDATE npcs SET goal = 'rich', goal_kind = NULL, goal_target = NULL, gold = ? WHERE id = ?",
+                         (G.RICH_GOLD + 1, npc_id))
+            done = G.goals_season(conn, world_id)
+            assert done["achieved"] >= 1, "a notable rich enough did not achieve Grow rich"
+            assert conn.execute("SELECT goal FROM npcs WHERE id = ?", (npc_id,)).fetchone()[0] not in (None, "rich"), \
+                "an achieved goal was not replaced"
+            # a heavy grievance and a vengeful heart: Avenge, aimed at the wrongdoer
+            other = conn.execute("SELECT id FROM npcs WHERE alive = 1 AND id != ? ORDER BY id LIMIT 1", (npc_id,)).fetchone()[0]
+            conn.execute("""INSERT OR REPLACE INTO grievances (holder_id, target_id, amount, reason, since_day, settled)
+                            VALUES (?, ?, 180, 'a test', 0, 0)""", (npc_id, other))
+            conn.execute("UPDATE npcs SET vengefulness = 100 WHERE id = ?", (npc_id,))
+            picks = [G.choose(conn, conn.execute("SELECT * FROM npcs WHERE id = ?", (npc_id,)).fetchone()) for _ in range(40)]
+            avenges = [p for p in picks if p[0] == "avenge"]
+            assert len(avenges) >= 20, f"a vengeful notable with a grievance of 180 chose to avenge only {len(avenges)} of 40 times"
+            assert all(p[1:] == ("npc", other) for p in avenges), "Avenge aimed at someone other than the wrongdoer"
+            assert G.moment(conn, [npc_id], "kin_slain") == 1, "a big moment did not make a notable weigh their goal"
+            # a blood feud passes to a grown child who is not forgiving, with half the grievance
+            parent = conn.execute("""SELECT p.id FROM npcs p JOIN npcs c ON c.parent_a_id = p.id OR c.parent_b_id = p.id
+                                     WHERE p.alive = 1 AND c.alive = 1 AND c.age >= 16 AND c.loyalty IS NOT NULL
+                                     AND p.city_id IN (SELECT id FROM cities WHERE kingdom_id IN (SELECT id FROM kingdoms WHERE world_id = ?))
+                                     LIMIT 1""", (world_id,)).fetchone()
+            if parent:
+                kids = conn.execute("""SELECT id, vengefulness, goal, goal_kind, goal_target, goal_since FROM npcs
+                                       WHERE (parent_a_id = ? OR parent_b_id = ?) AND alive = 1""", (parent[0], parent[0])).fetchall()
+                conn.execute("UPDATE npcs SET vengefulness = 50 WHERE parent_a_id = ? OR parent_b_id = ?", (parent[0], parent[0]))
+                kingdom = conn.execute("SELECT id FROM kingdoms WHERE world_id = ? LIMIT 1", (world_id,)).fetchone()[0]
+                conn.execute("""INSERT OR REPLACE INTO regard (holder_id, target_kind, target_id, grievance, trust, reason, since_day)
+                                VALUES (?, 'kingdom', ?, 120, 0, 'a test', 0)""", (parent[0], kingdom))
+                pheld = conn.execute("SELECT goal, goal_kind, goal_target, goal_since FROM npcs WHERE id = ?", (parent[0],)).fetchone()
+                conn.execute("UPDATE npcs SET goal = 'avenge', goal_kind = 'kingdom', goal_target = ? WHERE id = ?", (kingdom, parent[0]))
+                heir = G.inherit(conn, parent[0])
+                try:
+                    assert heir is not None, "a blood feud against a kingdom passed to no one"
+                    took = conn.execute("SELECT goal, goal_kind, goal_target FROM npcs WHERE id = ?", (heir,)).fetchone()
+                    assert tuple(took) == ("avenge", "kingdom", kingdom), "the heir did not take up the blood feud"
+                    assert grievance(conn, heir, "kingdom", kingdom) >= 60, "the heir did not inherit half the grievance"
+                finally:
+                    for k in kids:
+                        conn.execute("""UPDATE npcs SET vengefulness = ?, goal = ?, goal_kind = ?, goal_target = ?, goal_since = ?
+                                        WHERE id = ?""", (k["vengefulness"], k["goal"], k["goal_kind"], k["goal_target"], k["goal_since"], k["id"]))
+                    conn.execute("UPDATE npcs SET goal = ?, goal_kind = ?, goal_target = ?, goal_since = ? WHERE id = ?", (*pheld, parent[0]))
+        finally:
+            conn.execute("UPDATE npcs SET gold = ?, goal = ?, goal_kind = ?, goal_target = ?, goal_since = ?, vengefulness = ? WHERE id = ?",
+                         (*held, npc_id))
+            conn.execute("DELETE FROM grievances")
+            conn.execute("DELETE FROM regard")
+            for row in saved_grievances:
+                conn.execute(f"INSERT INTO grievances VALUES ({','.join('?' * len(row))})", tuple(row))
+            for row in saved_regard:
+                conn.execute(f"INSERT INTO regard VALUES ({','.join('?' * len(row))})", tuple(row))
+            conn.commit()
+
+    run_step(r, "goals: every notable holds one, sticky until achieved; a vengeful heart aims Avenge at the wrongdoer; "
+                "a blood feud passes to a grown heir with half the grievance", notable_goals)
 
     run_step(r, "grievance and trust: a lord's raid gives a notable a blood feud with his house and a grudge with his kingdom; "
                 "grievances fade by temper; betrayal costs the crown's trust", grievance_and_trust)
